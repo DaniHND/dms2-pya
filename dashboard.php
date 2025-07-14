@@ -152,14 +152,14 @@ if ($currentUser['company_id']) {
                 </li>
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Subir Documentos')">
+                    <a href="modules/documents/upload.php" class="nav-link">
                         <i data-feather="upload"></i>
                         <span>Subir Documentos</span>
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Bandeja de Entrada')">
+                    <a href="modules/documents/inbox.php" class="nav-link">
                         <i data-feather="inbox"></i>
                         <span>Archivos</span>
                     </a>
@@ -295,10 +295,10 @@ if ($currentUser['company_id']) {
                         </div>
                         <div class="widget-content">
                             <div class="quick-actions">
-                                <button class="quick-action-btn" onclick="showComingSoon('Subir Documento')">
+                                <a href="modules/documents/upload.php" class="quick-action-btn">
                                     <i data-feather="upload"></i>
                                     <span>Subir Documento</span>
-                                </button>
+                                </a>
 
                                 <button class="quick-action-btn" onclick="showComingSoon('Buscar Archivo')">
                                     <i data-feather="search"></i>
@@ -341,10 +341,10 @@ if ($currentUser['company_id']) {
                                 <div class="empty-state">
                                     <i data-feather="file"></i>
                                     <p>No hay documentos recientes</p>
-                                    <button class="btn" onclick="showComingSoon('Subir Documento')">
+                                    <a href="modules/documents/upload.php" class="btn">
                                         <i data-feather="plus"></i>
                                         Subir primer documento
-                                    </button>
+                                    </a>
                                 </div>
                             <?php else: ?>
                                 <div class="document-list">
