@@ -1,6 +1,6 @@
 <?php
 // modules/documents/log_activity.php
-// Endpoint para registrar actividades de documentos
+// Registro de actividades de documentos - DMS2
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -8,81 +8,79 @@ require_once '../../config/database.php';
 // Verificar que el usuario esté logueado
 SessionManager::requireLogin();
 
-// Solo aceptar POST requests
+$currentUser = SessionManager::getCurrentUser();
+
+// Verificar que la solicitud sea POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['error' => 'Método no permitido']);
+    echo json_encode(['error' => 'Method not allowed']);
     exit();
 }
 
-// Obtener datos JSON
-$input = json_decode(file_get_contents('php://input'), true);
+// Obtener el contenido JSON
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
 
-if (!$input) {
+if (!$data || !isset($data['action']) || !isset($data['document_id'])) {
     http_response_code(400);
-    echo json_encode(['error' => 'Datos inválidos']);
+    echo json_encode(['error' => 'Invalid data']);
     exit();
 }
 
-$currentUser = SessionManager::getCurrentUser();
-$action = $input['action'] ?? '';
-$documentId = $input['document_id'] ?? null;
+$action = $data['action'];
+$documentId = intval($data['document_id']);
 
-// Validar acción
-$validActions = ['view', 'download', 'share'];
-if (!in_array($action, $validActions)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'Acción inválida']);
-    exit();
-}
+try {
+    // Validar acción
+    $validActions = ['view', 'download', 'share'];
+    if (!in_array($action, $validActions)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid action']);
+        exit();
+    }
 
-// Validar document_id si es necesario
-if ($documentId && !is_numeric($documentId)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'ID de documento inválido']);
-    exit();
-}
-
-// Verificar que el documento existe y el usuario tiene acceso
-if ($documentId) {
-    if ($currentUser['role'] === 'admin') {
-        $query = "SELECT id FROM documents WHERE id = :id AND status = 'active'";
-        $params = ['id' => $documentId];
-    } else {
-        $query = "SELECT id FROM documents WHERE id = :id AND company_id = :company_id AND status = 'active'";
-        $params = ['id' => $documentId, 'company_id' => $currentUser['company_id']];
+    // Verificar que el documento existe y el usuario tiene acceso
+    $query = "SELECT d.name, d.company_id 
+              FROM documents d 
+              WHERE d.id = :id AND d.status = 'active'";
+    
+    $params = ['id' => $documentId];
+    
+    // Si no es admin, verificar que el documento pertenezca a su empresa
+    if ($currentUser['role'] !== 'admin') {
+        $query .= " AND d.company_id = :company_id";
+        $params['company_id'] = $currentUser['company_id'];
     }
     
     $document = fetchOne($query, $params);
+    
     if (!$document) {
         http_response_code(404);
-        echo json_encode(['error' => 'Documento no encontrado']);
+        echo json_encode(['error' => 'Document not found']);
         exit();
     }
-}
 
-// Generar descripción según la acción
-$descriptions = [
-    'view' => 'Usuario visualizó documento',
-    'download' => 'Usuario descargó documento',
-    'share' => 'Usuario compartió documento'
-];
+    // Crear descripción de la actividad
+    $descriptions = [
+        'view' => 'Usuario visualizó el documento: ' . $document['name'],
+        'download' => 'Usuario descargó el documento: ' . $document['name'],
+        'share' => 'Usuario compartió el documento: ' . $document['name']
+    ];
+    
+    $description = $descriptions[$action] ?? "Usuario realizó acción '$action' en el documento: " . $document['name'];
 
-$description = $descriptions[$action] ?? 'Acción en documento';
+    // Registrar actividad
+    logActivity($currentUser['id'], $action, 'document', $documentId, $description);
 
-// Registrar actividad
-$success = logActivity(
-    $currentUser['id'],
-    $action,
-    'documents',
-    $documentId,
-    $description
-);
+    // Respuesta exitosa
+    echo json_encode([
+        'success' => true,
+        'message' => 'Activity logged successfully'
+    ]);
 
-if ($success) {
-    echo json_encode(['success' => true, 'message' => 'Actividad registrada']);
-} else {
+} catch (Exception $e) {
+    error_log("Error logging activity: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => 'Error al registrar actividad']);
+    echo json_encode(['error' => 'Internal server error']);
 }
 ?>
