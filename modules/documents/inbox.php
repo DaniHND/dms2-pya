@@ -151,6 +151,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/inbox.css">
+    
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
@@ -177,7 +178,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <span>Subir Documentos</span>
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item active">
                     <a href="inbox.php" class="nav-link">
                         <i data-feather="inbox"></i>
                         <span>Archivo</span>

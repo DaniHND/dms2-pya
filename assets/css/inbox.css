@@ -345,7 +345,8 @@
     gap: 1.5rem;
     margin: 0;
     padding: 0;
-    width: 100%; /* CORREGIDO: era 200% */
+    width: 100%;
+    /* CORREGIDO: era 200% */
     max-width: 100%;
 }
 
@@ -682,7 +683,7 @@
     gap: 0.5rem;
     z-index: 10000;
     font-size: 0.875rem;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     transform: translateX(100%);
     transition: transform 0.3s ease;
     color: white;
@@ -718,16 +719,22 @@
     background: rgba(255, 255, 255, 0.2);
 }
 
+.nav-item.active .nav-link {
+    color: rgb(212, 175, 55);
+    background: rgba(236, 183, 6, 0.1);
+    font-weight: 600;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .inbox-container {
         grid-template-columns: 260px 1fr;
     }
-    
+
     .filters-panel {
         width: 260px;
     }
-    
+
     .documents-grid {
         grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         gap: 1rem;
@@ -738,11 +745,11 @@
     .inbox-container {
         grid-template-columns: 240px 1fr;
     }
-    
+
     .filters-panel {
         width: 240px;
     }
-    
+
     .documents-grid {
         grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
         gap: 1rem;
@@ -754,7 +761,7 @@
         grid-template-columns: 1fr;
         height: auto;
     }
-    
+
     .filters-panel {
         display: none;
         position: fixed;
@@ -765,34 +772,34 @@
         z-index: 1001;
         box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
     }
-    
+
     .filters-panel.active {
         display: block;
     }
-    
+
     .documents-grid {
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 1rem;
     }
-    
+
     .documents-content {
         padding: 1rem;
     }
-    
+
     .header-stats {
         display: none;
     }
-    
+
     .documents-header {
         flex-direction: column;
         gap: 0.75rem;
         align-items: stretch;
     }
-    
+
     .view-controls {
         justify-content: center;
     }
-    
+
     .document-actions {
         flex-direction: row;
         gap: 0.5rem;
@@ -804,15 +811,15 @@
         grid-template-columns: 1fr;
         gap: 0.75rem;
     }
-    
+
     .documents-content {
         padding: 0.75rem;
     }
-    
+
     .document-card {
         margin-bottom: 0.75rem;
     }
-    
+
     .filters-panel {
         width: 100%;
     }
@@ -824,6 +831,7 @@
         opacity: 0;
         transform: translateX(20px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -861,12 +869,18 @@
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* Mejoras de accesibilidad */
 @media (prefers-reduced-motion: reduce) {
+
     .document-card,
     .action-btn,
     .folder-item,
