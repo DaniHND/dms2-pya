@@ -1,5 +1,5 @@
 <?php
-// modules/documents/inbox.php - VERSIÓN LIMPIA FINAL
+// modules/documents/inbox.php - VERSIÓN UNIFICADA Y COMPLETA
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
@@ -177,7 +177,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <span>Subir Documentos</span>
                     </a>
                 </li>
-                <li class="nav-item active">
+                <li class="nav-item">
                     <a href="inbox.php" class="nav-link">
                         <i data-feather="inbox"></i>
                         <span>Archivos</span>
@@ -196,6 +196,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <span>Reportes</span>
                     </a>
                 </li>
+                
                 <?php if ($currentUser['role'] === 'admin'): ?>
                     <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
                     <li class="nav-item">
@@ -208,6 +209,18 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <a href="#" class="nav-link" onclick="showComingSoon('Empresas')">
                             <i data-feather="briefcase"></i>
                             <span>Empresas</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link" onclick="showComingSoon('Departamentos')">
+                            <i data-feather="layers"></i>
+                            <span>Departamentos</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link" onclick="showComingSoon('Grupos')">
+                            <i data-feather="shield"></i>
+                            <span>Grupos</span>
                         </a>
                     </li>
                 <?php endif; ?>
@@ -242,9 +255,8 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showNotifications()">
-                        <i data-feather="bell"></i>
-                        <span class="notification-badge">3</span>
+                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
+                        <i data-feather="settings"></i>
                     </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                         <i data-feather="log-out"></i>
@@ -425,7 +437,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                                         </div>
                                     </div>
                                     
-                                    <!-- BOTONES DE ACCIÓN - SIN CONFLICTOS -->
+                                    <!-- BOTONES DE ACCIÓN -->
                                     <div class="document-actions">
                                         <!-- VER -->
                                         <button class="action-btn view-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Ver documento">
@@ -465,55 +477,86 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         var canDownload = <?php echo $canDownload ? 'true' : 'false'; ?>;
         var currentUserId = <?php echo $currentUser['id']; ?>;
         var currentUserRole = '<?php echo $currentUser['role']; ?>';
-    </script>
-    
-    <!-- JavaScript LIMPIO -->
-    <script>
-        console.log('🚀 INICIANDO INBOX LIMPIO');
+        
+        console.log('🚀 INBOX DMS2 - Inicializando');
         
         // Variables globales
         let currentView = 'grid';
 
-        // Inicializar
+        // Inicializar cuando el DOM esté listo
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
             setupEventListeners();
             handleURLMessages();
-            console.log('✅ Inbox limpio inicializado');
+            console.log('✅ Inbox inicializado correctamente');
         });
 
         // Configurar eventos
         function setupEventListeners() {
-            // Botones de vista
+            // Delegación de eventos para botones de acción
             document.addEventListener('click', function(e) {
-                if (e.target.closest('.view-btn[data-doc-id]')) {
+                // Botón VER
+                if (e.target.closest('.view-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
-                    const docId = e.target.closest('.view-btn[data-doc-id]').dataset.docId;
-                    viewDocument(docId);
+                    const docId = e.target.closest('.view-btn').dataset.docId;
+                    if (docId) {
+                        viewDocument(docId);
+                    }
                 }
                 
-                if (e.target.closest('.download-btn[data-doc-id]')) {
+                // Botón DESCARGAR
+                if (e.target.closest('.download-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
-                    const docId = e.target.closest('.download-btn[data-doc-id]').dataset.docId;
-                    downloadDocument(docId);
+                    const docId = e.target.closest('.download-btn').dataset.docId;
+                    if (docId) {
+                        downloadDocument(docId);
+                    }
                 }
                 
-                if (e.target.closest('.delete-btn[data-doc-id]')) {
+                // Botón ELIMINAR
+                if (e.target.closest('.delete-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
-                    const docId = e.target.closest('.delete-btn[data-doc-id]').dataset.docId;
-                    deleteDocument(docId);
+                    const docId = e.target.closest('.delete-btn').dataset.docId;
+                    if (docId) {
+                        deleteDocument(docId);
+                    }
+                }
+                
+                // Click en vista previa del documento
+                if (e.target.closest('.document-preview')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const card = e.target.closest('.document-card');
+                    if (card) {
+                        const docId = card.dataset.id;
+                        if (docId) {
+                            viewDocument(docId);
+                        }
+                    }
                 }
             });
         }
 
-        // FUNCIÓN VER - MISMA VENTANA
+        // FUNCIÓN VER DOCUMENTO
         function viewDocument(documentId) {
-            console.log('👁️ Ver documento ID:', documentId, '- MISMA VENTANA');
+            console.log('👁️ Ver documento ID:', documentId);
+            
+            // Verificar que el documento existe
+            if (typeof documentsData !== 'undefined') {
+                const document = documentsData.find(doc => doc.id == documentId);
+                if (!document) {
+                    showNotification('Documento no encontrado', 'error');
+                    return;
+                }
+                console.log('📄 Abriendo documento:', document.name);
+            }
+            
+            // Abrir en la misma ventana
             window.location.href = 'view.php?id=' + documentId;
         }
 
@@ -549,27 +592,40 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             }, 2000);
         }
 
-        // FUNCIÓN ELIMINAR
+        // FUNCIÓN ELIMINAR - CORREGIDA
         function deleteDocument(documentId) {
             console.log('🗑️ Eliminar documento ID:', documentId);
             
-            const document = documentsData.find(doc => doc.id == documentId);
-            if (!document) {
+            // CORREGIDO: Usar 'docData' en lugar de 'document' para evitar conflicto
+            const docData = documentsData.find(doc => doc.id == documentId);
+            if (!docData) {
                 showNotification('Documento no encontrado', 'error');
                 return;
             }
             
-            const canDelete = (currentUserRole === 'admin') || (document.user_id == currentUserId);
+            // Verificar permisos
+            const canDelete = (currentUserRole === 'admin') || (docData.user_id == currentUserId);
             if (!canDelete) {
                 showNotification('No tienes permisos para eliminar', 'error');
                 return;
             }
             
-            const confirmMsg = `¿Eliminar documento?\n\n📄 ${document.name}\n⚠️ Esta acción no se puede deshacer.`;
+            // Confirmación detallada
+            const confirmMsg = `¿Eliminar documento?
+
+📄 ${docData.name}
+🏢 ${docData.company_name || 'Sin empresa'}
+📁 ${docData.department_name || 'Sin departamento'}
+📏 ${formatBytes(docData.file_size)}
+
+⚠️ Esta acción no se puede deshacer.`;
+            
             if (!confirm(confirmMsg)) return;
             
-            if (!confirm('¿Está completamente seguro?')) return;
+            // Confirmación final
+            if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) return;
             
+            // CORREGIDO: Ahora document se refiere al DOM correctamente
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'delete.php';
@@ -584,7 +640,17 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             document.body.appendChild(form);
             form.submit();
             
-            showNotification('Eliminando...', 'warning');
+            showNotification('Eliminando documento...', 'warning');
+        }
+
+        // Función para formatear bytes
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
         // Funciones auxiliares
@@ -614,7 +680,70 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
 
         function showNotification(message, type = 'info') {
             console.log(`📢 ${type.toUpperCase()}: ${message}`);
-            alert(`${type.toUpperCase()}: ${message}`);
+            
+            // Crear notificación visual
+            const notification = document.createElement('div');
+            notification.className = `notification-toast ${type}`;
+            
+            const colors = {
+                'info': '#3b82f6',
+                'success': '#10b981',
+                'warning': '#f59e0b',
+                'error': '#ef4444'
+            };
+            
+            const icons = {
+                'info': 'info',
+                'success': 'check-circle',
+                'warning': 'alert-triangle',
+                'error': 'alert-circle'
+            };
+            
+            notification.innerHTML = `
+                <i data-feather="${icons[type] || 'info'}"></i>
+                <span>${message}</span>
+                <button onclick="this.parentElement.remove()">
+                    <i data-feather="x"></i>
+                </button>
+            `;
+            
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${colors[type] || colors.info};
+                color: white;
+                padding: 16px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                z-index: 9999;
+                font-size: 14px;
+                font-weight: 500;
+                max-width: 350px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+            `;
+            
+            document.body.appendChild(notification);
+            feather.replace();
+            
+            // Animar entrada
+            setTimeout(() => {
+                notification.style.transform = 'translateX(0)';
+            }, 10);
+            
+            // Auto-remover después de 4 segundos
+            setTimeout(() => {
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 4000);
         }
 
         function toggleSidebar() {
@@ -629,7 +758,10 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         }
 
         function sortDocuments() {
-            console.log('Ordenando...');
+            const sortBy = document.getElementById('sortBy').value;
+            const url = new URL(window.location);
+            url.searchParams.set('sort', sortBy);
+            window.location.href = url.toString();
         }
 
         function handleURLMessages() {
@@ -637,6 +769,36 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             if (urlParams.get('success') === 'document_deleted') {
                 const name = urlParams.get('name') || 'el documento';
                 showNotification(`${name} eliminado exitosamente`, 'success');
+                
+                // Limpiar URL
+                const newUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, newUrl);
+            }
+            
+            if (urlParams.get('error')) {
+                const error = urlParams.get('error');
+                let message = 'Error desconocido';
+                
+                switch(error) {
+                    case 'delete_failed':
+                        message = 'Error al eliminar el documento';
+                        break;
+                    case 'document_not_found':
+                        message = 'Documento no encontrado';
+                        break;
+                    case 'download_disabled':
+                        message = 'Descarga deshabilitada';
+                        break;
+                    case 'file_not_found':
+                        message = 'Archivo no encontrado';
+                        break;
+                }
+                
+                showNotification(message, 'error');
+                
+                // Limpiar URL
+                const newUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, newUrl);
             }
         }
 
@@ -644,9 +806,12 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             showNotification(`${feature} - Próximamente`, 'info');
         }
 
-        function showNotifications() {
-            showNotification('Notificaciones - Próximamente', 'info');
-        }
+        // Configurar eventos responsive
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                document.getElementById('sidebar').classList.remove('active');
+            }
+        });
     </script>
 </body>
 </html>
