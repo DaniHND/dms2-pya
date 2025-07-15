@@ -180,15 +180,10 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                 <li class="nav-item">
                     <a href="inbox.php" class="nav-link">
                         <i data-feather="inbox"></i>
-                        <span>Archivos</span>
+                        <span>Archivo</span>
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Búsqueda')">
-                        <i data-feather="search"></i>
-                        <span>Búsqueda</span>
-                    </a>
-                </li>
+
                 <li class="nav-divider"></li>
                 <li class="nav-item">
                     <a href="#" class="nav-link" onclick="showComingSoon('Reportes')">

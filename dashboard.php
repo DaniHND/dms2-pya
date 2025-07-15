@@ -165,12 +165,7 @@ if ($currentUser['company_id']) {
                     </a>
                 </li>
 
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Búsqueda')">
-                        <i data-feather="search"></i>
-                        <span>Búsqueda</span>
-                    </a>
-                </li>
+
 
                 <li class="nav-divider"></li>
 
@@ -300,10 +295,7 @@ if ($currentUser['company_id']) {
                                     <span>Subir Documento</span>
                                 </a>
 
-                                <button class="quick-action-btn" onclick="showComingSoon('Buscar Archivo')">
-                                    <i data-feather="search"></i>
-                                    <span>Buscar Archivo</span>
-                                </button>
+
 
                                 <button class="quick-action-btn" onclick="showComingSoon('Ver Reportes')">
                                     <i data-feather="bar-chart"></i>

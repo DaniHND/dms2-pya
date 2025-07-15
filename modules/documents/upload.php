@@ -195,12 +195,7 @@ function formatBytes($size, $precision = 2) {
                     </a>
                 </li>
 
-                <li class="nav-item">
-                    <a href="search.php" class="nav-link">
-                        <i data-feather="search"></i>
-                        <span>Búsqueda</span>
-                    </a>
-                </li>
+
 
                 <li class="nav-divider"></li>
 
