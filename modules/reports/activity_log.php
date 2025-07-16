@@ -20,36 +20,37 @@ $limit = 50;
 $offset = ($page - 1) * $limit;
 
 // Función para obtener actividades con filtros
-function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset) {
+function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset)
+{
     $whereConditions = [];
     $params = [];
-    
+
     // Filtro por fechas
     $whereConditions[] = "al.created_at >= :date_from";
     $whereConditions[] = "al.created_at <= :date_to";
     $params['date_from'] = $dateFrom . ' 00:00:00';
     $params['date_to'] = $dateTo . ' 23:59:59';
-    
+
     // Filtro por usuario
     if (!empty($userId)) {
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
-    
+
     // Filtro por acción
     if (!empty($action)) {
         $whereConditions[] = "al.action = :action";
         $params['action'] = $action;
     }
-    
+
     // Filtro por empresa (si no es admin)
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     // Query principal
     $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name
               FROM activity_logs al
@@ -58,55 +59,57 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limi
               WHERE $whereClause
               ORDER BY al.created_at DESC
               LIMIT :limit OFFSET :offset";
-    
+
     $params['limit'] = $limit;
     $params['offset'] = $offset;
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener el total de registros
-function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action) {
+function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
+{
     $whereConditions = [];
     $params = [];
-    
+
     // Filtro por fechas
     $whereConditions[] = "al.created_at >= :date_from";
     $whereConditions[] = "al.created_at <= :date_to";
     $params['date_from'] = $dateFrom . ' 00:00:00';
     $params['date_to'] = $dateTo . ' 23:59:59';
-    
+
     // Filtro por usuario
     if (!empty($userId)) {
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
-    
+
     // Filtro por acción
     if (!empty($action)) {
         $whereConditions[] = "al.action = :action";
         $params['action'] = $action;
     }
-    
+
     // Filtro por empresa (si no es admin)
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     $query = "SELECT COUNT(*) as total
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
               WHERE $whereClause";
-    
+
     $result = fetchOne($query, $params);
     return $result['total'] ?? 0;
 }
 
 // Función para obtener usuarios para filtro
-function getUsers($currentUser) {
+function getUsers($currentUser)
+{
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT id, username, first_name, last_name FROM users WHERE status = 'active' ORDER BY first_name, last_name";
         return fetchAll($query);
@@ -117,7 +120,8 @@ function getUsers($currentUser) {
 }
 
 // Función para obtener tipos de acciones
-function getActionTypes() {
+function getActionTypes()
+{
     $query = "SELECT DISTINCT action FROM activity_logs ORDER BY action";
     return fetchAll($query);
 }
@@ -135,6 +139,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -147,53 +152,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
-
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-                <li class="nav-divider"></li>
-                <li class="nav-item active">
-                    <a href="index.php" class="nav-link">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-                
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -247,8 +206,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <select id="user_id" name="user_id">
                                 <option value="">Todos los usuarios</option>
                                 <?php foreach ($users as $user): ?>
-                                    <option value="<?php echo $user['id']; ?>" 
-                                            <?php echo $userId == $user['id'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo $user['id']; ?>"
+                                        <?php echo $userId == $user['id'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -259,8 +218,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <select id="action" name="action">
                                 <option value="">Todas las acciones</option>
                                 <?php foreach ($actionTypes as $actionType): ?>
-                                    <option value="<?php echo $actionType['action']; ?>" 
-                                            <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo $actionType['action']; ?>"
+                                        <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars(ucfirst($actionType['action'])); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -352,8 +311,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <?php if ($totalPages > 1): ?>
                     <div class="pagination">
                         <div class="pagination-info">
-                            Mostrando <?php echo number_format(($page - 1) * $limit + 1); ?> - 
-                            <?php echo number_format(min($page * $limit, $totalActivities)); ?> 
+                            Mostrando <?php echo number_format(($page - 1) * $limit + 1); ?> -
+                            <?php echo number_format(min($page * $limit, $totalActivities)); ?>
                             de <?php echo number_format($totalActivities); ?> registros
                         </div>
                         <div class="pagination-controls">
@@ -364,8 +323,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <?php endif; ?>
 
                             <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>" 
-                                   class="page-btn <?php echo $i == $page ? 'active' : ''; ?>">
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"
+                                    class="page-btn <?php echo $i == $page ? 'active' : ''; ?>">
                                     <?php echo $i; ?>
                                 </a>
                             <?php endfor; ?>
@@ -385,7 +344,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <script>
         // Variables de configuración
         var currentFilters = <?php echo json_encode($_GET); ?>;
-        
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
@@ -397,8 +356,15 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
@@ -431,11 +397,13 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         });
     </script>
 </body>
+
 </html>
 
 <?php
 // Función auxiliar para obtener clase CSS según acción
-function getActionClass($action) {
+function getActionClass($action)
+{
     $classes = [
         'login' => 'success',
         'logout' => 'info',
@@ -446,7 +414,7 @@ function getActionClass($action) {
         'update' => 'warning',
         'view' => 'info'
     ];
-    
+
     return $classes[$action] ?? 'info';
 }
 ?>

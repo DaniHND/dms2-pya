@@ -1448,6 +1448,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     
     .data-table th {
         background: #f8f9fa !important;
-        -webkit-print-color-adjust: exact;
+  
     }
 }

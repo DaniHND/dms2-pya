@@ -67,7 +67,8 @@ if (strpos($mimeType, 'image/') === 0) {
 // Registrar vista
 logActivity($currentUser['id'], 'view', 'documents', $documentId, 'Usuario visualizó documento: ' . $document['name']);
 
-function formatBytes($size, $precision = 2) {
+function formatBytes($size, $precision = 2)
+{
     if ($size == 0) return '0 B';
     $units = array('B', 'KB', 'MB', 'GB', 'TB');
     $base = log($size, 1024);
@@ -77,6 +78,7 @@ function formatBytes($size, $precision = 2) {
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -87,83 +89,11 @@ function formatBytes($size, $precision = 2) {
     <link rel="stylesheet" href="../../assets/css/view.css">
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
+
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
 
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-
-                <li class="nav-item">
-                    <a href="upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-
-                <li class="nav-item active">
-                    <a href="inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivo</span>
-                    </a>
-                </li>
-
-                <li class="nav-divider"></li>
-
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Reportes')">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section">
-                        <span>ADMINISTRACIÓN</span>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../users/list.php" class="nav-link">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../companies/list.php" class="nav-link">
-                            <i data-feather="briefcase"></i>
-                            <span>Empresas</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../departments/list.php" class="nav-link">
-                            <i data-feather="layers"></i>
-                            <span>Departamentos</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../groups/list.php" class="nav-link">
-                            <i data-feather="shield"></i>
-                            <span>Grupos</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -219,10 +149,10 @@ function formatBytes($size, $precision = 2) {
                         <span class="meta-value"><?php echo htmlspecialchars($document['company_name']); ?></span>
                     </div>
                     <?php if ($document['department_name']): ?>
-                    <div class="meta-item">
-                        <span class="meta-label">Departamento</span>
-                        <span class="meta-value"><?php echo htmlspecialchars($document['department_name']); ?></span>
-                    </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Departamento</span>
+                            <span class="meta-value"><?php echo htmlspecialchars($document['department_name']); ?></span>
+                        </div>
                     <?php endif; ?>
                     <div class="meta-item">
                         <span class="meta-label">Subido por</span>
@@ -233,22 +163,22 @@ function formatBytes($size, $precision = 2) {
                         <span class="meta-value"><?php echo date('d/m/Y H:i', strtotime($document['created_at'])); ?></span>
                     </div>
                     <?php if ($document['description']): ?>
-                    <div class="meta-item" style="grid-column: 1 / -1;">
-                        <span class="meta-label">Descripción</span>
-                        <span class="meta-value"><?php echo htmlspecialchars($document['description']); ?></span>
-                    </div>
+                        <div class="meta-item" style="grid-column: 1 / -1;">
+                            <span class="meta-label">Descripción</span>
+                            <span class="meta-value"><?php echo htmlspecialchars($document['description']); ?></span>
+                        </div>
                     <?php endif; ?>
                 </div>
 
                 <div class="document-preview-container">
                     <?php if ($fileType === 'image'): ?>
-                        <img src="../../<?php echo htmlspecialchars($document['file_path']); ?>" 
-                             alt="<?php echo htmlspecialchars($document['name']); ?>"
-                             class="preview-image">
+                        <img src="../../<?php echo htmlspecialchars($document['file_path']); ?>"
+                            alt="<?php echo htmlspecialchars($document['name']); ?>"
+                            class="preview-image">
                     <?php elseif ($fileType === 'pdf'): ?>
-                        <iframe src="../../<?php echo htmlspecialchars($document['file_path']); ?>#toolbar=1" 
-                                class="preview-pdf"
-                                title="<?php echo htmlspecialchars($document['name']); ?>">
+                        <iframe src="../../<?php echo htmlspecialchars($document['file_path']); ?>#toolbar=1"
+                            class="preview-pdf"
+                            title="<?php echo htmlspecialchars($document['name']); ?>">
                         </iframe>
                     <?php else: ?>
                         <div class="preview-placeholder">
@@ -272,7 +202,7 @@ function formatBytes($size, $precision = 2) {
                             Descarga Deshabilitada
                         </button>
                     <?php endif; ?>
-                    
+
                     <a href="inbox.php" class="btn btn-secondary">
                         <i data-feather="list"></i>
                         Ver Todos los Documentos
@@ -328,7 +258,7 @@ function formatBytes($size, $precision = 2) {
                 link.href = '../../<?php echo htmlspecialchars($document['file_path']); ?>';
                 link.download = '<?php echo htmlspecialchars($document['original_name'] ?? $document['name']); ?>';
                 link.style.display = 'none';
-                
+
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -368,4 +298,5 @@ function formatBytes($size, $precision = 2) {
         });
     </script>
 </body>
+
 </html>

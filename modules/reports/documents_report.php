@@ -18,17 +18,18 @@ $documentType = $_GET['document_type'] ?? '';
 $reportType = $_GET['report_type'] ?? 'summary';
 
 // Función para obtener estadísticas de documentos
-function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType) {
+function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType)
+{
     $whereConditions = [];
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     $whereConditions[] = "d.created_at >= :date_from";
     $whereConditions[] = "d.created_at <= :date_to";
     $whereConditions[] = "d.status = 'active'";
-    
+
     // Filtro por empresa
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "d.company_id = :user_company_id";
@@ -37,17 +38,17 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
     }
-    
+
     // Filtro por tipo de documento
     if (!empty($documentType)) {
         $whereConditions[] = "dt.name = :document_type";
         $params['document_type'] = $documentType;
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     $stats = [];
-    
+
     // Total de documentos
     $query = "SELECT COUNT(*) as total,
                      SUM(d.file_size) as total_size,
@@ -55,12 +56,12 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
               FROM documents d
               LEFT JOIN document_types dt ON d.document_type_id = dt.id
               WHERE $whereClause";
-    
+
     $result = fetchOne($query, $params);
     $stats['total'] = $result['total'] ?? 0;
     $stats['total_size'] = $result['total_size'] ?? 0;
     $stats['avg_size'] = $result['avg_size'] ?? 0;
-    
+
     // Documentos por tipo
     $query = "SELECT dt.name as type_name, COUNT(*) as count, SUM(d.file_size) as total_size
               FROM documents d
@@ -68,9 +69,9 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
               WHERE $whereClause
               GROUP BY dt.name
               ORDER BY count DESC";
-    
+
     $stats['by_type'] = fetchAll($query, $params);
-    
+
     // Documentos por empresa
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT c.name as company_name, COUNT(*) as count, SUM(d.file_size) as total_size
@@ -80,10 +81,10 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
                   WHERE $whereClause
                   GROUP BY c.name
                   ORDER BY count DESC";
-        
+
         $stats['by_company'] = fetchAll($query, $params);
     }
-    
+
     // Documentos por día
     $query = "SELECT DATE(d.created_at) as date, COUNT(*) as count
               FROM documents d
@@ -91,9 +92,9 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
               WHERE $whereClause
               GROUP BY DATE(d.created_at)
               ORDER BY date";
-    
+
     $stats['by_date'] = fetchAll($query, $params);
-    
+
     // Top usuarios que más suben documentos
     $query = "SELECT u.first_name, u.last_name, u.username, COUNT(*) as documents_count
               FROM documents d
@@ -103,25 +104,26 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
               GROUP BY u.id
               ORDER BY documents_count DESC
               LIMIT 10";
-    
+
     $stats['top_uploaders'] = fetchAll($query, $params);
-    
+
     return $stats;
 }
 
 // Función para obtener actividad de documentos
-function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType) {
+function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType)
+{
     $whereConditions = [];
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     $whereConditions[] = "al.created_at >= :date_from";
     $whereConditions[] = "al.created_at <= :date_to";
     $whereConditions[] = "al.table_name = 'documents'";
     $whereConditions[] = "al.action IN ('upload', 'download', 'view', 'delete')";
-    
+
     // Filtro por empresa
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "d.company_id = :user_company_id";
@@ -130,17 +132,17 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
     }
-    
+
     // Filtro por tipo de documento
     if (!empty($documentType)) {
         $whereConditions[] = "dt.name = :document_type";
         $params['document_type'] = $documentType;
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     $activity = [];
-    
+
     // Actividad por tipo de acción
     $query = "SELECT al.action, COUNT(*) as count
               FROM activity_logs al
@@ -149,9 +151,9 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
               WHERE $whereClause
               GROUP BY al.action
               ORDER BY count DESC";
-    
+
     $activity['by_action'] = fetchAll($query, $params);
-    
+
     // Documentos más descargados
     $query = "SELECT d.name as document_name, COUNT(*) as download_count
               FROM activity_logs al
@@ -161,9 +163,9 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
               GROUP BY d.id
               ORDER BY download_count DESC
               LIMIT 10";
-    
+
     $activity['most_downloaded'] = fetchAll($query, $params);
-    
+
     // Documentos más vistos
     $query = "SELECT d.name as document_name, COUNT(*) as view_count
               FROM activity_logs al
@@ -173,24 +175,25 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
               GROUP BY d.id
               ORDER BY view_count DESC
               LIMIT 10";
-    
+
     $activity['most_viewed'] = fetchAll($query, $params);
-    
+
     return $activity;
 }
 
 // Función para obtener lista detallada de documentos
-function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType, $limit = 100) {
+function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType, $limit = 100)
+{
     $whereConditions = [];
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     $whereConditions[] = "d.created_at >= :date_from";
     $whereConditions[] = "d.created_at <= :date_to";
     $whereConditions[] = "d.status = 'active'";
-    
+
     // Filtro por empresa
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "d.company_id = :user_company_id";
@@ -199,15 +202,15 @@ function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documen
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
     }
-    
+
     // Filtro por tipo de documento
     if (!empty($documentType)) {
         $whereConditions[] = "dt.name = :document_type";
         $params['document_type'] = $documentType;
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     $query = "SELECT d.*, dt.name as document_type, c.name as company_name,
                      u.first_name, u.last_name, u.username,
                      (SELECT COUNT(*) FROM activity_logs al WHERE al.record_id = d.id AND al.action = 'download') as download_count,
@@ -219,26 +222,27 @@ function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documen
               WHERE $whereClause
               ORDER BY d.created_at DESC
               LIMIT :limit";
-    
+
     $params['limit'] = $limit;
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener empresas y tipos de documento para filtros
-function getFilterOptions($currentUser) {
+function getFilterOptions($currentUser)
+{
     $options = [];
-    
+
     // Empresas
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
         $options['companies'] = fetchAll($query);
     }
-    
+
     // Tipos de documento
     $query = "SELECT name FROM document_types WHERE status = 'active' ORDER BY name";
     $options['document_types'] = fetchAll($query);
-    
+
     return $options;
 }
 
@@ -251,7 +255,8 @@ $filterOptions = getFilterOptions($currentUser);
 logActivity($currentUser['id'], 'view_documents_report', 'reports', null, 'Usuario accedió al reporte de documentos');
 
 // Función para formatear bytes
-function formatBytes($size, $precision = 2) {
+function formatBytes($size, $precision = 2)
+{
     if ($size == 0) return '0 B';
     $units = array('B', 'KB', 'MB', 'GB', 'TB');
     $base = log($size, 1024);
@@ -261,6 +266,7 @@ function formatBytes($size, $precision = 2) {
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -274,53 +280,8 @@ function formatBytes($size, $precision = 2) {
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
-
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-                <li class="nav-divider"></li>
-                <li class="nav-item active">
-                    <a href="index.php" class="nav-link">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-                
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+   
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -367,7 +328,7 @@ function formatBytes($size, $precision = 2) {
                         <div class="stat-label">Total Documentos</div>
                     </div>
                 </div>
-                
+
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="hard-drive"></i>
@@ -377,7 +338,7 @@ function formatBytes($size, $precision = 2) {
                         <div class="stat-label">Espacio Total</div>
                     </div>
                 </div>
-                
+
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="trending-up"></i>
@@ -387,14 +348,14 @@ function formatBytes($size, $precision = 2) {
                         <div class="stat-label">Tamaño Promedio</div>
                     </div>
                 </div>
-                
+
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="download"></i>
                     </div>
                     <div class="stat-info">
                         <div class="stat-number">
-                            <?php 
+                            <?php
                             $totalDownloads = 0;
                             foreach ($activity['by_action'] as $action) {
                                 if ($action['action'] === 'download') {
@@ -423,35 +384,35 @@ function formatBytes($size, $precision = 2) {
                             <label for="date_to">Hasta</label>
                             <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>">
                         </div>
-                        
+
                         <?php if ($currentUser['role'] === 'admin' && !empty($filterOptions['companies'])): ?>
-                        <div class="filter-group">
-                            <label for="company_id">Empresa</label>
-                            <select id="company_id" name="company_id">
-                                <option value="">Todas las empresas</option>
-                                <?php foreach ($filterOptions['companies'] as $company): ?>
-                                    <option value="<?php echo $company['id']; ?>" 
+                            <div class="filter-group">
+                                <label for="company_id">Empresa</label>
+                                <select id="company_id" name="company_id">
+                                    <option value="">Todas las empresas</option>
+                                    <?php foreach ($filterOptions['companies'] as $company): ?>
+                                        <option value="<?php echo $company['id']; ?>"
                                             <?php echo $companyId == $company['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($company['name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
+                                            <?php echo htmlspecialchars($company['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
                         <?php endif; ?>
-                        
+
                         <div class="filter-group">
                             <label for="document_type">Tipo de Documento</label>
                             <select id="document_type" name="document_type">
                                 <option value="">Todos los tipos</option>
                                 <?php foreach ($filterOptions['document_types'] as $type): ?>
-                                    <option value="<?php echo $type['name']; ?>" 
-                                            <?php echo $documentType == $type['name'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo $type['name']; ?>"
+                                        <?php echo $documentType == $type['name'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($type['name']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        
+
                         <div class="filter-group">
                             <label for="report_type">Tipo de Reporte</label>
                             <select id="report_type" name="report_type">
@@ -481,43 +442,43 @@ function formatBytes($size, $precision = 2) {
                             <h3>Documentos por Tipo</h3>
                             <canvas id="documentsByTypeChart"></canvas>
                         </div>
-                        
+
                         <div class="chart-container">
                             <h3>Documentos por Día</h3>
                             <canvas id="documentsByDateChart"></canvas>
                         </div>
                     </div>
-                    
+
                     <?php if ($currentUser['role'] === 'admin' && !empty($stats['by_company'])): ?>
-                    <div class="chart-row">
-                        <div class="chart-container">
-                            <h3>Documentos por Empresa</h3>
-                            <canvas id="documentsByCompanyChart"></canvas>
-                        </div>
-                        
-                        <div class="top-uploaders-section">
-                            <h3>Usuarios que Más Suben</h3>
-                            <div class="top-users-list">
-                                <?php foreach ($stats['top_uploaders'] as $index => $uploader): ?>
-                                    <div class="top-user-item">
-                                        <div class="user-rank"><?php echo $index + 1; ?></div>
-                                        <div class="user-info">
-                                            <div class="user-name">
-                                                <?php echo htmlspecialchars($uploader['first_name'] . ' ' . $uploader['last_name']); ?>
+                        <div class="chart-row">
+                            <div class="chart-container">
+                                <h3>Documentos por Empresa</h3>
+                                <canvas id="documentsByCompanyChart"></canvas>
+                            </div>
+
+                            <div class="top-uploaders-section">
+                                <h3>Usuarios que Más Suben</h3>
+                                <div class="top-users-list">
+                                    <?php foreach ($stats['top_uploaders'] as $index => $uploader): ?>
+                                        <div class="top-user-item">
+                                            <div class="user-rank"><?php echo $index + 1; ?></div>
+                                            <div class="user-info">
+                                                <div class="user-name">
+                                                    <?php echo htmlspecialchars($uploader['first_name'] . ' ' . $uploader['last_name']); ?>
+                                                </div>
+                                                <div class="user-username">@<?php echo htmlspecialchars($uploader['username']); ?></div>
                                             </div>
-                                            <div class="user-username">@<?php echo htmlspecialchars($uploader['username']); ?></div>
+                                            <div class="user-count">
+                                                <span class="count-number"><?php echo number_format($uploader['documents_count']); ?></span>
+                                                <span class="count-label">documentos</span>
+                                            </div>
                                         </div>
-                                        <div class="user-count">
-                                            <span class="count-number"><?php echo number_format($uploader['documents_count']); ?></span>
-                                            <span class="count-label">documentos</span>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
+                                    <?php endforeach; ?>
+                                </div>
                             </div>
                         </div>
-                    </div>
                     <?php endif; ?>
-                    
+
                     <!-- Documentos más populares -->
                     <div class="popular-documents-section">
                         <div class="popular-section">
@@ -541,7 +502,7 @@ function formatBytes($size, $precision = 2) {
                                 <?php endif; ?>
                             </div>
                         </div>
-                        
+
                         <div class="popular-section">
                             <h3>Documentos Más Vistos</h3>
                             <div class="popular-list">
@@ -664,13 +625,13 @@ function formatBytes($size, $precision = 2) {
         var documentsByDate = <?php echo json_encode($stats['by_date']); ?>;
         var documentsByCompany = <?php echo json_encode($stats['by_company'] ?? []); ?>;
         var reportType = '<?php echo $reportType; ?>';
-        
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-            
+
             if (reportType === 'summary') {
                 initCharts();
             }
@@ -679,7 +640,7 @@ function formatBytes($size, $precision = 2) {
         function initCharts() {
             initDocumentsByTypeChart();
             initDocumentsByDateChart();
-            
+
             if (documentsByCompany.length > 0) {
                 initDocumentsByCompanyChart();
             }
@@ -687,10 +648,10 @@ function formatBytes($size, $precision = 2) {
 
         function initDocumentsByTypeChart() {
             const ctx = document.getElementById('documentsByTypeChart').getContext('2d');
-            
+
             const labels = documentsByType.map(item => item.type_name || 'Sin tipo');
             const data = documentsByType.map(item => parseInt(item.count));
-            
+
             const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460'];
 
             new Chart(ctx, {
@@ -721,10 +682,13 @@ function formatBytes($size, $precision = 2) {
 
         function initDocumentsByDateChart() {
             const ctx = document.getElementById('documentsByDateChart').getContext('2d');
-            
+
             const labels = documentsByDate.map(item => {
                 const date = new Date(item.date);
-                return date.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' });
+                return date.toLocaleDateString('es-ES', {
+                    month: 'short',
+                    day: 'numeric'
+                });
             });
             const data = documentsByDate.map(item => parseInt(item.count));
 
@@ -764,10 +728,10 @@ function formatBytes($size, $precision = 2) {
 
         function initDocumentsByCompanyChart() {
             const ctx = document.getElementById('documentsByCompanyChart').getContext('2d');
-            
+
             const labels = documentsByCompany.map(item => item.company_name);
             const data = documentsByCompany.map(item => parseInt(item.count));
-            
+
             const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460', '#DAA520', '#B8860B'];
 
             new Chart(ctx, {
@@ -805,8 +769,15 @@ function formatBytes($size, $precision = 2) {
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
@@ -839,4 +810,5 @@ function formatBytes($size, $precision = 2) {
         });
     </script>
 </body>
+
 </html>

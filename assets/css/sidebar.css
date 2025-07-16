@@ -1,0 +1,216 @@
+/* assets/css/sidebar.css */
+/* Estilos para el sidebar contraíble - DMS2 */
+
+/* Logo contraído - P dorada */
+.logo-collapsed {
+    display: none;
+    width: 40px;
+    height: 40px;
+    background: #D4AF37;
+    border-radius: 50%;
+    color: white;
+    font-size: 1.5rem;
+    font-weight: bold;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Botón toggle */
+.sidebar-toggle-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #cbd5e1;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.sidebar-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.sidebar-toggle-btn i {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.3s ease;
+}
+
+/* Estados del sidebar */
+.sidebar {
+    width: 260px;
+    transition: width 0.3s ease;
+}
+
+.sidebar.collapsed {
+    width: 80px;
+}
+
+/* Logo cuando está contraído */
+.sidebar.collapsed .logo-image {
+    display: none;
+}
+
+.sidebar.collapsed .logo-collapsed {
+    display: flex;
+}
+
+/* Navegación cuando está contraído */
+.sidebar.collapsed .nav-link span {
+    display: none;
+}
+
+.sidebar.collapsed .nav-section {
+    display: none;
+}
+
+.sidebar.collapsed .sidebar-toggle-btn i {
+    transform: rotate(180deg);
+}
+
+.sidebar.collapsed .nav-link {
+    justify-content: center;
+    padding: 0.75rem;
+    position: relative;
+}
+
+.sidebar.collapsed .nav-divider {
+    margin: 0.5rem 1rem;
+}
+
+/* Tooltips para modo contraído */
+.sidebar.collapsed .nav-link {
+    position: relative;
+}
+
+.sidebar.collapsed .nav-link:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 0.5rem);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #333;
+    color: white;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 1000;
+    font-size: 0.875rem;
+    opacity: 0;
+    animation: tooltipFadeIn 0.3s ease forwards;
+    pointer-events: none;
+}
+
+.sidebar.collapsed .nav-link:hover::before {
+    content: '';
+    position: absolute;
+    left: calc(100% + 0.25rem);
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0.25rem solid transparent;
+    border-right-color: #333;
+    z-index: 1000;
+    opacity: 0;
+    animation: tooltipFadeIn 0.3s ease forwards;
+}
+
+@keyframes tooltipFadeIn {
+    to { 
+        opacity: 1; 
+    }
+}
+
+/* Ajustar contenido principal */
+.main-content {
+    margin-left: 260px;
+    transition: margin-left 0.3s ease;
+}
+
+.main-content.sidebar-collapsed {
+    margin-left: 80px;
+}
+
+/* Transiciones suaves para todos los elementos */
+.sidebar,
+.sidebar .logo-image,
+.sidebar .logo-collapsed,
+.sidebar .nav-link span,
+.main-content {
+    transition: all 0.3s ease;
+}
+
+/* Estado por defecto - logo contraído oculto */
+.logo-collapsed {
+    display: none;
+}
+
+/* Responsive: En móvil mantener comportamiento normal */
+@media (max-width: 768px) {
+    .sidebar-toggle-btn {
+        display: none !important;
+    }
+    
+    .sidebar.collapsed {
+        width: 260px;
+    }
+    
+    .sidebar.collapsed .logo-image {
+        display: block;
+    }
+    
+    .sidebar.collapsed .logo-collapsed {
+        display: none;
+    }
+    
+    .sidebar.collapsed .nav-link span {
+        display: inline;
+    }
+    
+    .sidebar.collapsed .nav-section {
+        display: block;
+    }
+    
+    .main-content.sidebar-collapsed {
+        margin-left: 260px;
+    }
+    
+    .main-content {
+        margin-left: 0;
+    }
+}
+
+/* Mejoras visuales */
+.sidebar.collapsed .nav-item.active .nav-link {
+    background: rgba(212, 175, 55, 0.1);
+    color: #D4AF37;
+}
+
+.sidebar.collapsed .nav-link i {
+    color: inherit;
+}
+
+/* Animación suave para el cambio de estado */
+.sidebar * {
+    box-sizing: border-box;
+}
+
+/* Prevenir overflow durante la transición */
+.sidebar.collapsed {
+    overflow: hidden;
+}
+
+.sidebar.collapsed .nav-link {
+    overflow: visible;
+}

@@ -135,83 +135,7 @@ if ($currentUser['company_id']) {
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
-
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item active">
-                    <a href="dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-
-                <li class="nav-item">
-                    <a href="modules/documents/upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-
-                <li class="nav-item">
-                    <a href="modules/documents/inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-
-
-
-                <li class="nav-divider"></li>
-
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Reportes')">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-
-                <?php if ($currentUser['role'] === 'admin' || checkPermission('admin')): ?>
-                    <li class="nav-section">
-                        <span>ADMINISTRACIÓN</span>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Empresas')">
-                            <i data-feather="briefcase"></i>
-                            <span>Empresas</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Departamentos')">
-                            <i data-feather="layers"></i>
-                            <span>Departamentos</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Grupos de Seguridad')">
-                            <i data-feather="shield"></i>
-                            <span>Grupos</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include 'includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -231,10 +155,6 @@ if ($currentUser['company_id']) {
                 </div>
 
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showNotifications()">
-                        <i data-feather="bell"></i>
-                        <span class="notification-badge">3</span>
-                    </button>
                     <button class="btn-icon" onclick="showUserMenu()">
                         <i data-feather="settings"></i>
                     </button>

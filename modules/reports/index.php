@@ -11,9 +11,10 @@ SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
 // Función para obtener estadísticas generales
-function getReportStats($userId, $companyId, $role) {
+function getReportStats($userId, $companyId, $role)
+{
     $stats = [];
-    
+
     // Total de actividades
     if ($role === 'admin') {
         $query = "SELECT COUNT(*) as total FROM activity_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
@@ -26,7 +27,7 @@ function getReportStats($userId, $companyId, $role) {
     }
     $result = fetchOne($query, $params);
     $stats['total_activities'] = $result['total'] ?? 0;
-    
+
     // Actividades hoy
     if ($role === 'admin') {
         $query = "SELECT COUNT(*) as total FROM activity_logs WHERE DATE(created_at) = CURDATE()";
@@ -39,7 +40,7 @@ function getReportStats($userId, $companyId, $role) {
     }
     $result = fetchOne($query, $params);
     $stats['activities_today'] = $result['total'] ?? 0;
-    
+
     // Usuarios activos (últimos 7 días)
     if ($role === 'admin') {
         $query = "SELECT COUNT(DISTINCT user_id) as total FROM activity_logs 
@@ -53,7 +54,7 @@ function getReportStats($userId, $companyId, $role) {
     }
     $result = fetchOne($query, $params);
     $stats['active_users'] = $result['total'] ?? 0;
-    
+
     // Acciones más comunes
     if ($role === 'admin') {
         $query = "SELECT action, COUNT(*) as count FROM activity_logs 
@@ -70,12 +71,13 @@ function getReportStats($userId, $companyId, $role) {
     $result = fetchOne($query, $params);
     $stats['top_action'] = $result['action'] ?? 'N/A';
     $stats['top_action_count'] = $result['count'] ?? 0;
-    
+
     return $stats;
 }
 
 // Función para obtener actividad reciente
-function getRecentActivity($userId, $role, $companyId, $limit = 10) {
+function getRecentActivity($userId, $role, $companyId, $limit = 10)
+{
     if ($role === 'admin') {
         $query = "SELECT al.*, u.first_name, u.last_name, u.username 
                   FROM activity_logs al 
@@ -92,17 +94,18 @@ function getRecentActivity($userId, $role, $companyId, $limit = 10) {
                   LIMIT :limit";
         $params = ['company_id' => $companyId, 'user_id' => $userId, 'limit' => $limit];
     }
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener datos de gráficos
-function getChartData($userId, $role, $companyId, $days = 7) {
+function getChartData($userId, $role, $companyId, $days = 7)
+{
     $data = [];
-    
+
     for ($i = $days - 1; $i >= 0; $i--) {
         $date = date('Y-m-d', strtotime("-$i days"));
-        
+
         if ($role === 'admin') {
             $query = "SELECT COUNT(*) as count FROM activity_logs 
                       WHERE DATE(created_at) = :date";
@@ -113,14 +116,14 @@ function getChartData($userId, $role, $companyId, $days = 7) {
                       WHERE u.company_id = :company_id AND DATE(al.created_at) = :date";
             $params = ['company_id' => $companyId, 'date' => $date];
         }
-        
+
         $result = fetchOne($query, $params);
         $data[] = [
             'date' => $date,
             'count' => $result['count'] ?? 0
         ];
     }
-    
+
     return $data;
 }
 
@@ -134,6 +137,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -147,71 +151,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
 
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-                <li class="nav-divider"></li>
-                <li class="nav-item active">
-                    <a href="index.php" class="nav-link">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-                
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Empresas')">
-                            <i data-feather="briefcase"></i>
-                            <span>Empresas</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Departamentos')">
-                            <i data-feather="layers"></i>
-                            <span>Departamentos</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Grupos')">
-                            <i data-feather="shield"></i>
-                            <span>Grupos</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -293,7 +234,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     <div class="nav-buttons">
                         <a href="activity_log.php" class="nav-btn">
                             <i data-feather="list"></i>
-                            <span>Log de Actividades</span>
+                            <span>Actividades</span>
                         </a>
                         <a href="user_reports.php" class="nav-btn">
                             <i data-feather="user"></i>
@@ -315,58 +256,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     <h3>Actividad de los Últimos 7 Días</h3>
                     <canvas id="activityChart"></canvas>
                 </div>
-
-                <!-- Actividad reciente -->
-                <div class="recent-activity">
-                    <h3>Actividad Reciente</h3>
-                    <div class="activity-list">
-                        <?php if (empty($recentActivity)): ?>
-                            <div class="empty-state">
-                                <i data-feather="activity"></i>
-                                <p>No hay actividad reciente</p>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach ($recentActivity as $activity): ?>
-                                <div class="activity-item">
-                                    <div class="activity-icon">
-                                        <?php
-                                        $iconMap = [
-                                            'login' => 'log-in',
-                                            'logout' => 'log-out',
-                                            'upload' => 'upload',
-                                            'download' => 'download',
-                                            'delete' => 'trash-2',
-                                            'view' => 'eye',
-                                            'create' => 'plus',
-                                            'update' => 'edit'
-                                        ];
-                                        $icon = $iconMap[$activity['action']] ?? 'activity';
-                                        ?>
-                                        <i data-feather="<?php echo $icon; ?>"></i>
-                                    </div>
-                                    <div class="activity-details">
-                                        <div class="activity-user">
-                                            <?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?>
-                                        </div>
-                                        <div class="activity-description">
-                                            <?php echo htmlspecialchars($activity['description'] ?? ucfirst($activity['action'])); ?>
-                                        </div>
-                                        <div class="activity-time">
-                                            <?php echo date('d/m/Y H:i', strtotime($activity['created_at'])); ?>
-                                        </div>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                    <div class="activity-footer">
-                        <a href="activity_log.php" class="view-all-btn">
-                            <i data-feather="arrow-right"></i>
-                            Ver todo el log
-                        </a>
-                    </div>
-                </div>
             </div>
+        </div>
         </div>
     </main>
 
@@ -374,7 +265,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
     <script>
         var chartData = <?php echo json_encode($chartData); ?>;
         var currentUserRole = '<?php echo $currentUser['role']; ?>';
-        
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
@@ -388,7 +279,10 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             const ctx = document.getElementById('activityChart').getContext('2d');
             const labels = chartData.map(item => {
                 const date = new Date(item.date);
-                return date.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' });
+                return date.toLocaleDateString('es-ES', {
+                    month: 'short',
+                    day: 'numeric'
+                });
             });
             const data = chartData.map(item => item.count);
 
@@ -431,8 +325,15 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
@@ -456,4 +357,5 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
         });
     </script>
 </body>
+
 </html>

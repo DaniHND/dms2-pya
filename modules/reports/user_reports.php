@@ -16,7 +16,8 @@ $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
 $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 
 // Función para obtener usuarios con estadísticas
-function getUsersWithStats($currentUser, $dateFrom, $dateTo) {
+function getUsersWithStats($currentUser, $dateFrom, $dateTo)
+{
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT u.id, u.username, u.first_name, u.last_name, u.email, u.role, 
                          u.last_login, u.created_at, c.name as company_name,
@@ -53,12 +54,13 @@ function getUsersWithStats($currentUser, $dateFrom, $dateTo) {
             'company_id' => $currentUser['company_id']
         ];
     }
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener actividad detallada de un usuario
-function getUserActivity($userId, $dateFrom, $dateTo, $limit = 20) {
+function getUserActivity($userId, $dateFrom, $dateTo, $limit = 20)
+{
     $query = "SELECT al.*, 
                      CASE 
                          WHEN al.table_name = 'documents' THEN d.name
@@ -71,19 +73,20 @@ function getUserActivity($userId, $dateFrom, $dateTo, $limit = 20) {
               AND al.created_at <= :date_to
               ORDER BY al.created_at DESC
               LIMIT :limit";
-    
+
     $params = [
         'user_id' => $userId,
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59',
         'limit' => $limit
     ];
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener estadísticas por acción de un usuario
-function getUserActionStats($userId, $dateFrom, $dateTo) {
+function getUserActionStats($userId, $dateFrom, $dateTo)
+{
     $query = "SELECT action, COUNT(*) as count
               FROM activity_logs
               WHERE user_id = :user_id 
@@ -91,13 +94,13 @@ function getUserActionStats($userId, $dateFrom, $dateTo) {
               AND created_at <= :date_to
               GROUP BY action
               ORDER BY count DESC";
-    
+
     $params = [
         'user_id' => $userId,
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     return fetchAll($query, $params);
 }
 
@@ -109,7 +112,7 @@ $selectedUserInfo = null;
 if ($selectedUserId) {
     $selectedUserActivity = getUserActivity($selectedUserId, $dateFrom, $dateTo);
     $selectedUserActionStats = getUserActionStats($selectedUserId, $dateFrom, $dateTo);
-    
+
     // Buscar información del usuario seleccionado
     foreach ($users as $user) {
         if ($user['id'] == $selectedUserId) {
@@ -125,6 +128,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -138,53 +142,8 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
 
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="../documents/inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-                <li class="nav-divider"></li>
-                <li class="nav-item active">
-                    <a href="index.php" class="nav-link">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-                
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -238,8 +197,8 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                             <select id="user_id" name="user_id">
                                 <option value="">Ver todos los usuarios</option>
                                 <?php foreach ($users as $user): ?>
-                                    <option value="<?php echo $user['id']; ?>" 
-                                            <?php echo $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo $user['id']; ?>"
+                                        <?php echo $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -274,7 +233,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                                 <p><?php echo htmlspecialchars($selectedUserInfo['company_name']); ?> - <?php echo ucfirst($selectedUserInfo['role']); ?></p>
                             </div>
                         </div>
-                        
+
                         <div class="user-stats-grid">
                             <div class="user-stat">
                                 <div class="stat-number"><?php echo number_format($selectedUserInfo['activity_count']); ?></div>
@@ -417,8 +376,8 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <a href="?user_id=<?php echo $user['id']; ?>&date_from=<?php echo $dateFrom; ?>&date_to=<?php echo $dateTo; ?>" 
-                                                   class="btn-action" title="Ver detalles">
+                                                <a href="?user_id=<?php echo $user['id']; ?>&date_from=<?php echo $dateFrom; ?>&date_to=<?php echo $dateTo; ?>"
+                                                    class="btn-action" title="Ver detalles">
                                                     <i data-feather="eye"></i>
                                                 </a>
                                             </td>
@@ -456,13 +415,13 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
         // Variables de configuración
         var currentFilters = <?php echo json_encode($_GET); ?>;
         var userActionStats = <?php echo json_encode($selectedUserActionStats); ?>;
-        
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-            
+
             <?php if ($selectedUserId && !empty($selectedUserActionStats)): ?>
                 initUserActionsChart();
             <?php endif; ?>
@@ -470,10 +429,10 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
 
         function initUserActionsChart() {
             const ctx = document.getElementById('userActionsChart').getContext('2d');
-            
+
             const labels = userActionStats.map(item => item.action.charAt(0).toUpperCase() + item.action.slice(1));
             const data = userActionStats.map(item => parseInt(item.count));
-            
+
             const colors = [
                 '#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887',
                 '#F4A460', '#DAA520', '#B8860B', '#9ACD32', '#6B8E23'
@@ -509,8 +468,15 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
@@ -543,11 +509,13 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
         });
     </script>
 </body>
+
 </html>
 
 <?php
 // Función auxiliar para obtener clase CSS según acción
-function getActionClass($action) {
+function getActionClass($action)
+{
     $classes = [
         'login' => 'success',
         'logout' => 'info',
@@ -558,7 +526,7 @@ function getActionClass($action) {
         'update' => 'warning',
         'view' => 'info'
     ];
-    
+
     return $classes[$action] ?? 'info';
 }
 ?>

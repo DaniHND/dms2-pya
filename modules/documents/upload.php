@@ -19,8 +19,10 @@ $documentTypes = fetchAll("SELECT * FROM document_types WHERE status = 'active' 
 if ($currentUser['role'] === 'admin') {
     $companies = fetchAll("SELECT * FROM companies WHERE status = 'active' ORDER BY name");
 } else {
-    $companies = fetchAll("SELECT * FROM companies WHERE id = :company_id AND status = 'active'", 
-                         ['company_id' => $currentUser['company_id']]);
+    $companies = fetchAll(
+        "SELECT * FROM companies WHERE id = :company_id AND status = 'active'",
+        ['company_id' => $currentUser['company_id']]
+    );
 }
 
 // Obtener departamentos
@@ -30,11 +32,13 @@ if ($currentUser['role'] === 'admin') {
                             LEFT JOIN companies c ON d.company_id = c.id 
                             WHERE d.status = 'active' ORDER BY c.name, d.name");
 } else {
-    $departments = fetchAll("SELECT d.*, c.name as company_name FROM departments d 
+    $departments = fetchAll(
+        "SELECT d.*, c.name as company_name FROM departments d 
                             LEFT JOIN companies c ON d.company_id = c.id 
                             WHERE d.company_id = :company_id AND d.status = 'active' 
-                            ORDER BY d.name", 
-                           ['company_id' => $currentUser['company_id']]);
+                            ORDER BY d.name",
+        ['company_id' => $currentUser['company_id']]
+    );
 }
 
 // Procesar subida de archivo
@@ -45,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
     $departmentId = $_POST['department_id'] ?? '';
     $description = trim($_POST['description'] ?? '');
     $tags = trim($_POST['tags'] ?? '');
-    
+
     // Validaciones
     if (empty($documentName)) {
         $error = 'El nombre del documento es requerido';
@@ -66,14 +70,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
             $fileTmpName = $file['tmp_name'];
             $fileSize = $file['size'];
             $fileError = $file['error'];
-            
+
             if ($fileError !== UPLOAD_ERR_OK) {
                 $error = 'Error al subir el archivo';
             } else {
                 // Obtener configuración del sistema
                 $maxFileSize = getSystemConfig('max_file_size') ?? 20971520; // 20MB por defecto
                 $allowedExtensions = json_decode(getSystemConfig('allowed_extensions') ?? '["pdf","doc","docx","xlsx","jpg","jpeg","png","gif"]', true);
-                
+
                 // Validar tamaño
                 if ($fileSize > $maxFileSize) {
                     $error = 'El archivo es muy grande. Tamaño máximo: ' . formatBytes($maxFileSize);
@@ -88,11 +92,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
                         if (!is_dir($uploadDir)) {
                             mkdir($uploadDir, 0755, true);
                         }
-                        
+
                         // Generar nombre único para el archivo
                         $uniqueFileName = uniqid() . '_' . time() . '.' . $fileExtension;
                         $filePath = $uploadDir . $uniqueFileName;
-                        
+
                         // Mover archivo
                         if (move_uploaded_file($fileTmpName, $filePath)) {
                             // Procesar tags
@@ -101,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
                                 $tagsArray = array_map('trim', explode(',', $tags));
                                 $tagsArray = array_filter($tagsArray);
                             }
-                            
+
                             // Guardar en base de datos
                             $documentData = [
                                 'company_id' => $companyId,
@@ -117,14 +121,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
                                 'tags' => json_encode($tagsArray),
                                 'status' => 'active'
                             ];
-                            
+
                             if (insertRecord('documents', $documentData)) {
                                 $success = 'Documento subido exitosamente';
-                                
+
                                 // Log de actividad
-                                logActivity($currentUser['id'], 'upload', 'documents', null, 
-                                           'Usuario subió documento: ' . $documentName);
-                                
+                                logActivity(
+                                    $currentUser['id'],
+                                    'upload',
+                                    'documents',
+                                    null,
+                                    'Usuario subió documento: ' . $documentName
+                                );
+
                                 // Limpiar formulario
                                 $documentName = '';
                                 $description = '';
@@ -144,7 +153,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
 }
 
 // Función para formatear bytes
-function formatBytes($size, $precision = 2) {
+function formatBytes($size, $precision = 2)
+{
     $units = array('B', 'KB', 'MB', 'GB', 'TB');
     $base = log($size, 1024);
     return round(pow(1024, $base - floor($base)), $precision) . ' ' . $units[floor($base)];
@@ -153,6 +163,7 @@ function formatBytes($size, $precision = 2) {
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -165,83 +176,8 @@ function formatBytes($size, $precision = 2) {
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
 
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-
-                <li class="nav-item active">
-                    <a href="upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-
-                <li class="nav-item">
-                    <a href="inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivos</span>
-                    </a>
-                </li>
-
-
-
-                <li class="nav-divider"></li>
-
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Reportes')">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section">
-                        <span>ADMINISTRACIÓN</span>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../users/list.php" class="nav-link">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../companies/list.php" class="nav-link">
-                            <i data-feather="briefcase"></i>
-                            <span>Empresas</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../departments/list.php" class="nav-link">
-                            <i data-feather="layers"></i>
-                            <span>Departamentos</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-item">
-                        <a href="../groups/list.php" class="nav-link">
-                            <i data-feather="shield"></i>
-                            <span>Grupos</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -261,10 +197,6 @@ function formatBytes($size, $precision = 2) {
                 </div>
 
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showNotifications()">
-                        <i data-feather="bell"></i>
-                        <span class="notification-badge">3</span>
-                    </button>
                     <button class="btn-icon" onclick="showUserMenu()">
                         <i data-feather="settings"></i>
                     </button>
@@ -302,10 +234,10 @@ function formatBytes($size, $precision = 2) {
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="document_name">Nombre del Documento *</label>
-                                <input type="text" id="document_name" name="document_name" 
-                                       class="form-control" required
-                                       value="<?php echo htmlspecialchars($documentName ?? ''); ?>"
-                                       placeholder="Ej: Factura 001-2024">
+                                <input type="text" id="document_name" name="document_name"
+                                    class="form-control" required
+                                    value="<?php echo htmlspecialchars($documentName ?? ''); ?>"
+                                    placeholder="Ej: Factura 001-2024">
                             </div>
 
                             <div class="form-group">
@@ -314,7 +246,7 @@ function formatBytes($size, $precision = 2) {
                                     <option value="">Seleccionar tipo</option>
                                     <?php foreach ($documentTypes as $type): ?>
                                         <option value="<?php echo $type['id']; ?>"
-                                                <?php echo (isset($documentTypeId) && $documentTypeId == $type['id']) ? 'selected' : ''; ?>>
+                                            <?php echo (isset($documentTypeId) && $documentTypeId == $type['id']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($type['name']); ?>
                                         </option>
                                     <?php endforeach; ?>
@@ -329,7 +261,7 @@ function formatBytes($size, $precision = 2) {
                                     <option value="">Seleccionar empresa</option>
                                     <?php foreach ($companies as $company): ?>
                                         <option value="<?php echo $company['id']; ?>"
-                                                <?php echo (isset($companyId) && $companyId == $company['id']) ? 'selected' : ''; ?>>
+                                            <?php echo (isset($companyId) && $companyId == $company['id']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($company['name']); ?>
                                         </option>
                                     <?php endforeach; ?>
@@ -342,8 +274,8 @@ function formatBytes($size, $precision = 2) {
                                     <option value="">Seleccionar departamento</option>
                                     <?php foreach ($departments as $dept): ?>
                                         <option value="<?php echo $dept['id']; ?>"
-                                                data-company="<?php echo $dept['company_id']; ?>"
-                                                <?php echo (isset($departmentId) && $departmentId == $dept['id']) ? 'selected' : ''; ?>>
+                                            data-company="<?php echo $dept['company_id']; ?>"
+                                            <?php echo (isset($departmentId) && $departmentId == $dept['id']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($dept['name']); ?>
                                             <?php if ($currentUser['role'] === 'admin'): ?>
                                                 (<?php echo htmlspecialchars($dept['company_name']); ?>)
@@ -357,10 +289,10 @@ function formatBytes($size, $precision = 2) {
                         <div class="form-group">
                             <label for="document_file">Archivo *</label>
                             <div class="file-upload-area" id="fileUploadArea">
-                                <input type="file" id="document_file" name="document_file" 
-                                       class="file-input" required accept=".pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif">
+                                <input type="file" id="document_file" name="document_file"
+                                    class="file-input" required accept=".pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif">
                                 <div class="file-upload-content">
-                                    <i data-feather="upload-cloud"class="icon-grande"></i>
+                                    <i data-feather="upload-cloud" class="icon-grande"></i>
                                     <p style="font-size: 1.4rem; font-weight: 500; text-align: center;">Haz clic aquí para seleccionar un archivo<br><small style="font-size: 1.3rem; font-weight: 500; text-align: center;">o arrastra y suelta un archivo</small></p>
                                     <small style="font-size: 0.8rem; font-weight: 500; text-align: center;">Tamaño máximo: <?php echo formatBytes(getSystemConfig('max_file_size') ?? 20971520); ?></small>
                                 </div>
@@ -382,15 +314,15 @@ function formatBytes($size, $precision = 2) {
 
                         <div class="form-group">
                             <label for="description">Descripción</label>
-                            <textarea id="description" name="description" class="form-control" 
-                                      rows="3" placeholder="Descripción opcional del documento"><?php echo htmlspecialchars($description ?? ''); ?></textarea>
+                            <textarea id="description" name="description" class="form-control"
+                                rows="3" placeholder="Descripción opcional del documento"><?php echo htmlspecialchars($description ?? ''); ?></textarea>
                         </div>
 
                         <div class="form-group">
                             <label for="tags">Etiquetas</label>
                             <input type="text" id="tags" name="tags" class="form-control"
-                                   value="<?php echo htmlspecialchars($tags ?? ''); ?>"
-                                   placeholder="Etiquetas separadas por comas (ej: factura, 2024, cliente)">
+                                value="<?php echo htmlspecialchars($tags ?? ''); ?>"
+                                placeholder="Etiquetas separadas por comas (ej: factura, 2024, cliente)">
                             <small class="form-help">Las etiquetas ayudan a organizar y buscar documentos</small>
                         </div>
 
@@ -458,19 +390,19 @@ function formatBytes($size, $precision = 2) {
         function showFilePreview(file) {
             const fileName = file.name;
             const fileSize = formatBytes(file.size);
-            
+
             const filePreview = document.getElementById('filePreview');
             const fileUploadContent = document.querySelector('.file-upload-content');
-            
+
             if (filePreview && fileUploadContent) {
                 filePreview.querySelector('.file-name').textContent = fileName;
                 filePreview.querySelector('.file-size').textContent = fileSize;
-                
+
                 fileUploadContent.style.display = 'none';
                 filePreview.style.display = 'flex';
-                
+
                 currentFile = file;
-                
+
                 // Auto-llenar el nombre del documento si está vacío
                 const docNameInput = document.getElementById('document_name');
                 if (docNameInput && !docNameInput.value.trim()) {
@@ -485,11 +417,11 @@ function formatBytes($size, $precision = 2) {
             const fileInput = document.getElementById('document_file');
             const filePreview = document.getElementById('filePreview');
             const fileUploadContent = document.querySelector('.file-upload-content');
-            
+
             if (fileInput) fileInput.value = '';
             if (filePreview) filePreview.style.display = 'none';
             if (fileUploadContent) fileUploadContent.style.display = 'block';
-            
+
             currentFile = null;
         }
 
@@ -516,7 +448,7 @@ function formatBytes($size, $precision = 2) {
                         e.stopPropagation();
                         return;
                     }
-                    
+
                     // Si hay un preview visible, solo abrir selector si se hace clic fuera del preview
                     const filePreview = document.getElementById('filePreview');
                     if (filePreview && filePreview.style.display === 'flex') {
@@ -524,7 +456,7 @@ function formatBytes($size, $precision = 2) {
                             return; // No hacer nada si se hace clic en el preview
                         }
                     }
-                    
+
                     // Abrir selector de archivos
                     fileInput.click();
                 });
@@ -563,12 +495,12 @@ function formatBytes($size, $precision = 2) {
             // Filtrar departamentos según empresa seleccionada
             const companySelect = document.getElementById('company_id');
             const departmentSelect = document.getElementById('department_id');
-            
+
             if (companySelect && departmentSelect) {
                 companySelect.addEventListener('change', function() {
                     const companyId = this.value;
                     const options = departmentSelect.querySelectorAll('option');
-                    
+
                     options.forEach(option => {
                         if (option.value === '') {
                             option.style.display = 'block';
@@ -577,7 +509,7 @@ function formatBytes($size, $precision = 2) {
                             option.style.display = (optionCompany === companyId) ? 'block' : 'none';
                         }
                     });
-                    
+
                     // Resetear selección de departamento
                     departmentSelect.value = '';
                 });
@@ -606,4 +538,5 @@ function formatBytes($size, $precision = 2) {
         });
     </script>
 </body>
+
 </html>

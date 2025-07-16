@@ -11,14 +11,16 @@ if (!$currentUser || !isset($currentUser['id'])) {
     exit();
 }
 
-function formatBytes($size, $precision = 2) {
+function formatBytes($size, $precision = 2)
+{
     if ($size == 0) return '0 B';
     $units = array('B', 'KB', 'MB', 'GB', 'TB');
     $base = log($size, 1024);
     return round(pow(1024, $base - floor($base)), $precision) . ' ' . $units[floor($base)];
 }
 
-function getDocumentsByPermissions($userId, $companyId, $role) {
+function getDocumentsByPermissions($userId, $companyId, $role)
+{
     if ($role === 'admin') {
         $query = "SELECT d.*, c.name as company_name, dep.name as department_name, 
                          dt.name as document_type, u.first_name, u.last_name,
@@ -58,13 +60,14 @@ function getDocumentsByPermissions($userId, $companyId, $role) {
     }
 }
 
-function organizeDocumentsByFolders($documents) {
+function organizeDocumentsByFolders($documents)
+{
     $folders = [];
     foreach ($documents as $doc) {
         $companyName = $doc['company_name'] ?? 'Sin Empresa';
         $departmentName = $doc['department_name'] ?? 'General';
         $folderKey = $companyName . '/' . $departmentName;
-        
+
         if (!isset($folders[$folderKey])) {
             $folders[$folderKey] = [
                 'company' => $companyName,
@@ -73,20 +76,22 @@ function organizeDocumentsByFolders($documents) {
                 'count' => 0
             ];
         }
-        
+
         $folders[$folderKey]['documents'][] = $doc;
         $folders[$folderKey]['count']++;
     }
     return $folders;
 }
 
-function canUserDownload($userId) {
+function canUserDownload($userId)
+{
     $query = "SELECT download_enabled FROM users WHERE id = :id";
     $result = fetchOne($query, ['id' => $userId]);
     return $result ? ($result['download_enabled'] ?? true) : false;
 }
 
-function canUserDelete($userId, $role, $documentOwnerId) {
+function canUserDelete($userId, $role, $documentOwnerId)
+{
     return ($role === 'admin') || ($userId == $documentOwnerId);
 }
 
@@ -104,14 +109,14 @@ if ($selectedFolder || $searchTerm || $selectedType) {
     $filteredDocuments = [];
     foreach ($documents as $doc) {
         $include = true;
-        
+
         if ($selectedFolder) {
             $docFolder = ($doc['company_name'] ?? 'Sin Empresa') . '/' . ($doc['department_name'] ?? 'General');
             if ($docFolder !== $selectedFolder) {
                 $include = false;
             }
         }
-        
+
         if ($searchTerm && $include) {
             $searchFields = [$doc['name'], $doc['description'], $doc['document_type'], $doc['company_name'], $doc['department_name']];
             $found = false;
@@ -125,13 +130,13 @@ if ($selectedFolder || $searchTerm || $selectedType) {
                 $include = false;
             }
         }
-        
+
         if ($selectedType && $include) {
             if ($doc['file_icon'] !== $selectedType) {
                 $include = false;
             }
         }
-        
+
         if ($include) {
             $filteredDocuments[] = $doc;
         }
@@ -144,6 +149,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -151,78 +157,14 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/inbox.css">
-    
+
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
-            </div>
-        </div>
 
-        <nav class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="../../dashboard.php" class="nav-link">
-                        <i data-feather="home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="upload.php" class="nav-link">
-                        <i data-feather="upload"></i>
-                        <span>Subir Documentos</span>
-                    </a>
-                </li>
-                <li class="nav-item active">
-                    <a href="inbox.php" class="nav-link">
-                        <i data-feather="inbox"></i>
-                        <span>Archivo</span>
-                    </a>
-                </li>
-
-                <li class="nav-divider"></li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Reportes')">
-                        <i data-feather="bar-chart-2"></i>
-                        <span>Reportes</span>
-                    </a>
-                </li>
-                
-                <?php if ($currentUser['role'] === 'admin'): ?>
-                    <li class="nav-section"><span>ADMINISTRACIÓN</span></li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Usuarios')">
-                            <i data-feather="users"></i>
-                            <span>Usuarios</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Empresas')">
-                            <i data-feather="briefcase"></i>
-                            <span>Empresas</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Departamentos')">
-                            <i data-feather="layers"></i>
-                            <span>Departamentos</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showComingSoon('Grupos')">
-                            <i data-feather="shield"></i>
-                            <span>Grupos</span>
-                        </a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </nav>
-    </aside>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -277,8 +219,8 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                     <form method="GET" action="">
                         <div class="search-input-group">
                             <i data-feather="search"></i>
-                            <input type="text" name="search" placeholder="Buscar documentos..." 
-                                   value="<?php echo htmlspecialchars($searchTerm); ?>">
+                            <input type="text" name="search" placeholder="Buscar documentos..."
+                                value="<?php echo htmlspecialchars($searchTerm); ?>">
                             <button type="submit" class="btn-search">
                                 <i data-feather="arrow-right"></i>
                             </button>
@@ -301,10 +243,10 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                             <span>Todos los archivos</span>
                             <span class="count"><?php echo array_sum(array_column($folders, 'count')); ?></span>
                         </a>
-                        
+
                         <?php foreach ($folders as $folderKey => $folder): ?>
-                            <a href="?folder=<?php echo urlencode($folderKey); ?><?php echo $searchTerm ? '&search=' . urlencode($searchTerm) : ''; ?>" 
-                               class="folder-item <?php echo $selectedFolder === $folderKey ? 'active' : ''; ?>">
+                            <a href="?folder=<?php echo urlencode($folderKey); ?><?php echo $searchTerm ? '&search=' . urlencode($searchTerm) : ''; ?>"
+                                class="folder-item <?php echo $selectedFolder === $folderKey ? 'active' : ''; ?>">
                                 <i data-feather="folder"></i>
                                 <div class="folder-info">
                                     <span class="folder-name"><?php echo htmlspecialchars($folder['company']); ?></span>
@@ -401,13 +343,13 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                                             <i data-feather="<?php echo $icon; ?>"></i>
                                         </div>
                                         <?php if ($doc['file_icon'] === 'image'): ?>
-                                            <img src="../../<?php echo htmlspecialchars($doc['file_path']); ?>" 
-                                                 alt="<?php echo htmlspecialchars($doc['name']); ?>"
-                                                 class="image-preview"
-                                                 onerror="this.style.display='none'">
+                                            <img src="../../<?php echo htmlspecialchars($doc['file_path']); ?>"
+                                                alt="<?php echo htmlspecialchars($doc['name']); ?>"
+                                                class="image-preview"
+                                                onerror="this.style.display='none'">
                                         <?php endif; ?>
                                     </div>
-                                    
+
                                     <div class="document-info">
                                         <h4 class="document-name" title="<?php echo htmlspecialchars($doc['name']); ?>">
                                             <?php echo htmlspecialchars($doc['name']); ?>
@@ -432,14 +374,14 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                                             <span><?php echo date('d/m/Y H:i', strtotime($doc['created_at'])); ?></span>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- BOTONES DE ACCIÓN -->
                                     <div class="document-actions">
                                         <!-- VER -->
                                         <button class="action-btn view-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Ver documento">
                                             <i data-feather="eye"></i>
                                         </button>
-                                        
+
                                         <!-- DESCARGAR -->
                                         <?php if ($canDownload): ?>
                                             <button class="action-btn download-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Descargar">
@@ -450,7 +392,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                                                 <i data-feather="download-cloud"></i>
                                             </button>
                                         <?php endif; ?>
-                                        
+
                                         <!-- ELIMINAR -->
                                         <?php if ($canDelete): ?>
                                             <button class="action-btn delete-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Eliminar">
@@ -473,9 +415,9 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         var canDownload = <?php echo $canDownload ? 'true' : 'false'; ?>;
         var currentUserId = <?php echo $currentUser['id']; ?>;
         var currentUserRole = '<?php echo $currentUser['role']; ?>';
-        
+
         console.log('🚀 INBOX DMS2 - Inicializando');
-        
+
         // Variables globales
         let currentView = 'grid';
 
@@ -502,7 +444,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         viewDocument(docId);
                     }
                 }
-                
+
                 // Botón DESCARGAR
                 if (e.target.closest('.download-btn')) {
                     e.preventDefault();
@@ -512,7 +454,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         downloadDocument(docId);
                     }
                 }
-                
+
                 // Botón ELIMINAR
                 if (e.target.closest('.delete-btn')) {
                     e.preventDefault();
@@ -522,7 +464,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         deleteDocument(docId);
                     }
                 }
-                
+
                 // Click en vista previa del documento
                 if (e.target.closest('.document-preview')) {
                     e.preventDefault();
@@ -541,7 +483,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         // FUNCIÓN VER DOCUMENTO
         function viewDocument(documentId) {
             console.log('👁️ Ver documento ID:', documentId);
-            
+
             // Verificar que el documento existe
             if (typeof documentsData !== 'undefined') {
                 const document = documentsData.find(doc => doc.id == documentId);
@@ -551,7 +493,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                 }
                 console.log('📄 Abriendo documento:', document.name);
             }
-            
+
             // Abrir en la misma ventana
             window.location.href = 'view.php?id=' + documentId;
         }
@@ -559,7 +501,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         // FUNCIÓN DESCARGAR
         function downloadDocument(documentId) {
             console.log('⬇️ Descargar documento ID:', documentId);
-            
+
             if (!canDownload) {
                 showNotification('No tienes permisos para descargar', 'error');
                 return;
@@ -569,18 +511,18 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             form.method = 'POST';
             form.action = 'download.php';
             form.style.display = 'none';
-            
+
             const input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'document_id';
             input.value = documentId;
-            
+
             form.appendChild(input);
             document.body.appendChild(form);
             form.submit();
-            
+
             showNotification('Iniciando descarga...', 'info');
-            
+
             setTimeout(() => {
                 if (document.body.contains(form)) {
                     document.body.removeChild(form);
@@ -591,21 +533,21 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         // FUNCIÓN ELIMINAR - CORREGIDA
         function deleteDocument(documentId) {
             console.log('🗑️ Eliminar documento ID:', documentId);
-            
+
             // CORREGIDO: Usar 'docData' en lugar de 'document' para evitar conflicto
             const docData = documentsData.find(doc => doc.id == documentId);
             if (!docData) {
                 showNotification('Documento no encontrado', 'error');
                 return;
             }
-            
+
             // Verificar permisos
             const canDelete = (currentUserRole === 'admin') || (docData.user_id == currentUserId);
             if (!canDelete) {
                 showNotification('No tienes permisos para eliminar', 'error');
                 return;
             }
-            
+
             // Confirmación detallada
             const confirmMsg = `¿Eliminar documento?
 
@@ -615,27 +557,27 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
 📏 ${formatBytes(docData.file_size)}
 
 ⚠️ Esta acción no se puede deshacer.`;
-            
+
             if (!confirm(confirmMsg)) return;
-            
+
             // Confirmación final
             if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) return;
-            
+
             // CORREGIDO: Ahora document se refiere al DOM correctamente
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'delete.php';
             form.style.display = 'none';
-            
+
             const input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'document_id';
             input.value = documentId;
-            
+
             form.appendChild(input);
             document.body.appendChild(form);
             form.submit();
-            
+
             showNotification('Eliminando documento...', 'warning');
         }
 
@@ -668,33 +610,40 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
 
         function showNotification(message, type = 'info') {
             console.log(`📢 ${type.toUpperCase()}: ${message}`);
-            
+
             // Crear notificación visual
             const notification = document.createElement('div');
             notification.className = `notification-toast ${type}`;
-            
+
             const colors = {
                 'info': '#3b82f6',
                 'success': '#10b981',
                 'warning': '#f59e0b',
                 'error': '#ef4444'
             };
-            
+
             const icons = {
                 'info': 'info',
                 'success': 'check-circle',
                 'warning': 'alert-triangle',
                 'error': 'alert-circle'
             };
-            
+
             notification.innerHTML = `
                 <i data-feather="${icons[type] || 'info'}"></i>
                 <span>${message}</span>
@@ -702,7 +651,7 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                     <i data-feather="x"></i>
                 </button>
             `;
-            
+
             notification.style.cssText = `
                 position: fixed;
                 top: 20px;
@@ -722,15 +671,15 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                 transform: translateX(100%);
                 transition: transform 0.3s ease;
             `;
-            
+
             document.body.appendChild(notification);
             feather.replace();
-            
+
             // Animar entrada
             setTimeout(() => {
                 notification.style.transform = 'translateX(0)';
             }, 10);
-            
+
             // Auto-remover después de 4 segundos
             setTimeout(() => {
                 notification.style.transform = 'translateX(100%)';
@@ -765,17 +714,17 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
             if (urlParams.get('success') === 'document_deleted') {
                 const name = urlParams.get('name') || 'el documento';
                 showNotification(`${name} eliminado exitosamente`, 'success');
-                
+
                 // Limpiar URL
                 const newUrl = window.location.pathname;
                 window.history.replaceState({}, document.title, newUrl);
             }
-            
+
             if (urlParams.get('error')) {
                 const error = urlParams.get('error');
                 let message = 'Error desconocido';
-                
-                switch(error) {
+
+                switch (error) {
                     case 'delete_failed':
                         message = 'Error al eliminar el documento';
                         break;
@@ -789,9 +738,9 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         message = 'Archivo no encontrado';
                         break;
                 }
-                
+
                 showNotification(message, 'error');
-                
+
                 // Limpiar URL
                 const newUrl = window.location.pathname;
                 window.history.replaceState({}, document.title, newUrl);
@@ -810,4 +759,5 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         });
     </script>
 </body>
+
 </html>
