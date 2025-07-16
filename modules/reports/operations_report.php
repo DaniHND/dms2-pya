@@ -16,21 +16,22 @@ $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 $operation = $_GET['operation'] ?? '';
 
 // Función para obtener estadísticas de operaciones
-function getOperationsStats($currentUser, $dateFrom, $dateTo) {
+function getOperationsStats($currentUser, $dateFrom, $dateTo)
+{
     $whereCondition = "";
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     // Filtro por empresa si no es admin
     if ($currentUser['role'] !== 'admin') {
         $whereCondition = "AND u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
-    
+
     $stats = [];
-    
+
     // Operaciones por tipo
     $query = "SELECT al.action, COUNT(*) as count
               FROM activity_logs al
@@ -40,9 +41,9 @@ function getOperationsStats($currentUser, $dateFrom, $dateTo) {
               $whereCondition
               GROUP BY al.action
               ORDER BY count DESC";
-    
+
     $stats['by_action'] = fetchAll($query, $params);
-    
+
     // Operaciones por día
     $query = "SELECT DATE(al.created_at) as date, COUNT(*) as count
               FROM activity_logs al
@@ -52,9 +53,9 @@ function getOperationsStats($currentUser, $dateFrom, $dateTo) {
               $whereCondition
               GROUP BY DATE(al.created_at)
               ORDER BY date";
-    
+
     $stats['by_date'] = fetchAll($query, $params);
-    
+
     // Operaciones por hora del día
     $query = "SELECT HOUR(al.created_at) as hour, COUNT(*) as count
               FROM activity_logs al
@@ -64,9 +65,9 @@ function getOperationsStats($currentUser, $dateFrom, $dateTo) {
               $whereCondition
               GROUP BY HOUR(al.created_at)
               ORDER BY hour";
-    
+
     $stats['by_hour'] = fetchAll($query, $params);
-    
+
     // Top usuarios más activos
     $query = "SELECT u.first_name, u.last_name, u.username, COUNT(*) as operations_count
               FROM activity_logs al
@@ -77,37 +78,38 @@ function getOperationsStats($currentUser, $dateFrom, $dateTo) {
               GROUP BY al.user_id
               ORDER BY operations_count DESC
               LIMIT 10";
-    
+
     $stats['top_users'] = fetchAll($query, $params);
-    
+
     return $stats;
 }
 
 // Función para obtener operaciones detalladas
-function getDetailedOperations($currentUser, $dateFrom, $dateTo, $operation, $limit = 100) {
+function getDetailedOperations($currentUser, $dateFrom, $dateTo, $operation, $limit = 100)
+{
     $whereConditions = [];
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     $whereConditions[] = "al.created_at >= :date_from";
     $whereConditions[] = "al.created_at <= :date_to";
-    
+
     // Filtro por tipo de operación
     if (!empty($operation)) {
         $whereConditions[] = "al.action = :operation";
         $params['operation'] = $operation;
     }
-    
+
     // Filtro por empresa si no es admin
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
-    
+
     $whereClause = implode(' AND ', $whereConditions);
-    
+
     $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name,
                      CASE 
                          WHEN al.table_name = 'documents' THEN d.name
@@ -122,27 +124,28 @@ function getDetailedOperations($currentUser, $dateFrom, $dateTo, $operation, $li
               WHERE $whereClause
               ORDER BY al.created_at DESC
               LIMIT :limit";
-    
+
     $params['limit'] = $limit;
-    
+
     return fetchAll($query, $params);
 }
 
 // Función para obtener métricas de rendimiento
-function getPerformanceMetrics($currentUser, $dateFrom, $dateTo) {
+function getPerformanceMetrics($currentUser, $dateFrom, $dateTo)
+{
     $whereCondition = "";
     $params = [
         'date_from' => $dateFrom . ' 00:00:00',
         'date_to' => $dateTo . ' 23:59:59'
     ];
-    
+
     if ($currentUser['role'] !== 'admin') {
         $whereCondition = "AND u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
-    
+
     $metrics = [];
-    
+
     // Total de operaciones
     $query = "SELECT COUNT(*) as total
               FROM activity_logs al
@@ -150,14 +153,14 @@ function getPerformanceMetrics($currentUser, $dateFrom, $dateTo) {
               WHERE al.created_at >= :date_from 
               AND al.created_at <= :date_to
               $whereCondition";
-    
+
     $result = fetchOne($query, $params);
     $metrics['total_operations'] = $result['total'] ?? 0;
-    
+
     // Promedio diario
     $days = max(1, (strtotime($dateTo) - strtotime($dateFrom)) / 86400);
     $metrics['daily_average'] = round($metrics['total_operations'] / $days, 2);
-    
+
     // Pico de actividad (hora con más operaciones)
     $query = "SELECT HOUR(al.created_at) as peak_hour, COUNT(*) as count
               FROM activity_logs al
@@ -168,11 +171,11 @@ function getPerformanceMetrics($currentUser, $dateFrom, $dateTo) {
               GROUP BY HOUR(al.created_at)
               ORDER BY count DESC
               LIMIT 1";
-    
+
     $result = fetchOne($query, $params);
     $metrics['peak_hour'] = $result['peak_hour'] ?? 0;
     $metrics['peak_count'] = $result['count'] ?? 0;
-    
+
     // Usuarios únicos activos
     $query = "SELECT COUNT(DISTINCT al.user_id) as unique_users
               FROM activity_logs al
@@ -180,10 +183,10 @@ function getPerformanceMetrics($currentUser, $dateFrom, $dateTo) {
               WHERE al.created_at >= :date_from 
               AND al.created_at <= :date_to
               $whereCondition";
-    
+
     $result = fetchOne($query, $params);
     $metrics['unique_users'] = $result['unique_users'] ?? 0;
-    
+
     return $metrics;
 }
 
@@ -197,6 +200,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -211,7 +215,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 <body class="dashboard-layout">
     <!-- Sidebar -->
 
-<?php include '../../includes/sidebar.php'; ?>
+    <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
@@ -230,6 +234,9 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
+                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
+                        <i data-feather="settings"></i>
+                    </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                         <i data-feather="log-out"></i>
                     </a>
@@ -260,7 +267,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                             <div class="metric-label">Total Operaciones</div>
                         </div>
                     </div>
-                    
+
                     <div class="metric-card">
                         <div class="metric-icon">
                             <i data-feather="trending-up"></i>
@@ -270,7 +277,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                             <div class="metric-label">Promedio Diario</div>
                         </div>
                     </div>
-                    
+
                     <div class="metric-card">
                         <div class="metric-icon">
                             <i data-feather="clock"></i>
@@ -281,7 +288,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                             <div class="metric-sublabel"><?php echo $metrics['peak_count']; ?> operaciones</div>
                         </div>
                     </div>
-                    
+
                     <div class="metric-card">
                         <div class="metric-icon">
                             <i data-feather="users"></i>
@@ -312,8 +319,8 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                             <select id="operation" name="operation">
                                 <option value="">Todas las operaciones</option>
                                 <?php foreach ($stats['by_action'] as $actionStat): ?>
-                                    <option value="<?php echo $actionStat['action']; ?>" 
-                                            <?php echo $operation == $actionStat['action'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo $actionStat['action']; ?>"
+                                        <?php echo $operation == $actionStat['action'] ? 'selected' : ''; ?>>
                                         <?php echo ucfirst($actionStat['action']); ?> (<?php echo $actionStat['count']; ?>)
                                     </option>
                                 <?php endforeach; ?>
@@ -340,19 +347,19 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                         <h3>Operaciones por Tipo</h3>
                         <canvas id="operationsByTypeChart"></canvas>
                     </div>
-                    
+
                     <div class="chart-container">
                         <h3>Actividad por Hora del Día</h3>
                         <canvas id="operationsByHourChart"></canvas>
                     </div>
                 </div>
-                
+
                 <div class="chart-row">
                     <div class="chart-container">
                         <h3>Operaciones por Día</h3>
                         <canvas id="operationsByDateChart"></canvas>
                     </div>
-                    
+
                     <div class="top-users-section">
                         <h3>Usuarios Más Activos</h3>
                         <div class="top-users-list">
@@ -479,13 +486,13 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
         var operationsByType = <?php echo json_encode($stats['by_action']); ?>;
         var operationsByHour = <?php echo json_encode($stats['by_hour']); ?>;
         var operationsByDate = <?php echo json_encode($stats['by_date']); ?>;
-        
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-            
+
             initCharts();
         });
 
@@ -497,10 +504,10 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByTypeChart() {
             const ctx = document.getElementById('operationsByTypeChart').getContext('2d');
-            
+
             const labels = operationsByType.map(item => item.action.charAt(0).toUpperCase() + item.action.slice(1));
             const data = operationsByType.map(item => parseInt(item.count));
-            
+
             const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460', '#DAA520', '#B8860B'];
 
             new Chart(ctx, {
@@ -536,14 +543,16 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByHourChart() {
             const ctx = document.getElementById('operationsByHourChart').getContext('2d');
-            
+
             // Crear array de 24 horas
             const hourlyData = new Array(24).fill(0);
             operationsByHour.forEach(item => {
                 hourlyData[parseInt(item.hour)] = parseInt(item.count);
             });
-            
-            const labels = Array.from({length: 24}, (_, i) => i.toString().padStart(2, '0') + ':00');
+
+            const labels = Array.from({
+                length: 24
+            }, (_, i) => i.toString().padStart(2, '0') + ':00');
 
             new Chart(ctx, {
                 type: 'line',
@@ -581,10 +590,13 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByDateChart() {
             const ctx = document.getElementById('operationsByDateChart').getContext('2d');
-            
+
             const labels = operationsByDate.map(item => {
                 const date = new Date(item.date);
-                return date.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' });
+                return date.toLocaleDateString('es-ES', {
+                    month: 'short',
+                    day: 'numeric'
+                });
             });
             const data = operationsByDate.map(item => parseInt(item.count));
 
@@ -623,8 +635,15 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
                 const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
@@ -657,11 +676,13 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
         });
     </script>
 </body>
+
 </html>
 
 <?php
 // Función auxiliar para obtener clase CSS según acción
-function getActionClass($action) {
+function getActionClass($action)
+{
     $classes = [
         'login' => 'success',
         'logout' => 'info',
@@ -672,7 +693,7 @@ function getActionClass($action) {
         'update' => 'warning',
         'view' => 'info'
     ];
-    
+
     return $classes[$action] ?? 'info';
 }
 ?>

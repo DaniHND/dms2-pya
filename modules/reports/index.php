@@ -215,15 +215,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     </div>
                 </div>
 
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i data-feather="trending-up"></i>
-                    </div>
-                    <div class="stat-info">
-                        <div class="stat-number"><?php echo $stats['top_action_count']; ?></div>
-                        <div class="stat-label">Acción: <?php echo ucfirst($stats['top_action']); ?></div>
-                    </div>
-                </div>
+
             </div>
 
             <!-- Grid principal -->
@@ -240,10 +232,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                             <i data-feather="user"></i>
                             <span>Reportes por Usuario</span>
                         </a>
-                        <a href="operations_report.php" class="nav-btn">
-                            <i data-feather="settings"></i>
-                            <span>Seguimiento de Operaciones</span>
-                        </a>
+
+                        
                         <a href="documents_report.php" class="nav-btn">
                             <i data-feather="file-text"></i>
                             <span>Reportes de Documentos</span>

@@ -10,7 +10,7 @@ SessionManager::requireLogin();
 
 $currentUser = SessionManager::getCurrentUser();
 
-// Parámetros de filtrado
+// Parámetros de filtrado - convertir formato de fecha dd/mm/yyyy a yyyy-mm-dd
 $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
 $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 $userId = $_GET['user_id'] ?? '';
@@ -101,6 +101,7 @@ function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
     $query = "SELECT COUNT(*) as total
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
+              LEFT JOIN companies c ON u.company_id = c.id
               WHERE $whereClause";
 
     $result = fetchOne($query, $params);
@@ -124,6 +125,29 @@ function getActionTypes()
 {
     $query = "SELECT DISTINCT action FROM activity_logs ORDER BY action";
     return fetchAll($query);
+}
+
+// Función para traducir acciones
+function translateAction($action)
+{
+    $translations = [
+        'login' => 'Iniciar Sesión',
+        'logout' => 'Cerrar Sesión',
+        'upload' => 'Subir Archivo',
+        'download' => 'Descargar',
+        'delete' => 'Eliminar',
+        'create' => 'Crear',
+        'update' => 'Actualizar',
+        'view' => 'Ver',
+        'share' => 'Compartir',
+        'access_denied' => 'Acceso Denegado',
+        'view_activity_log' => 'Ver Log de Actividades',
+        'export_csv' => 'Exportar CSV',
+        'export_pdf' => 'Exportar PDF',
+        'export_excel' => 'Exportar Excel'
+    ];
+    
+    return $translations[$action] ?? ucfirst(str_replace('_', ' ', $action));
 }
 
 $activities = getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset);
@@ -171,6 +195,9 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
+                    <button class="btn-icon" onclick="location.reload()">
+                        <i data-feather="refresh-cw"></i>
+                    </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                         <i data-feather="log-out"></i>
                     </a>
@@ -188,6 +215,27 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </a>
             </div>
 
+            <!-- Resumen de resultados -->
+            <div class="results-summary">
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <i data-feather="activity"></i>
+                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
+                        <span class="stat-label">Total Actividades</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="calendar"></i>
+                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
+                        <span class="stat-label">Período</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="users"></i>
+                        <span class="stat-number"><?php echo count($users); ?></span>
+                        <span class="stat-label">Usuarios Activos</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Filtros -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>
@@ -195,11 +243,11 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="filters-row">
                         <div class="filter-group">
                             <label for="date_from">Desde</label>
-                            <input type="date" id="date_from" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>">
+                            <input type="date" id="date_from" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>" required>
                         </div>
                         <div class="filter-group">
                             <label for="date_to">Hasta</label>
-                            <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>">
+                            <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>" required>
                         </div>
                         <div class="filter-group">
                             <label for="user_id">Usuario</label>
@@ -220,7 +268,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                                 <?php foreach ($actionTypes as $actionType): ?>
                                     <option value="<?php echo $actionType['action']; ?>"
                                         <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars(ucfirst($actionType['action'])); ?>
+                                        <?php echo htmlspecialchars(translateAction($actionType['action'])); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -235,32 +283,20 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <i data-feather="x"></i>
                             Limpiar
                         </a>
+                        <a href="activity_log.php" class="btn-filter info">
+                            <i data-feather="rotate-ccw"></i>
+                            Todas las Actividades
+                        </a>
                     </div>
                 </form>
             </div>
 
-            <!-- Exportación -->
-            <div class="export-section">
-                <h3>Exportar Datos</h3>
-                <div class="export-buttons">
-                    <button class="export-btn" onclick="exportData('csv')">
-                        <i data-feather="file-text"></i>
-                        Exportar CSV
-                    </button>
-                    <button class="export-btn" onclick="exportData('excel')">
-                        <i data-feather="grid"></i>
-                        Exportar Excel
-                    </button>
-                    <button class="export-btn" onclick="printReport()">
-                        <i data-feather="printer"></i>
-                        Imprimir
-                    </button>
-                </div>
-            </div>
-
             <!-- Tabla de actividades -->
             <div class="reports-table">
-                <h3>Registro de Actividades (<?php echo number_format($totalActivities); ?> registros)</h3>
+                <div class="table-header">
+                    <h3>Registro de Actividades</h3>
+                </div>
+                
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -270,35 +306,50 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                                 <th>Empresa</th>
                                 <th>Acción</th>
                                 <th>Descripción</th>
-                                <th>IP</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($activities)): ?>
                                 <tr>
-                                    <td colspan="6" class="empty-state">
-                                        <i data-feather="search"></i>
-                                        <p>No se encontraron actividades con los filtros seleccionados</p>
+                                    <td colspan="5" class="empty-state">
+                                        <div class="empty-content">
+                                            <i data-feather="search"></i>
+                                            <p>No se encontraron actividades con los filtros seleccionados</p>
+                                            <a href="activity_log.php" class="btn-secondary">Ver Todas las Actividades</a>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($activities as $activity): ?>
                                     <tr>
-                                        <td><?php echo date('d/m/Y H:i', strtotime($activity['created_at'])); ?></td>
                                         <td>
-                                            <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
-                                            <br>
-                                            <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
+                                            <div class="datetime-cell">
+                                                <strong><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></strong>
+                                                <small><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></small>
+                                            </div>
                                         </td>
-                                        <td><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></td>
+                                        <td>
+                                            <div class="user-cell">
+                                                <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
+                                                <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="company-name"><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></span>
+                                        </td>
                                         <td>
                                             <span class="status-badge <?php echo getActionClass($activity['action']); ?>">
-                                                <?php echo htmlspecialchars(ucfirst($activity['action'])); ?>
+                                                <i data-feather="<?php echo getActionIcon($activity['action']); ?>"></i>
+                                                <?php echo htmlspecialchars(translateAction($activity['action'])); ?>
                                             </span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?></td>
                                         <td>
-                                            <code><?php echo htmlspecialchars($activity['ip_address'] ?? 'N/A'); ?></code>
+                                            <div class="description-cell" title="<?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>">
+                                                <?php 
+                                                $description = $activity['description'] ?? 'Sin descripción';
+                                                echo htmlspecialchars(strlen($description) > 60 ? substr($description, 0, 60) . '...' : $description);
+                                                ?>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -317,6 +368,9 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         </div>
                         <div class="pagination-controls">
                             <?php if ($page > 1): ?>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>" class="page-btn">
+                                    <i data-feather="chevrons-left"></i>
+                                </a>
                                 <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" class="page-btn">
                                     <i data-feather="chevron-left"></i>
                                 </a>
@@ -333,18 +387,41 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                                 <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" class="page-btn">
                                     <i data-feather="chevron-right"></i>
                                 </a>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $totalPages])); ?>" class="page-btn">
+                                    <i data-feather="chevrons-right"></i>
+                                </a>
                             <?php endif; ?>
                         </div>
                     </div>
                 <?php endif; ?>
             </div>
+
+            <!-- Exportación -->
+            <div class="export-section">
+                <h3>Exportar Datos</h3>
+                <div class="export-buttons">
+                    <button class="export-btn" onclick="exportarDatos('csv')">
+                        <i data-feather="file-text"></i>
+                        Descargar CSV
+                    </button>
+                    <button class="export-btn" onclick="exportarDatos('excel')">
+                        <i data-feather="grid"></i>
+                        Descargar Excel
+                    </button>
+                    <button class="export-btn" onclick="exportarDatos('pdf')">
+                        <i data-feather="file"></i>
+                        Descargar PDF
+                    </button>
+                    <button class="export-btn secondary" onclick="window.print()">
+                        <i data-feather="printer"></i>
+                        Imprimir
+                    </button>
+                </div>
+            </div>
         </div>
     </main>
 
     <script>
-        // Variables de configuración
-        var currentFilters = <?php echo json_encode($_GET); ?>;
-
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
@@ -376,23 +453,56 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             }
         }
 
-        function exportData(format) {
-            const url = `export.php?format=${format}&type=activity_log&${new URLSearchParams(currentFilters).toString()}`;
-            window.open(url, '_blank');
+        function exportarDatos(formato) {
+            // Obtener parámetros actuales de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Construir URL de exportación
+            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&' + urlParams.toString();
+            
+            if (formato === 'pdf') {
+                // Para PDF, navegar directamente en la misma ventana
+                mostrarNotificacion('Generando vista previa del PDF...', 'info');
+                window.location.href = exportUrl;
+            } else {
+                // Para CSV y Excel, abrir en nueva ventana para descarga
+                mostrarNotificacion('Preparando descarga de ' + formato.toUpperCase() + '...', 'info');
+                window.open(exportUrl, '_blank');
+            }
         }
 
-        function printReport() {
-            window.print();
-        }
-
-        function showComingSoon(feature) {
-            alert(`${feature} - Próximamente`);
+        function mostrarNotificacion(mensaje, tipo) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${tipo === 'info' ? '#17a2b8' : '#28a745'};
+                color: white;
+                padding: 12px 20px;
+                border-radius: 4px;
+                z-index: 1000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                font-family: Arial, sans-serif;
+            `;
+            notification.textContent = mensaje;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, 3000);
         }
 
         // Responsive
         window.addEventListener('resize', function() {
             if (window.innerWidth > 768) {
-                document.getElementById('sidebar').classList.remove('active');
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) {
+                    sidebar.classList.remove('active');
+                }
             }
         });
     </script>
@@ -412,9 +522,38 @@ function getActionClass($action)
         'delete' => 'error',
         'create' => 'success',
         'update' => 'warning',
-        'view' => 'info'
+        'view' => 'info',
+        'share' => 'warning',
+        'access_denied' => 'error',
+        'view_activity_log' => 'info',
+        'export_csv' => 'info',
+        'export_pdf' => 'info',
+        'export_excel' => 'info'
     ];
 
     return $classes[$action] ?? 'info';
+}
+
+// Función auxiliar para obtener icono según acción
+function getActionIcon($action)
+{
+    $icons = [
+        'login' => 'log-in',
+        'logout' => 'log-out',
+        'upload' => 'upload',
+        'download' => 'download',
+        'delete' => 'trash-2',
+        'create' => 'plus',
+        'update' => 'edit',
+        'view' => 'eye',
+        'share' => 'share-2',
+        'access_denied' => 'shield-off',
+        'view_activity_log' => 'activity',
+        'export_csv' => 'file-text',
+        'export_pdf' => 'file',
+        'export_excel' => 'grid'
+    ];
+
+    return $icons[$action] ?? 'activity';
 }
 ?>
