@@ -201,7 +201,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             justify-content: space-between;
             align-items: center;
             padding: 15px 20px;
-            background-color: #8B4513;
+            background-color: #ecececff;
             color: white;
             border-radius: 8px 8px 0 0;
         }
@@ -215,8 +215,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         .pdf-modal-close {
             background: none;
             border: none;
-            color: white;
-            font-size: 24px;
+            color: black;
+            font-size: 35px;
             cursor: pointer;
             padding: 5px;
             border-radius: 4px;
@@ -228,7 +228,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         }
 
         .pdf-modal-body {
-            height: calc(100% - 70px);
+            height: calc(120% - 150px);
             padding: 0;
         }
 

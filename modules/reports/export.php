@@ -1,6 +1,6 @@
 <?php
 // modules/reports/export.php
-// Sistema de exportación de reportes con DomPDF - DMS2
+// Sistema de exportación de reportes con DomPDF - DMS2 (VERSIÓN FINAL)
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -160,7 +160,7 @@ function generateExcel($headers, $rows, $filename) {
     echo '<table border="1">';
     
     // Headers
-    echo '<tr style="background-color: #8B4513; color: white; font-weight: bold;">';
+    echo '<tr style="background-color: #667eea; color: white; font-weight: bold;">';
     foreach ($headers as $header) {
         echo '<th>' . htmlspecialchars($header) . '</th>';
     }
@@ -181,7 +181,7 @@ function generateExcel($headers, $rows, $filename) {
     exit();
 }
 
-// Función para generar PDF con DomPDF
+// Función para generar PDF con DomPDF (VERSIÓN FINAL OPTIMIZADA)
 function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDownload = false) {
     
     if ($forceDownload) {
@@ -194,7 +194,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         $dompdf = new Dompdf($options);
         
-        // Template HTML para PDF optimizado
+        // Template HTML para PDF optimizado SIN GRADIENTES (compatible con DomPDF)
         $html = '<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -209,38 +209,40 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         body {
             font-family: Arial, sans-serif;
             font-size: 10px;
-            color: #333;
-            line-height: 1.3;
+            color: #2c3e50;
+            line-height: 1.4;
             margin: 0;
             padding: 0;
         }
         
         .header {
             text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 3px solid #8B4513;
-            padding-bottom: 15px;
+            margin-bottom: 25px;
+            border-bottom: 3px solid #6d534eff;
+            padding-bottom: 20px;
         }
         
         .header h1 {
-            color: #8B4513;
-            margin: 0 0 5px 0;
-            font-size: 20px;
+            color: #2c3e50;
+            margin: 0 0 8px 0;
+            font-size: 24px;
             font-weight: bold;
         }
         
         .header .subtitle {
-            color: #666;
+            color: #6c757d;
             margin: 0;
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: 500;
         }
         
         .report-info {
-            background: #f8f9fa;
-            padding: 12px;
-            margin-bottom: 20px;
-            border-left: 4px solid #8B4513;
-            font-size: 9px;
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-left: 4px solid #6d534eff;
+            border-radius: 8px;
+            font-size: 10px;
         }
         
         .info-grid {
@@ -259,41 +261,50 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         }
         
         .report-info strong {
-            color: #8B4513;
+            color: #495057;
             font-weight: bold;
         }
         
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 8px;
-            margin-top: 10px;
+            font-size: 9px;
+            margin-top: 15px;
+            border-radius: 8px;
+            overflow: hidden;
         }
         
         th, td {
-            border: 1px solid #ddd;
-            padding: 6px 4px;
+            border: 1px solid #e1e5e9;
+            padding: 8px 6px;
             text-align: left;
             vertical-align: top;
         }
         
         th {
-            background-color: #8B4513;
+            background-color: #4e342e;
             color: white;
-            font-weight: bold;
+            font-weight: 600;
             text-align: center;
-            font-size: 9px;
+            font-size: 10px;
+            padding: 12px 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         tr:nth-child(even) {
-            background-color: #f9f9f9;
+            background-color: #f8f9fa;
+        }
+        
+        tr:nth-child(odd) {
+            background-color: white;
         }
         
         .col-fecha {
             width: 15%;
             font-weight: bold;
-            color: #8B4513;
-            font-size: 7px;
+            color: #495057;
+            font-size: 8px;
         }
         
         .col-nombre {
@@ -306,7 +317,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             width: 15%;
             font-style: italic;
             color: #6c757d;
-            font-size: 7px;
+            font-size: 8px;
         }
         
         .col-empresa {
@@ -318,17 +329,17 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         .col-descripcion {
             width: 25%;
             word-wrap: break-word;
-            font-size: 7px;
-            line-height: 1.2;
+            font-size: 8px;
+            line-height: 1.3;
         }
         
         .footer {
-            margin-top: 20px;
+            margin-top: 25px;
             text-align: center;
-            font-size: 8px;
-            color: #666;
-            border-top: 2px solid #8B4513;
-            padding-top: 10px;
+            font-size: 9px;
+            color: #6c757d;
+            border-top: 1px solid #dee2e6;
+            padding-top: 15px;
         }
     </style>
 </head>
@@ -417,7 +428,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         exit();
     }
     
-    // Vista previa (código original sin cambios)
+    // Vista previa (CON GRADIENTES para el navegador)
     header('Content-Type: text/html; charset=UTF-8');
     
     // Verificar si viene del modal
@@ -430,105 +441,111 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
     <title>' . htmlspecialchars($title) . '</title>
     <style>
         body { 
-            font-family: Arial, sans-serif; 
+            font-family: "Segoe UI", Arial, sans-serif; 
             margin: 0;
-            padding: 10px;
-            font-size: 12px;
-            color: #333;
-            line-height: 1.3;
-            background-color: #f0f2f5;
+            padding: 12px;
+            font-size: 11px;
+            color: #2c3e50;
+            line-height: 1.4;
+            background-color: #ffffff;
         }
         
         .controls {
             position: fixed;
-            top: 15px;
-            right: 15px;
+            top: 12px;
+            right: 12px;
             background: white;
             padding: 0;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             z-index: 1000;
             display: flex;
-            gap: 0;
-            border: 1px solid #dee2e6;
+            gap: 2px;
+            border: 1px solid #e1e5e9;
         }
         
         .controls button {
-            background: #8B4513;
+            background: linear-gradient(135deg, #4e342e 0%, #6d534eff 100%);
             color: white;
             border: none;
-            padding: 12px 20px;
+            padding: 12px 18px;
             cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
+            font-size: 13px;
+            font-weight: 500;
             display: inline-flex;
             align-items: center;
             gap: 8px;
             transition: all 0.3s ease;
-            min-width: 140px;
+            min-width: 130px;
             justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .controls button::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+        
+        .controls button:hover::before {
+            left: 100%;
         }
         
         .controls button:first-child {
-            border-radius: 8px 0 0 8px;
-            background: #8B4513;
+            border-radius: 10px 0 0 10px;
         }
         
         .controls button:nth-child(2) {
-            border-radius: 0;
-            background: #28a745;
-            border-left: 1px solid rgba(255,255,255,0.2);
-            border-right: 1px solid rgba(255,255,255,0.2);
+            border-radius: 0 10px 10px 0;
+            background: linear-gradient(135deg, #43a047 0%, #388e3c 100%);
         }
         
         .controls button:last-child {
-            border-radius: 0 8px 8px 0;
-            background: #6c757d;
+            border-radius: 0 10px 10px 0;
+            background: linear-gradient(135deg, #78909c 0%, #546e7a 100%);
         }
         
         .controls button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
         }
         
-        .controls button:first-child:hover {
-            background: #654321;
-        }
-        
-        .controls button:nth-child(2):hover {
-            background: #1e7e34;
-        }
-        
-        .controls button:last-child:hover {
-            background: #5a6268;
+        .controls button:active {
+            transform: translateY(0);
         }
         
         .pdf-container {
-            max-width: 1000px;
-            margin: 60px auto 20px auto;
+            max-width: 100%;
+            margin: 50px auto 20px auto;
             background: white;
-            padding: 30px;
+            padding: 25px;
             border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             border: 1px solid #e9ecef;
         }
         
         .header {
             text-align: center;
             margin-bottom: 25px;
-            border-bottom: 3px solid #8B4513;
+            border-bottom: 2px solid #6d534eff;
             padding-bottom: 20px;
         }
         
         .header h1 {
-            color: #8B4513;
+            color: #2c3e50;
             margin: 0;
-            font-size: 28px;
-            font-weight: bold;
+            font-size: 26px;
+            font-weight: 700;
         }
         
         .header .subtitle {
-            color: #666;
+            color: #6c757d;
             margin: 8px 0;
             font-size: 16px;
             font-weight: 500;
@@ -541,28 +558,28 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             margin-bottom: 25px;
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
             padding: 20px;
-            border-radius: 8px;
-            border-left: 4px solid #8B4513;
-            font-size: 13px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            font-size: 12px;
         }
         
         .report-info strong {
-            color: #8B4513;
-            font-weight: bold;
+            color: #495057;
+            font-weight: 600;
         }
         
         table { 
             width: 100%; 
             border-collapse: collapse; 
-            font-size: 11px;
+            font-size: 10px;
             margin-top: 15px;
-            border: 2px solid #8B4513;
-            border-radius: 8px;
+            border-radius: 10px;
             overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }
         
         th, td { 
-            border: 1px solid #dee2e6; 
+            border: 1px solid #e1e5e9; 
             padding: 10px 8px; 
             text-align: left; 
             vertical-align: top;
@@ -570,14 +587,15 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         }
         
         th { 
-            background: linear-gradient(135deg, #8B4513 0%, #654321 100%);
+            background: linear-gradient(135deg, #4e342e 0%, #6d534eff 100%);
             color: white; 
-            font-weight: bold;
-            font-size: 12px;
+            font-weight: 600;
+            font-size: 11px;
             text-align: center;
             padding: 15px 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         
         tr:nth-child(even) { 
@@ -590,20 +608,22 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         tr:hover {
             background-color: #e3f2fd;
+            transform: scale(1.001);
+            transition: all 0.2s ease;
         }
         
         .col-fecha {
             width: 18%;
-            font-weight: bold;
-            color: #8B4513;
-            font-size: 10px;
+            font-weight: 600;
+            color: #495057;
+            font-size: 9px;
             white-space: nowrap;
         }
         
         .col-nombre {
             width: 25%;
             font-weight: 600;
-            font-size: 11px;
+            font-size: 10px;
             color: #2c3e50;
         }
         
@@ -611,39 +631,50 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             width: 15%;
             font-style: italic;
             color: #6c757d;
-            font-size: 10px;
+            font-size: 9px;
         }
         
         .col-empresa {
             width: 20%;
             color: #495057;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 500;
         }
         
         .col-descripcion {
             width: 22%;
-            font-size: 10px;
+            font-size: 9px;
             line-height: 1.4;
             word-break: break-word;
         }
         
         .footer {
-            margin-top: 30px;
+            margin-top: 25px;
             text-align: center;
-            font-size: 12px;
+            font-size: 11px;
             color: #6c757d;
-            border-top: 2px solid #8B4513;
+            border-top: 1px solid #dee2e6;
             padding-top: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 10px;
             padding: 20px;
         }
         
+        /* Estilos especiales para impresión */
         @media print {
             .controls { display: none !important; }
             .pdf-container { margin: 0; padding: 20px; box-shadow: none; border: none; }
             body { background: white; }
+            th { 
+                background: #667eea !important; 
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
+            .report-info {
+                background: #f8f9fa !important;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
         }
     </style>
 </head>
@@ -654,10 +685,10 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         $htmlContent .= '
     <div class="controls">
         <button onclick="window.print()" title="Imprimir documento">
-            <span>🖨️</span> Imprimir
+            <span></span> Imprimir
         </button>
         <button onclick="descargarPDFReal()" title="Descargar archivo PDF">
-            <span>💾</span> Descargar PDF
+            <span></span> Descargar PDF
         </button>
         <button onclick="window.history.back()" title="Volver al log de actividades">
             <span>←</span> Volver
@@ -665,7 +696,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
     </div>';
     } else {
         $htmlContent .= '
-    <div class="controls" style="position: relative; top: 10px; right: 10px; margin-bottom: 20px;">
+    <div class="controls" style="position: relative; top: 8px; right: 8px; margin-bottom: 18px;">
         <button onclick="window.print()" title="Imprimir documento">
             <span>🖨️</span> Imprimir
         </button>
@@ -714,7 +745,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         $htmlContent .= '<td class="col-usuario">@' . htmlspecialchars($row[2]) . '</td>';
         $htmlContent .= '<td class="col-empresa">' . htmlspecialchars($row[3]) . '</td>';
         
-        // Descripción truncada
+        // Descripción truncada para el modal
         $descripcion = $row[4];
         if (strlen($descripcion) > 100) {
             $descripcion = substr($descripcion, 0, 100) . '...';
@@ -748,6 +779,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
     $htmlContent .= '
         }';
         
+    // JavaScript específico para modal
     if ($isModal) {
         $htmlContent .= '
         
@@ -762,6 +794,19 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
                 container.style.maxWidth = "100%";
                 container.style.boxShadow = "none";
                 container.style.border = "none";
+                container.style.padding = "20px";
+            }
+            
+            // Ajustar el tamaño del modal para que sea más compacto
+            const modal = window.parent.document.getElementById("pdfModal");
+            if (modal) {
+                const modalContent = modal.querySelector(".pdf-modal-content");
+                if (modalContent) {
+                    modalContent.style.width = "75%";
+                    modalContent.style.height = "75%";
+                    modalContent.style.maxWidth = "900px";
+                    modalContent.style.maxHeight = "600px";
+                }
             }
         });';
     }
@@ -821,7 +866,7 @@ try {
     error_log("Error en exportación: " . $e->getMessage());
     error_log("Parámetros: " . print_r($_GET, true));
     
-    // Mostrar error al usuario
+    // Mostrar error al usuario con diseño mejorado
     http_response_code(500);
     echo '<!DOCTYPE html>';
     echo '<html lang="es">';
@@ -829,25 +874,28 @@ try {
     echo '<meta charset="UTF-8">';
     echo '<title>Error de Exportación - DMS2</title>';
     echo '<style>';
-    echo 'body { font-family: Arial, sans-serif; margin: 40px; color: #333; text-align: center; }';
-    echo '.error-container { max-width: 600px; margin: 0 auto; }';
-    echo '.error-box { background-color: #f8d7da; color: #721c24; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #f5c6cb; }';
-    echo '.btn { background-color: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; margin: 10px; }';
-    echo '.btn:hover { background-color: #0056b3; }';
+    echo 'body { font-family: "Segoe UI", Arial, sans-serif; margin: 40px; color: #2c3e50; text-align: center; background: #f8f9fa; }';
+    echo '.error-container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }';
+    echo '.error-box { background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); color: #721c24; padding: 25px; border-radius: 10px; margin: 25px 0; border: 1px solid #f5c6cb; }';
+    echo '.btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; margin: 10px; font-weight: 500; transition: all 0.3s ease; }';
+    echo '.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,0.2); }';
+    echo '.btn.secondary { background: linear-gradient(135deg, #43a047 0%, #388e3c 100%); }';
+    echo '.error-icon { font-size: 48px; margin-bottom: 20px; }';
     echo '</style>';
     echo '</head>';
     echo '<body>';
     echo '<div class="error-container">';
-    echo '<h1 style="color: #dc3545;">❌ Error en la Exportación</h1>';
+    echo '<div class="error-icon">❌</div>';
+    echo '<h1 style="color: #dc3545; margin-bottom: 20px;">Error en la Exportación</h1>';
     echo '<div class="error-box">';
     echo '<h3>Se produjo un error al generar el reporte:</h3>';
     echo '<p><strong>' . htmlspecialchars($e->getMessage()) . '</strong></p>';
     echo '</div>';
     echo '<div>';
     echo '<a href="javascript:history.back()" class="btn">← Volver</a>';
-    echo '<a href="activity_log.php" class="btn" style="background-color: #28a745;">🏠 Ir al Log de Actividades</a>';
+    echo '<a href="activity_log.php" class="btn secondary">🏠 Ir al Log de Actividades</a>';
     echo '</div>';
-    echo '<div style="margin-top: 30px; font-size: 12px; color: #666;">';
+    echo '<div style="margin-top: 30px; font-size: 12px; color: #6c757d;">';
     echo 'Si el problema persiste, contacte al administrador del sistema.';
     echo '</div>';
     echo '</div>';
