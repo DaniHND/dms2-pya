@@ -194,7 +194,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         $dompdf = new Dompdf($options);
         
-        // Generar HTML optimizado para PDF
+        // Template HTML para PDF optimizado
         $html = '<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -330,14 +330,6 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             border-top: 2px solid #8B4513;
             padding-top: 10px;
         }
-        
-        .page-number {
-            position: fixed;
-            bottom: 1cm;
-            right: 1.5cm;
-            font-size: 8px;
-            color: #666;
-        }
     </style>
 </head>
 <body>
@@ -427,6 +419,9 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
     
     // Vista previa (código original sin cambios)
     header('Content-Type: text/html; charset=UTF-8');
+    
+    // Verificar si viene del modal
+    $isModal = isset($_GET['modal']) && $_GET['modal'] == '1';
     
     $htmlContent = '<!DOCTYPE html>
 <html lang="es">
@@ -652,9 +647,11 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         }
     </style>
 </head>
-<body>
+<body>';
     
-    <!-- Controles solo para vista previa -->
+    // Controles dinámicos según modal
+    if (!$isModal) {
+        $htmlContent .= '
     <div class="controls">
         <button onclick="window.print()" title="Imprimir documento">
             <span>🖨️</span> Imprimir
@@ -665,8 +662,20 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         <button onclick="window.history.back()" title="Volver al log de actividades">
             <span>←</span> Volver
         </button>
-    </div>
+    </div>';
+    } else {
+        $htmlContent .= '
+    <div class="controls" style="position: relative; top: 10px; right: 10px; margin-bottom: 20px;">
+        <button onclick="window.print()" title="Imprimir documento">
+            <span>🖨️</span> Imprimir
+        </button>
+        <button onclick="descargarPDFReal()" title="Descargar archivo PDF">
+            <span>💾</span> Descargar PDF
+        </button>
+    </div>';
+    }
     
+    $htmlContent .= '
     <div class="pdf-container">
         <div class="header">
             <h1>' . htmlspecialchars($title) . '</h1>
@@ -726,11 +735,38 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
     
     <script type="text/javascript">
         function descargarPDFReal() {
-            // Redirigir a la misma URL pero con parámetro de descarga
             var urlActual = window.location.href;
             var nuevaUrl = urlActual + (urlActual.includes("?") ? "&" : "?") + "download=1";
-            window.location.href = nuevaUrl;
-        }
+            ';
+            
+    if ($isModal) {
+        $htmlContent .= 'window.open(nuevaUrl, "_blank");';
+    } else {
+        $htmlContent .= 'window.location.href = nuevaUrl;';
+    }
+    
+    $htmlContent .= '
+        }';
+        
+    if ($isModal) {
+        $htmlContent .= '
+        
+        document.addEventListener("DOMContentLoaded", function() {
+            document.body.style.margin = "0";
+            document.body.style.padding = "10px";
+            document.body.style.backgroundColor = "#ffffff";
+            
+            const container = document.querySelector(".pdf-container");
+            if (container) {
+                container.style.margin = "0";
+                container.style.maxWidth = "100%";
+                container.style.boxShadow = "none";
+                container.style.border = "none";
+            }
+        });';
+    }
+    
+    $htmlContent .= '
     </script>
 </body>
 </html>';

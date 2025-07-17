@@ -172,6 +172,114 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
     <script src="https://unpkg.com/feather-icons"></script>
+    <style>
+        /* Estilos para el modal del PDF */
+        .pdf-modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            overflow: auto;
+        }
+
+        .pdf-modal-content {
+            position: relative;
+            margin: 2% auto;
+            width: 95%;
+            height: 95%;
+            background-color: #fefefe;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .pdf-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: #8B4513;
+            color: white;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .pdf-modal-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .pdf-modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+
+        .pdf-modal-close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .pdf-modal-body {
+            height: calc(100% - 70px);
+            padding: 0;
+        }
+
+        .pdf-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .pdf-loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            flex-direction: column;
+            color: #666;
+        }
+
+        .pdf-loading .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #8B4513;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive para móviles */
+        @media (max-width: 768px) {
+            .pdf-modal-content {
+                margin: 1% auto;
+                width: 98%;
+                height: 98%;
+            }
+            
+            .pdf-modal-header {
+                padding: 10px 15px;
+            }
+            
+            .pdf-modal-title {
+                font-size: 16px;
+            }
+        }
+    </style>
 </head>
 
 <body class="dashboard-layout">
@@ -421,6 +529,23 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         </div>
     </main>
 
+    <!-- Modal para vista previa del PDF -->
+    <div id="pdfModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Log de Actividades</h3>
+                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div class="pdf-loading" id="pdfLoading">
+                    <div class="spinner"></div>
+                    <p>Generando vista previa del PDF...</p>
+                </div>
+                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
@@ -458,17 +583,63 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             const urlParams = new URLSearchParams(window.location.search);
             
             // Construir URL de exportación
-            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&' + urlParams.toString();
+            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&modal=1&' + urlParams.toString();
             
             if (formato === 'pdf') {
-                // Para PDF, navegar directamente en la misma ventana
-                mostrarNotificacion('Generando vista previa del PDF...', 'info');
-                window.location.href = exportUrl;
+                // Para PDF, abrir modal
+                abrirModalPDF(exportUrl);
             } else {
                 // Para CSV y Excel, abrir en nueva ventana para descarga
                 mostrarNotificacion('Preparando descarga de ' + formato.toUpperCase() + '...', 'info');
                 window.open(exportUrl, '_blank');
             }
+        }
+
+        function abrirModalPDF(url) {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            const loading = document.getElementById('pdfLoading');
+            
+            // Mostrar modal
+            modal.style.display = 'block';
+            
+            // Mostrar loading y ocultar iframe
+            loading.style.display = 'flex';
+            iframe.style.display = 'none';
+            
+            // Cargar PDF en iframe
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+            
+            iframe.onerror = function() {
+                loading.innerHTML = '<p style="color: #dc3545;">Error al cargar la vista previa del PDF</p>';
+            };
+            
+            iframe.src = url;
+            
+            // Cerrar modal con Escape
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    cerrarModalPDF();
+                }
+            });
+            
+            // Cerrar modal al hacer clic fuera
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    cerrarModalPDF();
+                }
+            });
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            
+            modal.style.display = 'none';
+            iframe.src = 'about:blank'; // Limpiar iframe
         }
 
         function mostrarNotificacion(mensaje, tipo) {
