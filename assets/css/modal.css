@@ -1,0 +1,111 @@
+        /* Estilos para el modal del PDF */
+        .pdf-modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            overflow: auto;
+        }
+
+        .pdf-modal-content {
+            position: relative;
+            margin: 2% auto;
+            width: 95%;
+            height: 95%;
+            background-color: #fefefe;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .pdf-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: #ecececff;
+            color: white;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .pdf-modal-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .pdf-modal-close {
+            background: none;
+            border: none;
+            color: black;
+            font-size: 35px;
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+
+        .pdf-modal-close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .pdf-modal-body {
+            height: calc(120% - 150px);
+            padding: 0;
+        }
+
+        .pdf-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .pdf-loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            flex-direction: column;
+            color: #666;
+        }
+
+        .pdf-loading .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #8B4513;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Responsive para móviles */
+        @media (max-width: 768px) {
+            .pdf-modal-content {
+                margin: 1% auto;
+                width: 98%;
+                height: 98%;
+            }
+
+            .pdf-modal-header {
+                padding: 10px 15px;
+            }
+
+            .pdf-modal-title {
+                font-size: 16px;
+            }
+        }

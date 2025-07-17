@@ -146,7 +146,7 @@ function translateAction($action)
         'export_pdf' => 'Exportar PDF',
         'export_excel' => 'Exportar Excel'
     ];
-    
+
     return $translations[$action] ?? ucfirst(str_replace('_', ' ', $action));
 }
 
@@ -171,115 +171,9 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
-    <script src="https://unpkg.com/feather-icons"></script>
-    <style>
-        /* Estilos para el modal del PDF */
-        .pdf-modal {
-            display: none;
-            position: fixed;
-            z-index: 10000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            overflow: auto;
-        }
-
-        .pdf-modal-content {
-            position: relative;
-            margin: 2% auto;
-            width: 95%;
-            height: 95%;
-            background-color: #fefefe;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-
-        .pdf-modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 20px;
-            background-color: #ecececff;
-            color: white;
-            border-radius: 8px 8px 0 0;
-        }
-
-        .pdf-modal-title {
-            margin: 0;
-            font-size: 18px;
-            font-weight: 600;
-        }
-
-        .pdf-modal-close {
-            background: none;
-            border: none;
-            color: black;
-            font-size: 35px;
-            cursor: pointer;
-            padding: 5px;
-            border-radius: 4px;
-            transition: background-color 0.3s;
-        }
-
-        .pdf-modal-close:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
-
-        .pdf-modal-body {
-            height: calc(120% - 150px);
-            padding: 0;
-        }
-
-        .pdf-iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            border-radius: 0 0 8px 8px;
-        }
-
-        .pdf-loading {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100%;
-            flex-direction: column;
-            color: #666;
-        }
-
-        .pdf-loading .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #8B4513;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Responsive para móviles */
-        @media (max-width: 768px) {
-            .pdf-modal-content {
-                margin: 1% auto;
-                width: 98%;
-                height: 98%;
-            }
-            
-            .pdf-modal-header {
-                padding: 10px 15px;
-            }
-            
-            .pdf-modal-title {
-                font-size: 16px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="../../assets/css/summary.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
+    <script src="https://unpkg.com/feather-icons"></script>    
 </head>
 
 <body class="dashboard-layout">
@@ -303,8 +197,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="location.reload()">
-                        <i data-feather="refresh-cw"></i>
+                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
+                        <i data-feather="settings"></i>
                     </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                         <i data-feather="log-out"></i>
@@ -323,26 +217,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </a>
             </div>
 
-            <!-- Resumen de resultados -->
-            <div class="results-summary">
-                <div class="summary-stats">
-                    <div class="stat-item">
-                        <i data-feather="activity"></i>
-                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
-                        <span class="stat-label">Total Actividades</span>
-                    </div>
-                    <div class="stat-item">
-                        <i data-feather="calendar"></i>
-                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
-                        <span class="stat-label">Período</span>
-                    </div>
-                    <div class="stat-item">
-                        <i data-feather="users"></i>
-                        <span class="stat-number"><?php echo count($users); ?></span>
-                        <span class="stat-label">Usuarios Activos</span>
-                    </div>
-                </div>
-            </div>
+
 
             <!-- Filtros -->
             <div class="reports-filters">
@@ -391,12 +266,28 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <i data-feather="x"></i>
                             Limpiar
                         </a>
-                        <a href="activity_log.php" class="btn-filter info">
-                            <i data-feather="rotate-ccw"></i>
-                            Todas las Actividades
-                        </a>
                     </div>
                 </form>
+            </div>
+            <!-- Resumen de resultados -->
+            <div class="results-summary">
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <i data-feather="activity"></i>
+                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
+                        <span class="stat-label">Total Actividades</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="calendar"></i>
+                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
+                        <span class="stat-label">Período</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="users"></i>
+                        <span class="stat-number"><?php echo count($users); ?></span>
+                        <span class="stat-label">Usuarios Activos</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Tabla de actividades -->
@@ -404,7 +295,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <div class="table-header">
                     <h3>Registro de Actividades</h3>
                 </div>
-                
+
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -453,7 +344,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                                         </td>
                                         <td>
                                             <div class="description-cell" title="<?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>">
-                                                <?php 
+                                                <?php
                                                 $description = $activity['description'] ?? 'Sin descripción';
                                                 echo htmlspecialchars(strlen($description) > 60 ? substr($description, 0, 60) . '...' : $description);
                                                 ?>
@@ -520,10 +411,6 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         <i data-feather="file"></i>
                         Descargar PDF
                     </button>
-                    <button class="export-btn secondary" onclick="window.print()">
-                        <i data-feather="printer"></i>
-                        Imprimir
-                    </button>
                 </div>
             </div>
         </div>
@@ -581,10 +468,10 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         function exportarDatos(formato) {
             // Obtener parámetros actuales de la URL
             const urlParams = new URLSearchParams(window.location.search);
-            
+
             // Construir URL de exportación
             const exportUrl = 'export.php?format=' + formato + '&type=activity_log&modal=1&' + urlParams.toString();
-            
+
             if (formato === 'pdf') {
                 // Para PDF, abrir modal
                 abrirModalPDF(exportUrl);
@@ -599,33 +486,33 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             const modal = document.getElementById('pdfModal');
             const iframe = document.getElementById('pdfIframe');
             const loading = document.getElementById('pdfLoading');
-            
+
             // Mostrar modal
             modal.style.display = 'block';
-            
+
             // Mostrar loading y ocultar iframe
             loading.style.display = 'flex';
             iframe.style.display = 'none';
-            
+
             // Cargar PDF en iframe
             iframe.onload = function() {
                 loading.style.display = 'none';
                 iframe.style.display = 'block';
             };
-            
+
             iframe.onerror = function() {
                 loading.innerHTML = '<p style="color: #dc3545;">Error al cargar la vista previa del PDF</p>';
             };
-            
+
             iframe.src = url;
-            
+
             // Cerrar modal con Escape
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') {
                     cerrarModalPDF();
                 }
             });
-            
+
             // Cerrar modal al hacer clic fuera
             modal.addEventListener('click', function(e) {
                 if (e.target === modal) {
@@ -637,7 +524,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         function cerrarModalPDF() {
             const modal = document.getElementById('pdfModal');
             const iframe = document.getElementById('pdfIframe');
-            
+
             modal.style.display = 'none';
             iframe.src = 'about:blank'; // Limpiar iframe
         }
@@ -657,9 +544,9 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 font-family: Arial, sans-serif;
             `;
             notification.textContent = mensaje;
-            
+
             document.body.appendChild(notification);
-            
+
             setTimeout(() => {
                 if (notification.parentElement) {
                     notification.remove();
