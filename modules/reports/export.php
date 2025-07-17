@@ -118,6 +118,119 @@ function exportActivityLog($currentUser, $params, $format) {
     ];
 }
 
+// Función para exportar reportes de usuarios
+function exportUserReports($currentUser, $params, $format) {
+    $dateFrom = $params['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+    $dateTo = $params['date_to'] ?? date('Y-m-d');
+    $selectedUserId = $params['user_id'] ?? '';
+    
+    if ($currentUser['role'] === 'admin') {
+        // Admin puede exportar todos los usuarios o uno específico
+        $query = "SELECT u.id, u.username, u.first_name, u.last_name, u.email, u.role, 
+                         u.last_login, u.created_at, c.name as company_name,
+                         (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
+                          AND al.created_at >= ? AND al.created_at <= ?) as activity_count,
+                         (SELECT COUNT(*) FROM documents d WHERE d.user_id = u.id 
+                          AND d.created_at >= ? AND d.created_at <= ?) as documents_uploaded,
+                         (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
+                          AND al.action = 'download' AND al.created_at >= ? AND al.created_at <= ?) as downloads_count
+                  FROM users u
+                  LEFT JOIN companies c ON u.company_id = c.id
+                  WHERE u.status = 'active'";
+        
+        $queryParams = [
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59',
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59',
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59'
+        ];
+        
+        if (!empty($selectedUserId)) {
+            $query .= " AND u.id = ?";
+            $queryParams[] = $selectedUserId;
+        }
+        
+        $query .= " ORDER BY activity_count DESC, u.first_name";
+        
+    } else {
+        // Usuario normal solo puede exportar sus propios datos
+        // Validación de seguridad: si especifica otro usuario, ignorarlo
+        if (!empty($selectedUserId) && $selectedUserId != $currentUser['id']) {
+            throw new Exception('Acceso denegado: No puede exportar datos de otros usuarios');
+        }
+        
+        $query = "SELECT u.id, u.username, u.first_name, u.last_name, u.email, u.role, 
+                         u.last_login, u.created_at, c.name as company_name,
+                         (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
+                          AND al.created_at >= ? AND al.created_at <= ?) as activity_count,
+                         (SELECT COUNT(*) FROM documents d WHERE d.user_id = u.id 
+                          AND d.created_at >= ? AND d.created_at <= ?) as documents_uploaded,
+                         (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
+                          AND al.action = 'download' AND al.created_at >= ? AND al.created_at <= ?) as downloads_count
+                  FROM users u
+                  LEFT JOIN companies c ON u.company_id = c.id
+                  WHERE u.status = 'active' AND u.id = ?";
+        
+        $queryParams = [
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59',
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59',
+            $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59',
+            $currentUser['id']
+        ];
+    }
+    
+    try {
+        $data = fetchAll($query, $queryParams);
+    } catch (Exception $e) {
+        error_log("Error en consulta de exportación de usuarios: " . $e->getMessage());
+        $data = [];
+    }
+    
+    $headers = [
+        'Nombre Completo',
+        'Usuario',
+        'Email',
+        'Empresa',
+        'Rol',
+        'Actividades',
+        'Documentos Subidos',
+        'Descargas',
+        'Último Acceso',
+        'Fecha Registro'
+    ];
+    
+    $rows = [];
+    foreach ($data as $row) {
+        $rows[] = [
+            trim($row['first_name'] . ' ' . $row['last_name']),
+            $row['username'],
+            $row['email'],
+            $row['company_name'] ?? 'N/A',
+            ucfirst($row['role']),
+            number_format($row['activity_count']),
+            number_format($row['documents_uploaded']),
+            number_format($row['downloads_count']),
+            $row['last_login'] ? date('d/m/Y H:i:s', strtotime($row['last_login'])) : 'Nunca',
+            date('d/m/Y', strtotime($row['created_at']))
+        ];
+    }
+    
+    $filename = 'reporte_usuarios_' . date('Y-m-d_H-i-s');
+    if (!empty($selectedUserId)) {
+        $filename = 'reporte_usuario_' . $selectedUserId . '_' . date('Y-m-d_H-i-s');
+    } elseif ($currentUser['role'] !== 'admin') {
+        $filename = 'mis_estadisticas_' . date('Y-m-d_H-i-s');
+    }
+    
+    $title = $currentUser['role'] === 'admin' ? 'Reporte de Usuarios' : 'Mis Estadísticas';
+    
+    return [
+        'headers' => $headers, 
+        'rows' => $rows, 
+        'filename' => $filename,
+        'title' => $title
+    ];
+}
+
 // Función para generar CSV
 function generateCSV($headers, $rows, $filename) {
     header('Content-Type: text/csv; charset=UTF-8');
@@ -154,7 +267,7 @@ function generateExcel($headers, $rows, $filename) {
     echo '<head>';
     echo '<meta charset="UTF-8">';
     echo '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
-    echo '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Actividades</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->';
+    echo '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Datos</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->';
     echo '</head>';
     echo '<body>';
     echo '<table border="1">';
@@ -268,7 +381,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 9px;
+            font-size: 8px;
             margin-top: 15px;
             border-radius: 8px;
             overflow: hidden;
@@ -276,7 +389,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         th, td {
             border: 1px solid #e1e5e9;
-            padding: 8px 6px;
+            padding: 6px 4px;
             text-align: left;
             vertical-align: top;
         }
@@ -286,8 +399,8 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             color: white;
             font-weight: 600;
             text-align: center;
-            font-size: 10px;
-            padding: 12px 8px;
+            font-size: 8px;
+            padding: 8px 4px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -298,39 +411,6 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         tr:nth-child(odd) {
             background-color: white;
-        }
-        
-        .col-fecha {
-            width: 15%;
-            font-weight: bold;
-            color: #495057;
-            font-size: 8px;
-        }
-        
-        .col-nombre {
-            width: 25%;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-        
-        .col-usuario {
-            width: 15%;
-            font-style: italic;
-            color: #6c757d;
-            font-size: 8px;
-        }
-        
-        .col-empresa {
-            width: 20%;
-            color: #495057;
-            font-weight: 500;
-        }
-        
-        .col-descripcion {
-            width: 25%;
-            word-wrap: break-word;
-            font-size: 8px;
-            line-height: 1.3;
         }
         
         .footer {
@@ -378,17 +458,14 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         foreach ($rows as $index => $row) {
             $html .= '<tr>';
-            $html .= '<td class="col-fecha">' . htmlspecialchars($row[0]) . '</td>';
-            $html .= '<td class="col-nombre">' . htmlspecialchars($row[1]) . '</td>';
-            $html .= '<td class="col-usuario">@' . htmlspecialchars($row[2]) . '</td>';
-            $html .= '<td class="col-empresa">' . htmlspecialchars($row[3]) . '</td>';
-            
-            // Truncar descripción si es muy larga
-            $descripcion = $row[4];
-            if (strlen($descripcion) > 80) {
-                $descripcion = substr($descripcion, 0, 80) . '...';
+            foreach ($row as $cellIndex => $cell) {
+                // Truncar texto muy largo para PDF
+                $cellContent = $cell;
+                if (strlen($cellContent) > 50) {
+                    $cellContent = substr($cellContent, 0, 50) . '...';
+                }
+                $html .= '<td>' . htmlspecialchars($cellContent) . '</td>';
             }
-            $html .= '<td class="col-descripcion">' . htmlspecialchars($descripcion) . '</td>';
             $html .= '</tr>';
         }
         
@@ -502,7 +579,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         }
         
         .controls button:nth-child(2) {
-            border-radius: 0 10px 10px 0;
+            border-radius: 0;
             background: linear-gradient(135deg, #43a047 0%, #388e3c 100%);
         }
         
@@ -571,7 +648,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         table { 
             width: 100%; 
             border-collapse: collapse; 
-            font-size: 10px;
+            font-size: 9px;
             margin-top: 15px;
             border-radius: 10px;
             overflow: hidden;
@@ -580,7 +657,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         th, td { 
             border: 1px solid #e1e5e9; 
-            padding: 10px 8px; 
+            padding: 8px 6px; 
             text-align: left; 
             vertical-align: top;
             word-wrap: break-word;
@@ -590,9 +667,9 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             background: linear-gradient(135deg, #4e342e 0%, #6d534eff 100%);
             color: white; 
             font-weight: 600;
-            font-size: 11px;
+            font-size: 10px;
             text-align: center;
-            padding: 15px 8px;
+            padding: 12px 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             text-shadow: 0 1px 2px rgba(0,0,0,0.1);
@@ -610,42 +687,6 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
             background-color: #e3f2fd;
             transform: scale(1.001);
             transition: all 0.2s ease;
-        }
-        
-        .col-fecha {
-            width: 18%;
-            font-weight: 600;
-            color: #495057;
-            font-size: 9px;
-            white-space: nowrap;
-        }
-        
-        .col-nombre {
-            width: 25%;
-            font-weight: 600;
-            font-size: 10px;
-            color: #2c3e50;
-        }
-        
-        .col-usuario {
-            width: 15%;
-            font-style: italic;
-            color: #6c757d;
-            font-size: 9px;
-        }
-        
-        .col-empresa {
-            width: 20%;
-            color: #495057;
-            font-size: 10px;
-            font-weight: 500;
-        }
-        
-        .col-descripcion {
-            width: 22%;
-            font-size: 9px;
-            line-height: 1.4;
-            word-break: break-word;
         }
         
         .footer {
@@ -690,7 +731,7 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         <button onclick="descargarPDFReal()" title="Descargar archivo PDF">
             <span></span> Descargar PDF
         </button>
-        <button onclick="window.history.back()" title="Volver al log de actividades">
+        <button onclick="window.history.back()" title="Volver a reportes">
             <span>←</span> Volver
         </button>
     </div>';
@@ -728,29 +769,26 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         
         <table>
             <thead>
-                <tr>
-                    <th>Fecha/Hora</th>
-                    <th>Nombre Completo</th>
-                    <th>Usuario</th>
-                    <th>Empresa</th>
-                    <th>Descripción</th>
-                </tr>
+                <tr>';
+    
+    foreach ($headers as $header) {
+        $htmlContent .= '<th>' . htmlspecialchars($header) . '</th>';
+    }
+    
+    $htmlContent .= '</tr>
             </thead>
             <tbody>';
     
     foreach ($rows as $row) {
         $htmlContent .= '<tr>';
-        $htmlContent .= '<td class="col-fecha">' . htmlspecialchars($row[0]) . '</td>';
-        $htmlContent .= '<td class="col-nombre">' . htmlspecialchars($row[1]) . '</td>';
-        $htmlContent .= '<td class="col-usuario">@' . htmlspecialchars($row[2]) . '</td>';
-        $htmlContent .= '<td class="col-empresa">' . htmlspecialchars($row[3]) . '</td>';
-        
-        // Descripción truncada para el modal
-        $descripcion = $row[4];
-        if (strlen($descripcion) > 100) {
-            $descripcion = substr($descripcion, 0, 100) . '...';
+        foreach ($row as $cell) {
+            // Truncar descripción para el modal
+            $cellContent = $cell;
+            if (strlen($cellContent) > 80) {
+                $cellContent = substr($cellContent, 0, 80) . '...';
+            }
+            $htmlContent .= '<td>' . htmlspecialchars($cellContent) . '</td>';
         }
-        $htmlContent .= '<td class="col-descripcion">' . htmlspecialchars($descripcion) . '</td>';
         $htmlContent .= '</tr>';
     }
     
@@ -834,6 +872,10 @@ try {
             $exportData = exportActivityLog($currentUser, $_GET, $format);
             break;
         
+        case 'user_reports':
+            $exportData = exportUserReports($currentUser, $_GET, $format);
+            break;
+        
         default:
             throw new Exception('Tipo de reporte no válido: ' . $type);
     }
@@ -893,7 +935,11 @@ try {
     echo '</div>';
     echo '<div>';
     echo '<a href="javascript:history.back()" class="btn">← Volver</a>';
-    echo '<a href="activity_log.php" class="btn secondary">🏠 Ir al Log de Actividades</a>';
+    
+    // Determinar la página de retorno según el tipo
+    $returnPage = ($type === 'user_reports') ? 'user_reports.php' : 'activity_log.php';
+    echo '<a href="' . $returnPage . '" class="btn secondary">🏠 Ir a Reportes</a>';
+    
     echo '</div>';
     echo '<div style="margin-top: 30px; font-size: 12px; color: #6c757d;">';
     echo 'Si el problema persiste, contacte al administrador del sistema.';

@@ -1,6 +1,6 @@
 <?php
 // modules/reports/user_reports.php
-// Reportes por usuario - DMS2
+// Reportes por usuario con seguridad y sin vista previa - DMS2
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -16,9 +16,10 @@ $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
 $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 
 // Función para obtener usuarios con estadísticas
-function getUsersWithStats($currentUser, $dateFrom, $dateTo)
+function getUsersWithStats($currentUser, $dateFrom, $dateTo, $selectedUserId = '')
 {
     if ($currentUser['role'] === 'admin') {
+        // Admin puede ver todos los usuarios
         $query = "SELECT u.id, u.username, u.first_name, u.last_name, u.email, u.role, 
                          u.last_login, u.created_at, c.name as company_name,
                          (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
@@ -29,13 +30,22 @@ function getUsersWithStats($currentUser, $dateFrom, $dateTo)
                           AND al.action = 'download' AND al.created_at >= :date_from AND al.created_at <= :date_to) as downloads_count
                   FROM users u
                   LEFT JOIN companies c ON u.company_id = c.id
-                  WHERE u.status = 'active'
-                  ORDER BY activity_count DESC, u.first_name";
+                  WHERE u.status = 'active'";
+        
         $params = [
             'date_from' => $dateFrom . ' 00:00:00',
             'date_to' => $dateTo . ' 23:59:59'
         ];
+        
+        if (!empty($selectedUserId)) {
+            $query .= " AND u.id = :selected_user_id";
+            $params['selected_user_id'] = $selectedUserId;
+        }
+        
+        $query .= " ORDER BY activity_count DESC, u.first_name";
+        
     } else {
+        // Usuario normal solo puede ver sus propios datos
         $query = "SELECT u.id, u.username, u.first_name, u.last_name, u.email, u.role, 
                          u.last_login, u.created_at, c.name as company_name,
                          (SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id 
@@ -46,12 +56,12 @@ function getUsersWithStats($currentUser, $dateFrom, $dateTo)
                           AND al.action = 'download' AND al.created_at >= :date_from AND al.created_at <= :date_to) as downloads_count
                   FROM users u
                   LEFT JOIN companies c ON u.company_id = c.id
-                  WHERE u.status = 'active' AND u.company_id = :company_id
-                  ORDER BY activity_count DESC, u.first_name";
+                  WHERE u.status = 'active' AND u.id = :current_user_id";
+        
         $params = [
             'date_from' => $dateFrom . ' 00:00:00',
             'date_to' => $dateTo . ' 23:59:59',
-            'company_id' => $currentUser['company_id']
+            'current_user_id' => $currentUser['id']
         ];
     }
 
@@ -59,8 +69,13 @@ function getUsersWithStats($currentUser, $dateFrom, $dateTo)
 }
 
 // Función para obtener actividad detallada de un usuario
-function getUserActivity($userId, $dateFrom, $dateTo, $limit = 20)
+function getUserActivity($userId, $dateFrom, $dateTo, $currentUser, $limit = 20)
 {
+    // Solo admin puede ver actividad de otros usuarios
+    if ($currentUser['role'] !== 'admin' && $userId != $currentUser['id']) {
+        return []; // Usuario normal no puede ver actividad de otros
+    }
+    
     $query = "SELECT al.*, 
                      CASE 
                          WHEN al.table_name = 'documents' THEN d.name
@@ -85,13 +100,20 @@ function getUserActivity($userId, $dateFrom, $dateTo, $limit = 20)
 }
 
 // Función para obtener estadísticas por acción de un usuario
-function getUserActionStats($userId, $dateFrom, $dateTo)
+function getUserActionStats($userId, $dateFrom, $dateTo, $currentUser)
 {
+    // Solo admin puede ver estadísticas de otros usuarios
+    if ($currentUser['role'] !== 'admin' && $userId != $currentUser['id']) {
+        return []; // Usuario normal no puede ver estadísticas de otros
+    }
+    
+    // Filtrar solo las acciones que queremos mostrar en el gráfico
     $query = "SELECT action, COUNT(*) as count
               FROM activity_logs
               WHERE user_id = :user_id 
               AND created_at >= :date_from 
               AND created_at <= :date_to
+              AND action IN ('upload', 'download', 'view')
               GROUP BY action
               ORDER BY count DESC";
 
@@ -104,14 +126,41 @@ function getUserActionStats($userId, $dateFrom, $dateTo)
     return fetchAll($query, $params);
 }
 
-$users = getUsersWithStats($currentUser, $dateFrom, $dateTo);
+// Función para obtener total de usuarios
+function getTotalUsers($currentUser, $dateFrom, $dateTo, $selectedUserId)
+{
+    if ($currentUser['role'] === 'admin') {
+        if ($selectedUserId) {
+            return 1; // Si hay un usuario específico, siempre es 1
+        }
+        $query = "SELECT COUNT(*) as total FROM users WHERE status = 'active'";
+        $params = [];
+    } else {
+        // Usuario normal solo puede ver sus propios datos
+        return 1;
+    }
+    
+    $result = fetchOne($query, $params);
+    return $result['total'] ?? 0;
+}
+
+$users = getUsersWithStats($currentUser, $dateFrom, $dateTo, $selectedUserId);
+$totalUsers = getTotalUsers($currentUser, $dateFrom, $dateTo, $selectedUserId);
 $selectedUserActivity = [];
 $selectedUserActionStats = [];
 $selectedUserInfo = null;
 
+// Validación de seguridad para usuario seleccionado
 if ($selectedUserId) {
-    $selectedUserActivity = getUserActivity($selectedUserId, $dateFrom, $dateTo);
-    $selectedUserActionStats = getUserActionStats($selectedUserId, $dateFrom, $dateTo);
+    // Si no es admin, solo puede ver sus propios datos
+    if ($currentUser['role'] !== 'admin' && $selectedUserId != $currentUser['id']) {
+        // Redirigir con mensaje de error de seguridad
+        header('Location: user_reports.php?error=access_denied');
+        exit();
+    }
+    
+    $selectedUserActivity = getUserActivity($selectedUserId, $dateFrom, $dateTo, $currentUser);
+    $selectedUserActionStats = getUserActionStats($selectedUserId, $dateFrom, $dateTo, $currentUser);
 
     // Buscar información del usuario seleccionado
     foreach ($users as $user) {
@@ -136,13 +185,16 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
+    <link rel="stylesheet" href="../../assets/css/summary.css">
+
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-
     <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
@@ -182,6 +234,30 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                 </a>
             </div>
 
+            <!-- Mensaje de error de acceso denegado -->
+            <?php if (isset($_GET['error']) && $_GET['error'] === 'access_denied'): ?>
+                <div class="error-message">
+                    <i data-feather="alert-triangle"></i>
+                    <span>Acceso denegado: Solo puede ver sus propios datos de usuario.</span>
+                </div>
+            <?php endif; ?>
+
+            <!-- Resumen de resultados -->
+            <div class="results-summary">
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <i data-feather="users"></i>
+                        <span class="stat-number"><?php echo number_format($totalUsers); ?></span>
+                        <span class="stat-label"><?php echo $currentUser['role'] === 'admin' ? 'Total Usuarios' : 'Mis Datos'; ?></span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="calendar"></i>
+                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
+                        <span class="stat-label">Período</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Filtros -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>
@@ -195,18 +271,24 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                             <label for="date_to">Hasta</label>
                             <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>">
                         </div>
-                        <div class="filter-group">
-                            <label for="user_id">Usuario Específico</label>
-                            <select id="user_id" name="user_id">
-                                <option value="">Ver todos los usuarios</option>
-                                <?php foreach ($users as $user): ?>
-                                    <option value="<?php echo $user['id']; ?>"
-                                        <?php echo $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
+                        <?php if ($currentUser['role'] === 'admin'): ?>
+                            <div class="filter-group">
+                                <label for="user_id">Usuario Específico</label>
+                                <select id="user_id" name="user_id">
+                                    <option value="">Ver todos los usuarios</option>
+                                    <?php 
+                                    // Obtener todos los usuarios para el select (solo admin)
+                                    $allUsers = getUsersWithStats($currentUser, $dateFrom, $dateTo);
+                                    foreach ($allUsers as $user): 
+                                    ?>
+                                        <option value="<?php echo $user['id']; ?>"
+                                            <?php echo $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        <?php endif; ?>
                     </div>
                     <div class="filters-actions">
                         <button type="submit" class="btn-filter">
@@ -260,65 +342,19 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                     </div>
 
                     <!-- Gráfico de acciones del usuario -->
-                    <div class="user-chart-section">
-                        <h3>Distribución de Acciones</h3>
-                        <canvas id="userActionsChart"></canvas>
-                    </div>
-
-                    <!-- Actividad reciente del usuario -->
-                    <div class="user-activity-section">
-                        <h3>Actividad Reciente</h3>
-                        <div class="activity-list">
-                            <?php if (empty($selectedUserActivity)): ?>
-                                <div class="empty-state">
-                                    <i data-feather="activity"></i>
-                                    <p>No hay actividad para mostrar en el rango de fechas seleccionado</p>
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($selectedUserActivity as $activity): ?>
-                                    <div class="activity-item">
-                                        <div class="activity-icon">
-                                            <?php
-                                            $iconMap = [
-                                                'login' => 'log-in',
-                                                'logout' => 'log-out',
-                                                'upload' => 'upload',
-                                                'download' => 'download',
-                                                'delete' => 'trash-2',
-                                                'view' => 'eye',
-                                                'create' => 'plus',
-                                                'update' => 'edit'
-                                            ];
-                                            $icon = $iconMap[$activity['action']] ?? 'activity';
-                                            ?>
-                                            <i data-feather="<?php echo $icon; ?>"></i>
-                                        </div>
-                                        <div class="activity-details">
-                                            <div class="activity-action">
-                                                <span class="status-badge <?php echo getActionClass($activity['action']); ?>">
-                                                    <?php echo htmlspecialchars(ucfirst($activity['action'])); ?>
-                                                </span>
-                                            </div>
-                                            <div class="activity-description">
-                                                <?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>
-                                                <?php if ($activity['document_name']): ?>
-                                                    <br><small>Documento: <?php echo htmlspecialchars($activity['document_name']); ?></small>
-                                                <?php endif; ?>
-                                            </div>
-                                            <div class="activity-time">
-                                                <?php echo date('d/m/Y H:i', strtotime($activity['created_at'])); ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+                    <?php if (!empty($selectedUserActionStats)): ?>
+                        <div class="user-chart-section">
+                            <h3>Distribución de Acciones</h3>
+                            <canvas id="userActionsChart"></canvas>
                         </div>
-                    </div>
+                    <?php endif; ?>
+
+                    
                 </div>
             <?php else: ?>
                 <!-- Tabla de usuarios con estadísticas -->
                 <div class="reports-table">
-                    <h3>Usuarios y sus Estadísticas (<?php echo count($users); ?> usuarios)</h3>
+                    <h3><?php echo $currentUser['role'] === 'admin' ? 'Usuarios y sus Estadísticas (' . count($users) . ' usuarios)' : 'Mis Estadísticas'; ?></h3>
                     <div class="table-container">
                         <table class="data-table">
                             <thead>
@@ -330,13 +366,15 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                                     <th>Documentos</th>
                                     <th>Descargas</th>
                                     <th>Último Acceso</th>
-                                    <th>Acciones</th>
+                                    <?php if ($currentUser['role'] === 'admin'): ?>
+                                        <th>Acciones</th>
+                                    <?php endif; ?>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php if (empty($users)): ?>
                                     <tr>
-                                        <td colspan="8" class="empty-state">
+                                        <td colspan="<?php echo $currentUser['role'] === 'admin' ? '8' : '7'; ?>" class="empty-state">
                                             <i data-feather="users"></i>
                                             <p>No se encontraron usuarios</p>
                                         </td>
@@ -378,12 +416,14 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                                                     <span class="text-muted">Nunca</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
-                                                <a href="?user_id=<?php echo $user['id']; ?>&date_from=<?php echo $dateFrom; ?>&date_to=<?php echo $dateTo; ?>"
-                                                    class="btn-action" title="Ver detalles">
-                                                    <i data-feather="eye"></i>
-                                                </a>
-                                            </td>
+                                            <?php if ($currentUser['role'] === 'admin'): ?>
+                                                <td>
+                                                    <a href="?user_id=<?php echo $user['id']; ?>&date_from=<?php echo $dateFrom; ?>&date_to=<?php echo $dateTo; ?>"
+                                                        class="btn-action" title="Ver detalles">
+                                                        <i data-feather="eye"></i>
+                                                    </a>
+                                                </td>
+                                            <?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
@@ -397,22 +437,39 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
             <div class="export-section">
                 <h3>Exportar Datos</h3>
                 <div class="export-buttons">
-                    <button class="export-btn" onclick="exportData('csv')">
+                    <button class="export-btn" onclick="exportarDatos('csv')">
                         <i data-feather="file-text"></i>
-                        Exportar CSV
+                        Descargar CSV
                     </button>
-                    <button class="export-btn" onclick="exportData('excel')">
+                    <button class="export-btn" onclick="exportarDatos('excel')">
                         <i data-feather="grid"></i>
-                        Exportar Excel
+                        Descargar Excel
                     </button>
-                    <button class="export-btn" onclick="printReport()">
-                        <i data-feather="printer"></i>
-                        Imprimir
+                    <button class="export-btn" onclick="exportarDatos('pdf')">
+                        <i data-feather="file"></i>
+                        Descargar PDF
                     </button>
                 </div>
             </div>
         </div>
     </main>
+
+    <!-- Modal para vista previa del PDF -->
+    <div id="pdfModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Reportes de Usuarios</h3>
+                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div class="pdf-loading" id="pdfLoading">
+                    <div class="spinner"></div>
+                    <p>Generando vista previa del PDF...</p>
+                </div>
+                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Variables de configuración
@@ -433,22 +490,37 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
         function initUserActionsChart() {
             const ctx = document.getElementById('userActionsChart').getContext('2d');
 
-            const labels = userActionStats.map(item => item.action.charAt(0).toUpperCase() + item.action.slice(1));
+            // Mapear acciones a etiquetas más descriptivas
+            const actionLabels = {
+                'upload': 'Subir Archivos',
+                'download': 'Descargar Archivos', 
+                'view': 'Ver Documentos'
+            };
+
+            const labels = userActionStats.map(item => actionLabels[item.action] || item.action);
             const data = userActionStats.map(item => parseInt(item.count));
 
-            const colors = [
-                '#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887',
-                '#F4A460', '#DAA520', '#B8860B', '#9ACD32', '#6B8E23'
-            ];
+            // Colores específicos para cada acción
+            const actionColors = {
+                'upload': '#10b981',    // Verde para subidas
+                'download': '#3b82f6',  // Azul para descargas
+                'view': '#8b5cf6'       // Morado para visualizaciones
+            };
+
+            const colors = userActionStats.map(item => actionColors[item.action] || '#8B4513');
 
             new Chart(ctx, {
-                type: 'doughnut',
+                type: 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
+                        label: 'Cantidad de Acciones',
                         data: data,
-                        backgroundColor: colors.slice(0, data.length),
-                        borderWidth: 0
+                        backgroundColor: colors,
+                        borderColor: colors.map(color => color + 'CC'), // Añadir transparencia al borde
+                        borderWidth: 2,
+                        borderRadius: 8,
+                        borderSkipped: false
                     }]
                 },
                 options: {
@@ -456,12 +528,76 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 20,
-                                usePointStyle: true
+                            display: false // Ocultar leyenda en gráfico de barras
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed.y || 0;
+                                    return `${label}: ${value} acciones`;
+                                }
+                            },
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            cornerRadius: 6
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1,
+                                font: {
+                                    size: 11
+                                },
+                                color: '#6b7280'
+                            },
+                            grid: {
+                                color: '#e5e7eb',
+                                drawBorder: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Número de Acciones',
+                                font: {
+                                    size: 12,
+                                    weight: 'bold'
+                                },
+                                color: '#374151'
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                font: {
+                                    size: 11,
+                                    weight: '500'
+                                },
+                                color: '#374151'
+                            },
+                            grid: {
+                                display: false
                             }
                         }
+                    },
+                    elements: {
+                        bar: {
+                            borderRadius: {
+                                topLeft: 8,
+                                topRight: 8,
+                                bottomLeft: 0,
+                                bottomRight: 0
+                            }
+                        }
+                    },
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeInOutQuart'
+                    },
+                    onHover: {
+                        mode: 'nearest',
+                        intersect: false
                     }
                 }
             });
@@ -491,18 +627,110 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
             }
         }
 
-        function exportData(format) {
-            const url = `export.php?format=${format}&type=user_reports&${new URLSearchParams(currentFilters).toString()}`;
-            window.open(url, '_blank');
+        function exportarDatos(formato) {
+            // Obtener parámetros actuales de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Construir URL de exportación
+            const exportUrl = 'export.php?format=' + formato + '&type=user_reports&modal=1&' + urlParams.toString();
+
+            if (formato === 'pdf') {
+                // Para PDF, abrir modal
+                abrirModalPDF(exportUrl);
+            } else {
+                // Para CSV y Excel, abrir en nueva ventana para descarga
+                mostrarNotificacion('Preparando descarga...', 'info');
+                window.open(exportUrl.replace('&modal=1', ''), '_blank');
+            }
         }
 
-        function printReport() {
-            window.print();
+        function abrirModalPDF(url) {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            const loading = document.getElementById('pdfLoading');
+
+            // Mostrar modal y loading
+            modal.style.display = 'block';
+            loading.style.display = 'flex';
+            iframe.style.display = 'none';
+
+            // Cargar PDF en iframe
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+
+            iframe.onerror = function() {
+                loading.innerHTML = '<div class="spinner"></div><p>Error al cargar la vista previa. <a href="' + url.replace('&modal=1', '&download=1') + '" target="_blank">Descargar PDF directamente</a></p>';
+            };
+
+            iframe.src = url;
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            
+            modal.style.display = 'none';
+            iframe.src = '';
+        }
+
+        function mostrarNotificacion(mensaje, tipo = 'info') {
+            // Crear elemento de notificación
+            const notification = document.createElement('div');
+            notification.className = `notification-toast ${tipo}`;
+            notification.innerHTML = `
+                <i data-feather="${getNotificationIcon(tipo)}"></i>
+                <span>${mensaje}</span>
+                <button onclick="this.parentElement.remove()">
+                    <i data-feather="x"></i>
+                </button>
+            `;
+
+            // Agregar al DOM
+            document.body.appendChild(notification);
+            feather.replace();
+
+            // Mostrar animación
+            setTimeout(() => notification.classList.add('visible'), 100);
+
+            // Auto-remover después de 5 segundos
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.classList.remove('visible');
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, 5000);
+        }
+
+        function getNotificationIcon(tipo) {
+            const icons = {
+                'success': 'check-circle',
+                'error': 'alert-circle',
+                'warning': 'alert-triangle',
+                'info': 'info'
+            };
+            return icons[tipo] || 'info';
         }
 
         function showComingSoon(feature) {
-            alert(`${feature} - Próximamente`);
+            mostrarNotificacion(`${feature} - Próximamente`, 'info');
         }
+
+        // Cerrar modal al hacer clic fuera
+        window.onclick = function(event) {
+            const modal = document.getElementById('pdfModal');
+            if (event.target === modal) {
+                cerrarModalPDF();
+            }
+        }
+
+        // Cerrar modal con Escape
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                cerrarModalPDF();
+            }
+        });
 
         // Responsive
         window.addEventListener('resize', function() {
@@ -527,7 +755,9 @@ function getActionClass($action)
         'delete' => 'error',
         'create' => 'success',
         'update' => 'warning',
-        'view' => 'info'
+        'view' => 'info',
+        'admin' => 'error',
+        'user' => 'info'
     ];
 
     return $classes[$action] ?? 'info';
