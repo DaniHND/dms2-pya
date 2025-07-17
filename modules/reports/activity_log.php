@@ -19,7 +19,7 @@ $page = intval($_GET['page'] ?? 1);
 $limit = 50;
 $offset = ($page - 1) * $limit;
 
-// Función para obtener actividades con filtros
+// Función para obtener actividades con filtros - VERSIÓN CORREGIDA
 function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset)
 {
     $whereConditions = [];
@@ -51,21 +51,24 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limi
 
     $whereClause = implode(' AND ', $whereConditions);
 
-    // Query principal
+    // Query principal - SIN LIMIT en los parámetros
     $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
               LEFT JOIN companies c ON u.company_id = c.id
               WHERE $whereClause
               ORDER BY al.created_at DESC
-              LIMIT :limit OFFSET :offset";
+              LIMIT $limit OFFSET $offset";
 
-    $params['limit'] = $limit;
-    $params['offset'] = $offset;
-
-    return fetchAll($query, $params);
+    // NO incluir limit y offset en $params
+    try {
+        $result = fetchAll($query, $params);
+        return $result ?: []; // Devolver array vacío si es false
+    } catch (Exception $e) {
+        error_log("Error en getActivities: " . $e->getMessage());
+        return []; // Devolver array vacío en caso de error
+    }
 }
-
 // Función para obtener el total de registros
 function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
 {
@@ -173,7 +176,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <link rel="stylesheet" href="../../assets/css/reports.css">
     <link rel="stylesheet" href="../../assets/css/summary.css">
     <link rel="stylesheet" href="../../assets/css/modal.css">
-    <script src="https://unpkg.com/feather-icons"></script>    
+    <link rel="stylesheet" href="../../assets/css/vista_filtro.css">
+    <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body class="dashboard-layout">
@@ -188,7 +192,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Log de Actividades</h1>
+                <h1>Actividades</h1>
             </div>
 
             <div class="header-right">
@@ -217,7 +221,21 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </a>
             </div>
 
-
+            <!-- Resumen de resultados -->
+            <div class="results-summary">
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <i data-feather="activity"></i>
+                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
+                        <span class="stat-label">Total Actividades</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="calendar"></i>
+                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
+                        <span class="stat-label">Período</span>
+                    </div>
+                </div>
+            </div>
 
             <!-- Filtros -->
             <div class="reports-filters">
@@ -268,133 +286,87 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         </a>
                     </div>
                 </form>
-            </div>
-            <!-- Resumen de resultados -->
-            <div class="results-summary">
-                <div class="summary-stats">
-                    <div class="stat-item">
-                        <i data-feather="activity"></i>
-                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
-                        <span class="stat-label">Total Actividades</span>
-                    </div>
-                    <div class="stat-item">
-                        <i data-feather="calendar"></i>
-                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
-                        <span class="stat-label">Período</span>
-                    </div>
-                    <div class="stat-item">
-                        <i data-feather="users"></i>
-                        <span class="stat-number"><?php echo count($users); ?></span>
-                        <span class="stat-label">Usuarios Activos</span>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Tabla de actividades -->
-            <div class="reports-table">
-                <div class="table-header">
-                    <h3>Registro de Actividades</h3>
-                </div>
-
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Fecha/Hora</th>
-                                <th>Usuario</th>
-                                <th>Empresa</th>
-                                <th>Acción</th>
-                                <th>Descripción</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($activities)): ?>
-                                <tr>
-                                    <td colspan="5" class="empty-state">
-                                        <div class="empty-content">
-                                            <i data-feather="search"></i>
-                                            <p>No se encontraron actividades con los filtros seleccionados</p>
-                                            <a href="activity_log.php" class="btn-secondary">Ver Todas las Actividades</a>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php else: ?>
-                                <?php foreach ($activities as $activity): ?>
-                                    <tr>
-                                        <td>
-                                            <div class="datetime-cell">
-                                                <strong><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></strong>
-                                                <small><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></small>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="user-cell">
-                                                <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
-                                                <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="company-name"><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="status-badge <?php echo getActionClass($activity['action']); ?>">
-                                                <i data-feather="<?php echo getActionIcon($activity['action']); ?>"></i>
-                                                <?php echo htmlspecialchars(translateAction($activity['action'])); ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div class="description-cell" title="<?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>">
-                                                <?php
-                                                $description = $activity['description'] ?? 'Sin descripción';
-                                                echo htmlspecialchars(strlen($description) > 60 ? substr($description, 0, 60) . '...' : $description);
-                                                ?>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Paginación -->
-                <?php if ($totalPages > 1): ?>
-                    <div class="pagination">
-                        <div class="pagination-info">
-                            Mostrando <?php echo number_format(($page - 1) * $limit + 1); ?> -
-                            <?php echo number_format(min($page * $limit, $totalActivities)); ?>
-                            de <?php echo number_format($totalActivities); ?> registros
+                <!-- Vista Previa de Resultados (solo se muestra cuando hay filtros aplicados) -->
+                <?php if (!empty($_GET['date_from']) || !empty($_GET['user_id']) || !empty($_GET['action'])): ?>
+                    <div class="filter-preview">
+                        <div class="preview-header">
+                            <h4>
+                                <i data-feather="list"></i>
+                                Vista Previa de Resultados
+                            </h4>
+                            <span class="preview-count">
+                                <?php echo number_format($totalActivities); ?> actividades encontradas
+                            </span>
                         </div>
-                        <div class="pagination-controls">
-                            <?php if ($page > 1): ?>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>" class="page-btn">
-                                    <i data-feather="chevrons-left"></i>
-                                </a>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" class="page-btn">
-                                    <i data-feather="chevron-left"></i>
-                                </a>
-                            <?php endif; ?>
 
-                            <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"
-                                    class="page-btn <?php echo $i == $page ? 'active' : ''; ?>">
-                                    <?php echo $i; ?>
-                                </a>
-                            <?php endfor; ?>
+                        <div class="preview-content">
+                            <?php if (!empty($activities)): ?>
+                                <div class="preview-table-container">
+                                    <table class="preview-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Fecha/Hora</th>
+                                                <th>Usuario</th>
+                                                <th>Empresa</th>
+                                                <th>Descripción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php
+                                            // Mostrar máximo 10 registros en la vista previa
+                                            $previewActivities = array_slice($activities, 0, 10);
+                                            foreach ($previewActivities as $activity):
+                                            ?>
+                                                <tr>
+                                                    <td>
+                                                        <div class="datetime-preview">
+                                                            <strong><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></strong>
+                                                            <small><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></small>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div class="user-preview">
+                                                            <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
+                                                            <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <span class="company-preview"><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></span>
+                                                    </td>
+                                                    <td>
+                                                        <div class="description-preview" title="<?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>">
+                                                            <?php
+                                                            $description = $activity['description'] ?? 'Sin descripción';
+                                                            echo htmlspecialchars(strlen($description) > 80 ? substr($description, 0, 80) . '...' : $description);
+                                                            ?>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
 
-                            <?php if ($page < $totalPages): ?>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" class="page-btn">
-                                    <i data-feather="chevron-right"></i>
-                                </a>
-                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $totalPages])); ?>" class="page-btn">
-                                    <i data-feather="chevrons-right"></i>
-                                </a>
+                                <?php if ($totalActivities > 10): ?>
+                                    <div class="preview-footer">
+                                        <p>
+                                            Mostrando 10 de <?php echo number_format($totalActivities); ?> registros.
+                                            <strong>Use la exportación para obtener todos los resultados.</strong>
+                                        </p>
+                                    </div>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <div class="preview-empty">
+                                    <i data-feather="search"></i>
+                                    <h4>No se encontraron resultados</h4>
+                                    <p>No hay actividades que coincidan con los filtros aplicados.</p>
+                                </div>
                             <?php endif; ?>
                         </div>
                     </div>
                 <?php endif; ?>
             </div>
-
             <!-- Exportación -->
             <div class="export-section">
                 <h3>Exportar Datos</h3>
@@ -420,7 +392,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <div id="pdfModal" class="pdf-modal">
         <div class="pdf-modal-content">
             <div class="pdf-modal-header">
-                <h3 class="pdf-modal-title">Vista Previa del PDF - Log de Actividades</h3>
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Actividades</h3>
                 <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
             </div>
             <div class="pdf-modal-body">

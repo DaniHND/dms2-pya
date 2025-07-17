@@ -114,7 +114,7 @@ function exportActivityLog($currentUser, $params, $format) {
         'headers' => $headers, 
         'rows' => $rows, 
         'filename' => 'log_actividades_' . date('Y-m-d_H-i-s'),
-        'title' => 'Log de Actividades del Sistema'
+        'title' => 'Actividades del Sistema'
     ];
 }
 
@@ -698,10 +698,10 @@ function generatePDF($headers, $rows, $filename, $title, $currentUser, $forceDow
         $htmlContent .= '
     <div class="controls" style="position: relative; top: 8px; right: 8px; margin-bottom: 18px;">
         <button onclick="window.print()" title="Imprimir documento">
-            <span>🖨️</span> Imprimir
+            <span></span> Imprimir
         </button>
         <button onclick="descargarPDFReal()" title="Descargar archivo PDF">
-            <span>💾</span> Descargar PDF
+            <span></span> Descargar PDF
         </button>
     </div>';
     }
