@@ -1,6 +1,6 @@
 <?php
 // modules/reports/documents_report.php
-// Reportes de documentos del sistema - DMS2
+// Reportes de documentos del sistema con exportación PDF - DMS2
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -274,13 +274,14 @@ function formatBytes($size, $precision = 2)
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
+    <link rel="stylesheet" href="../../assets/css/summary.css">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-
     <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
@@ -341,17 +342,6 @@ function formatBytes($size, $precision = 2)
                         <div class="stat-label">Espacio Total</div>
                     </div>
                 </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i data-feather="trending-up"></i>
-                    </div>
-                    <div class="stat-info">
-                        <div class="stat-number"><?php echo formatBytes($stats['avg_size']); ?></div>
-                        <div class="stat-label">Tamaño Promedio</div>
-                    </div>
-                </div>
-
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="download"></i>
@@ -413,14 +403,6 @@ function formatBytes($size, $precision = 2)
                                         <?php echo htmlspecialchars($type['name']); ?>
                                     </option>
                                 <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <div class="filter-group">
-                            <label for="report_type">Tipo de Reporte</label>
-                            <select id="report_type" name="report_type">
-                                <option value="summary" <?php echo $reportType == 'summary' ? 'selected' : ''; ?>>Resumen</option>
-                                <option value="detailed" <?php echo $reportType == 'detailed' ? 'selected' : ''; ?>>Detallado</option>
                             </select>
                         </div>
                     </div>
@@ -604,22 +586,39 @@ function formatBytes($size, $precision = 2)
             <div class="export-section">
                 <h3>Exportar Datos</h3>
                 <div class="export-buttons">
-                    <button class="export-btn" onclick="exportData('csv')">
+                    <button class="export-btn" onclick="exportarDatos('csv')">
                         <i data-feather="file-text"></i>
-                        Exportar CSV
+                        Descargar CSV
                     </button>
-                    <button class="export-btn" onclick="exportData('excel')">
+                    <button class="export-btn" onclick="exportarDatos('excel')">
                         <i data-feather="grid"></i>
-                        Exportar Excel
+                        Descargar Excel
                     </button>
-                    <button class="export-btn" onclick="printReport()">
-                        <i data-feather="printer"></i>
-                        Imprimir
+                    <button class="export-btn" onclick="exportarDatos('pdf')">
+                        <i data-feather="file"></i>
+                        Descargar PDF
                     </button>
                 </div>
             </div>
         </div>
     </main>
+
+    <!-- Modal para vista previa del PDF -->
+    <div id="pdfModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Reportes de Documentos</h3>
+                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div class="pdf-loading" id="pdfLoading">
+                    <div class="spinner"></div>
+                    <p>Generando vista previa del PDF...</p>
+                </div>
+                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Variables de configuración
@@ -792,18 +791,110 @@ function formatBytes($size, $precision = 2)
             }
         }
 
-        function exportData(format) {
-            const url = `export.php?format=${format}&type=documents_report&${new URLSearchParams(currentFilters).toString()}`;
-            window.open(url, '_blank');
+        function exportarDatos(formato) {
+            // Obtener parámetros actuales de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Construir URL de exportación
+            const exportUrl = 'export.php?format=' + formato + '&type=documents_report&modal=1&' + urlParams.toString();
+
+            if (formato === 'pdf') {
+                // Para PDF, abrir modal
+                abrirModalPDF(exportUrl);
+            } else {
+                // Para CSV y Excel, abrir en nueva ventana para descarga
+                mostrarNotificacion('Preparando descarga...', 'info');
+                window.open(exportUrl.replace('&modal=1', ''), '_blank');
+            }
         }
 
-        function printReport() {
-            window.print();
+        function abrirModalPDF(url) {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            const loading = document.getElementById('pdfLoading');
+
+            // Mostrar modal y loading
+            modal.style.display = 'block';
+            loading.style.display = 'flex';
+            iframe.style.display = 'none';
+
+            // Cargar PDF en iframe
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+
+            iframe.onerror = function() {
+                loading.innerHTML = '<div class="spinner"></div><p>Error al cargar la vista previa. <a href="' + url.replace('&modal=1', '&download=1') + '" target="_blank">Descargar PDF directamente</a></p>';
+            };
+
+            iframe.src = url;
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            
+            modal.style.display = 'none';
+            iframe.src = '';
+        }
+
+        function mostrarNotificacion(mensaje, tipo = 'info') {
+            // Crear elemento de notificación
+            const notification = document.createElement('div');
+            notification.className = `notification-toast ${tipo}`;
+            notification.innerHTML = `
+                <i data-feather="${getNotificationIcon(tipo)}"></i>
+                <span>${mensaje}</span>
+                <button onclick="this.parentElement.remove()">
+                    <i data-feather="x"></i>
+                </button>
+            `;
+
+            // Agregar al DOM
+            document.body.appendChild(notification);
+            feather.replace();
+
+            // Mostrar animación
+            setTimeout(() => notification.classList.add('visible'), 100);
+
+            // Auto-remover después de 5 segundos
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.classList.remove('visible');
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, 5000);
+        }
+
+        function getNotificationIcon(tipo) {
+            const icons = {
+                'success': 'check-circle',
+                'error': 'alert-circle',
+                'warning': 'alert-triangle',
+                'info': 'info'
+            };
+            return icons[tipo] || 'info';
         }
 
         function showComingSoon(feature) {
-            alert(`${feature} - Próximamente`);
+            mostrarNotificacion(`${feature} - Próximamente`, 'info');
         }
+
+        // Cerrar modal al hacer clic fuera
+        window.onclick = function(event) {
+            const modal = document.getElementById('pdfModal');
+            if (event.target === modal) {
+                cerrarModalPDF();
+            }
+        }
+
+        // Cerrar modal con Escape
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                cerrarModalPDF();
+            }
+        });
 
         // Responsive
         window.addEventListener('resize', function() {

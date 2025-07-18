@@ -1,6 +1,6 @@
 <?php
 // config/database.php
-// Configuración de la base de datos para DMS2
+// Configuración de la base de datos para DMS2 - CORREGIDO
 
 class Database {
     private $host = 'localhost';
@@ -99,16 +99,17 @@ function logActivity($userId, $action, $tableName = null, $recordId = null, $des
     return insertRecord('activity_logs', $data);
 }
 
-// Función para obtener configuración del sistema
-function getSystemConfig($key) {
-    $query = "SELECT config_value FROM system_config WHERE config_key = :key";
-    $result = fetchOne($query, ['key' => $key]);
-    return $result ? $result['config_value'] : null;
-}
+// FUNCIÓN ELIMINADA: getSystemConfig() - ya está definida en session.php
 
 // Función para actualizar configuración del sistema
 function updateSystemConfig($key, $value) {
-    $existing = getSystemConfig($key);
+    // Verificar si existe una función getSystemConfig en session.php
+    if (function_exists('getSystemConfig')) {
+        $existing = getSystemConfig($key);
+    } else {
+        $existing = null;
+    }
+    
     if ($existing) {
         return updateRecord('system_config', 
             ['config_value' => $value], 

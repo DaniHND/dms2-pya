@@ -1,6 +1,6 @@
 <?php
 // includes/sidebar.php
-// Componente Sidebar reutilizable - DMS2
+// Componente Sidebar reutilizable - DMS2 (Actualizado con módulo de usuarios)
 
 // Asegurar que el usuario esté definido
 if (!isset($currentUser)) {
@@ -69,14 +69,14 @@ function isActive($page, $module = null) {
                 </a>
             </li>
 
-            <li class="nav-item <?php echo isActive('upload.php', '') ? 'active' : ''; ?>">
+            <li class="nav-item <?php echo isActive('upload.php', 'documents') ? 'active' : ''; ?>">
                 <a href="<?php echo getRelativePath('modules/documents/upload.php'); ?>" class="nav-link">
                     <i data-feather="upload"></i>
                     <span>Subir Documentos</span>
                 </a>
             </li>
 
-            <li class="nav-item <?php echo isActive('inbox.php', '') ? 'active' : ''; ?>">
+            <li class="nav-item <?php echo isActive('inbox.php', 'documents') ? 'active' : ''; ?>">
                 <a href="<?php echo getRelativePath('modules/documents/inbox.php'); ?>" class="nav-link">
                     <i data-feather="inbox"></i>
                     <span>Archivos</span>
@@ -97,8 +97,8 @@ function isActive($page, $module = null) {
                     <span>ADMINISTRACIÓN</span>
                 </li>
 
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Usuarios')">
+                <li class="nav-item <?php echo isActive('index.php', 'users') ? 'active' : ''; ?>">
+                    <a href="<?php echo getRelativePath('modules/users/index.php'); ?>" class="nav-link">
                         <i data-feather="users"></i>
                         <span>Usuarios</span>
                     </a>
@@ -124,7 +124,52 @@ function isActive($page, $module = null) {
                         <span>Grupos</span>
                     </a>
                 </li>
+
+                <li class="nav-item">
+                    <a href="#" class="nav-link" onclick="showComingSoon('Configuración del Sistema')">
+                        <i data-feather="settings"></i>
+                        <span>Configuración</span>
+                    </a>
+                </li>
             <?php endif; ?>
+
+            <li class="nav-divider"></li>
+
+            <li class="nav-item">
+                <a href="<?php echo getRelativePath('profile.php'); ?>" class="nav-link">
+                    <i data-feather="user"></i>
+                    <span>Mi Perfil</span>
+                </a>
+            </li>
+
+            <li class="nav-item">
+                <a href="<?php echo getRelativePath('logout.php'); ?>" class="nav-link logout-link" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                    <i data-feather="log-out"></i>
+                    <span>Cerrar Sesión</span>
+                </a>
+            </li>
         </ul>
     </nav>
+
+    <!-- Información del usuario en la parte inferior -->
+    <div class="sidebar-footer">
+        <div class="user-info">
+            <div class="user-avatar">
+                <i data-feather="user"></i>
+            </div>
+            <div class="user-details">
+                <div class="user-name"><?php echo htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']); ?></div>
+                <div class="user-role"><?php echo ucfirst($currentUser['role']); ?></div>
+            </div>
+        </div>
+    </div>
 </aside>
+
+<!-- Overlay para móvil -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<script>
+function showComingSoon(feature) {
+    alert(feature + ' - Próximamente disponible');
+}
+</script>

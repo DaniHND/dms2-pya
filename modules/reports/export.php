@@ -1,6 +1,6 @@
 <?php
 // modules/reports/export.php
-// Sistema de exportación de reportes con DomPDF - DMS2 (VERSIÓN FINAL)
+// Sistema de exportación de reportes con DomPDF - DMS2 (VERSIÓN FINAL CORREGIDA)
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -118,7 +118,7 @@ function exportActivityLog($currentUser, $params, $format) {
     ];
 }
 
-// Función para exportar reportes de usuarios
+// Función para exportar reportes de usuarios (CORREGIDA)
 function exportUserReports($currentUser, $params, $format) {
     $dateFrom = $params['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
     $dateTo = $params['date_to'] ?? date('Y-m-d');
@@ -229,6 +229,154 @@ function exportUserReports($currentUser, $params, $format) {
         'filename' => $filename,
         'title' => $title
     ];
+}
+
+// Función para exportar reportes de documentos
+function exportDocumentsReport($currentUser, $params, $format) {
+    $dateFrom = $params['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+    $dateTo = $params['date_to'] ?? date('Y-m-d');
+    $companyId = $params['company_id'] ?? '';
+    $documentType = $params['document_type'] ?? '';
+    $reportType = $params['report_type'] ?? 'summary';
+    
+    $whereConditions = [];
+    $queryParams = [
+        $dateFrom . ' 00:00:00',
+        $dateTo . ' 23:59:59'
+    ];
+    
+    $whereConditions[] = "d.created_at >= ?";
+    $whereConditions[] = "d.created_at <= ?";
+    $whereConditions[] = "d.status = 'active'";
+    
+    // Filtro por empresa
+    if ($currentUser['role'] !== 'admin') {
+        $whereConditions[] = "d.company_id = ?";
+        $queryParams[] = $currentUser['company_id'];
+    } elseif (!empty($companyId)) {
+        $whereConditions[] = "d.company_id = ?";
+        $queryParams[] = $companyId;
+    }
+    
+    // Filtro por tipo de documento
+    if (!empty($documentType)) {
+        $whereConditions[] = "dt.name = ?";
+        $queryParams[] = $documentType;
+    }
+    
+    $whereClause = implode(' AND ', $whereConditions);
+    
+    try {
+        if ($reportType === 'detailed') {
+            // Vista detallada: lista completa de documentos
+            $query = "SELECT d.name as document_name, dt.name as document_type, 
+                             c.name as company_name, u.first_name, u.last_name, u.username,
+                             d.file_size, d.created_at,
+                             (SELECT COUNT(*) FROM activity_logs al WHERE al.record_id = d.id AND al.action = 'download') as download_count,
+                             (SELECT COUNT(*) FROM activity_logs al WHERE al.record_id = d.id AND al.action = 'view') as view_count
+                      FROM documents d
+                      LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                      LEFT JOIN companies c ON d.company_id = c.id
+                      LEFT JOIN users u ON d.user_id = u.id
+                      WHERE $whereClause
+                      ORDER BY d.created_at DESC";
+            
+            $headers = [
+                'Nombre Documento',
+                'Tipo',
+                'Empresa',
+                'Usuario',
+                'Email',
+                'Tamaño',
+                'Fecha Subida',
+                'Descargas',
+                'Visualizaciones'
+            ];
+            
+            $rows = [];
+            $data = fetchAll($query, $queryParams);
+            
+            foreach ($data as $row) {
+                $rows[] = [
+                    $row['document_name'] ?? 'Sin nombre',
+                    $row['document_type'] ?? 'Sin tipo',
+                    $row['company_name'] ?? 'Sin empresa',
+                    trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+                    '@' . ($row['username'] ?? 'usuario'),
+                    formatBytesForExport($row['file_size'] ?? 0),
+                    date('d/m/Y H:i:s', strtotime($row['created_at'])),
+                    number_format($row['download_count'] ?? 0),
+                    number_format($row['view_count'] ?? 0)
+                ];
+            }
+            
+            $filename = 'documentos_detallado_' . date('Y-m-d_H-i-s');
+            $title = 'Reporte Detallado de Documentos';
+            
+        } else {
+            // Vista resumen: estadísticas por tipo
+            $query = "SELECT dt.name as document_type, COUNT(*) as total_docs, 
+                             SUM(d.file_size) as total_size,
+                             AVG(d.file_size) as avg_size,
+                             MIN(d.created_at) as first_upload,
+                             MAX(d.created_at) as last_upload
+                      FROM documents d
+                      LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                      LEFT JOIN companies c ON d.company_id = c.id
+                      WHERE $whereClause
+                      GROUP BY dt.name
+                      ORDER BY total_docs DESC";
+            
+            $headers = [
+                'Tipo de Documento',
+                'Total Documentos',
+                'Espacio Total',
+                'Tamaño Promedio',
+                'Primera Subida',
+                'Última Subida'
+            ];
+            
+            $rows = [];
+            $data = fetchAll($query, $queryParams);
+            
+            foreach ($data as $row) {
+                $rows[] = [
+                    $row['document_type'] ?? 'Sin tipo',
+                    number_format($row['total_docs'] ?? 0),
+                    formatBytesForExport($row['total_size'] ?? 0),
+                    formatBytesForExport($row['avg_size'] ?? 0),
+                    $row['first_upload'] ? date('d/m/Y', strtotime($row['first_upload'])) : 'N/A',
+                    $row['last_upload'] ? date('d/m/Y', strtotime($row['last_upload'])) : 'N/A'
+                ];
+            }
+            
+            $filename = 'documentos_resumen_' . date('Y-m-d_H-i-s');
+            $title = 'Resumen de Documentos por Tipo';
+        }
+        
+    } catch (Exception $e) {
+        error_log("Error en consulta de exportación de documentos: " . $e->getMessage());
+        // Datos de fallback en caso de error
+        $headers = ['Error'];
+        $rows = [['No se pudieron obtener los datos: ' . $e->getMessage()]];
+        $filename = 'error_documentos_' . date('Y-m-d_H-i-s');
+        $title = 'Error en Reporte de Documentos';
+    }
+    
+    return [
+        'headers' => $headers, 
+        'rows' => $rows, 
+        'filename' => $filename,
+        'title' => $title
+    ];
+}
+
+// Función auxiliar para formatear bytes en exportación
+function formatBytesForExport($size, $precision = 2) {
+    if ($size == 0) return '0 B';
+    $units = array('B', 'KB', 'MB', 'GB', 'TB');
+    $base = log($size, 1024);
+    return round(pow(1024, $base - floor($base)), $precision) . ' ' . $units[floor($base)];
 }
 
 // Función para generar CSV
@@ -876,6 +1024,10 @@ try {
             $exportData = exportUserReports($currentUser, $_GET, $format);
             break;
         
+        case 'documents_report':
+            $exportData = exportDocumentsReport($currentUser, $_GET, $format);
+            break;
+        
         default:
             throw new Exception('Tipo de reporte no válido: ' . $type);
     }
@@ -937,7 +1089,12 @@ try {
     echo '<a href="javascript:history.back()" class="btn">← Volver</a>';
     
     // Determinar la página de retorno según el tipo
-    $returnPage = ($type === 'user_reports') ? 'user_reports.php' : 'activity_log.php';
+    $returnPages = [
+        'activity_log' => 'activity_log.php',
+        'user_reports' => 'user_reports.php',
+        'documents_report' => 'documents_report.php'
+    ];
+    $returnPage = $returnPages[$type] ?? 'index.php';
     echo '<a href="' . $returnPage . '" class="btn secondary">🏠 Ir a Reportes</a>';
     
     echo '</div>';

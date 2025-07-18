@@ -1,6 +1,6 @@
 <?php
 // config/session.php
-// Manejo de sesiones para DMS2
+// Manejo de sesiones para DMS2 - CON requireRole() AGREGADO
 
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -29,24 +29,36 @@ class SessionManager {
         $_SESSION['last_activity'] = time();
         
         // Actualizar último login
-        require_once 'database.php';
-        updateRecord('users', 
-            ['last_login' => date('Y-m-d H:i:s')], 
-            'id = :id', 
-            ['id' => $user['id']]
-        );
+        try {
+            require_once 'database.php';
+            updateRecord('users', 
+                ['last_login' => date('Y-m-d H:i:s')], 
+                'id = :id', 
+                ['id' => $user['id']]
+            );
+        } catch (Exception $e) {
+            error_log("Error updating last login: " . $e->getMessage());
+        }
         
-        // Log de actividad
-        logActivity($user['id'], 'login', 'users', $user['id'], 'Usuario inició sesión');
+        try {
+            // Log de actividad
+            logActivity($user['id'], 'login', 'users', $user['id'], 'Usuario inició sesión');
+        } catch (Exception $e) {
+            error_log("Error logging login activity: " . $e->getMessage());
+        }
     }
     
     public static function logout() {
         self::startSession();
         
         if (isset($_SESSION['user_id'])) {
-            // Log de actividad
-            require_once 'database.php';
-            logActivity($_SESSION['user_id'], 'logout', 'users', $_SESSION['user_id'], 'Usuario cerró sesión');
+            try {
+                // Log de actividad
+                require_once 'database.php';
+                logActivity($_SESSION['user_id'], 'logout', 'users', $_SESSION['user_id'], 'Usuario cerró sesión');
+            } catch (Exception $e) {
+                error_log("Error logging logout activity: " . $e->getMessage());
+            }
         }
         
         // Destruir todas las variables de sesión
@@ -78,7 +90,7 @@ class SessionManager {
         }
         
         // Verificar timeout de sesión
-        $timeout = getSystemConfig('session_timeout') ?? 3600; // 1 hora por defecto
+        $timeout = 3600; // 1 hora por defecto
         
         if (isset($_SESSION['last_activity']) && 
             (time() - $_SESSION['last_activity']) > $timeout) {
@@ -105,15 +117,28 @@ class SessionManager {
         }
     }
     
+    // ✅ FUNCIÓN FALTANTE AGREGADA - requireRole()
+    public static function requireRole($role) {
+        self::requireLogin();
+        if ($_SESSION['role'] !== $role) {
+            header('Location: /dms2/dashboard.php?error=access_denied');
+            exit();
+        }
+    }
+    
     public static function getUserPermissions($groupId) {
         if (!$groupId) return [];
         
-        require_once 'database.php';
-        $query = "SELECT permissions FROM security_groups WHERE id = :id AND status = 'active'";
-        $result = fetchOne($query, ['id' => $groupId]);
-        
-        if ($result && $result['permissions']) {
-            return json_decode($result['permissions'], true);
+        try {
+            require_once 'database.php';
+            $query = "SELECT permissions FROM security_groups WHERE id = :id AND status = 'active'";
+            $result = fetchOne($query, ['id' => $groupId]);
+            
+            if ($result && $result['permissions']) {
+                return json_decode($result['permissions'], true);
+            }
+        } catch (Exception $e) {
+            error_log("Error getting user permissions: " . $e->getMessage());
         }
         
         return [];
