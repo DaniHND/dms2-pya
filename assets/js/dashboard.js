@@ -23,7 +23,7 @@ function initializeDashboard() {
     animateOnLoad();
 }
 
-// Alternar sidebar
+// Alternar 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const mainContent = document.querySelector('.main-content');

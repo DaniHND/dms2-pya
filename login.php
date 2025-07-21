@@ -68,6 +68,7 @@ if ($flash) {
     <link rel="stylesheet" href="assets/css/login.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.0/feather.min.css">
 </head>
+
 <body class="login-page">
     <div class="login-container">
         <div class="login-card">

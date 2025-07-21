@@ -69,14 +69,14 @@ function isActive($page, $module = null) {
                 </a>
             </li>
 
-            <li class="nav-item <?php echo isActive('upload.php', 'documents') ? 'active' : ''; ?>">
+            <li class="nav-item <?php echo isActive('upload.php', '') ? 'active' : ''; ?>">
                 <a href="<?php echo getRelativePath('modules/documents/upload.php'); ?>" class="nav-link">
                     <i data-feather="upload"></i>
                     <span>Subir Documentos</span>
                 </a>
             </li>
 
-            <li class="nav-item <?php echo isActive('inbox.php', 'documents') ? 'active' : ''; ?>">
+            <li class="nav-item <?php echo isActive('inbox.php', '') ? 'active' : ''; ?>">
                 <a href="<?php echo getRelativePath('modules/documents/inbox.php'); ?>" class="nav-link">
                     <i data-feather="inbox"></i>
                     <span>Archivos</span>
@@ -127,27 +127,11 @@ function isActive($page, $module = null) {
 
                 <li class="nav-item">
                     <a href="#" class="nav-link" onclick="showComingSoon('Configuración del Sistema')">
-                        <i data-feather="settings"></i>
-                        <span>Configuración</span>
+                        <i data-feather="file-text"></i>
+                        <span>Documentos</span>
                     </a>
                 </li>
-            <?php endif; ?>
-
-            <li class="nav-divider"></li>
-
-            <li class="nav-item">
-                <a href="<?php echo getRelativePath('profile.php'); ?>" class="nav-link">
-                    <i data-feather="user"></i>
-                    <span>Mi Perfil</span>
-                </a>
-            </li>
-
-            <li class="nav-item">
-                <a href="<?php echo getRelativePath('logout.php'); ?>" class="nav-link logout-link" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                    <i data-feather="log-out"></i>
-                    <span>Cerrar Sesión</span>
-                </a>
-            </li>
+           <?php endif; ?>           
         </ul>
     </nav>
 

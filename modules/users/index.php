@@ -1,6 +1,6 @@
 <?php
 // modules/users/index.php
-// Módulo de gestión de usuarios - DMS2 (VERSIÓN SIMPLIFICADA)
+// Módulo de gestión de usuarios - DMS2 (VERSIÓN SIMPLIFICADA - SIN ELIMINAR)
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -21,32 +21,33 @@ $limit = 15;
 $offset = ($page - 1) * $limit;
 
 // Función para obtener usuarios con filtros (CORREGIDA)
-function getUsers($search, $filterRole, $filterCompany, $filterStatus, $limit, $offset) {
+function getUsers($search, $filterRole, $filterCompany, $filterStatus, $limit, $offset)
+{
     $whereConditions = ["u.status != 'deleted'"];
     $params = [];
-    
+
     if (!empty($search)) {
         $whereConditions[] = "(u.first_name LIKE :search OR u.last_name LIKE :search OR u.username LIKE :search OR u.email LIKE :search)";
         $params['search'] = '%' . $search . '%';
     }
-    
+
     if (!empty($filterRole)) {
         $whereConditions[] = "u.role = :role";
         $params['role'] = $filterRole;
     }
-    
+
     if (!empty($filterCompany)) {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $filterCompany;
     }
-    
+
     if (!empty($filterStatus)) {
         $whereConditions[] = "u.status = :status";
         $params['status'] = $filterStatus;
     }
-    
+
     $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
-    
+
     $query = "SELECT u.*, c.name as company_name,
                      COALESCE((SELECT COUNT(*) FROM documents d WHERE d.user_id = u.id), 0) as document_count,
                      COALESCE((SELECT COUNT(*) FROM activity_logs al WHERE al.user_id = u.id), 0) as activity_count
@@ -54,71 +55,74 @@ function getUsers($search, $filterRole, $filterCompany, $filterStatus, $limit, $
               LEFT JOIN companies c ON u.company_id = c.id
               $whereClause
               ORDER BY u.created_at DESC";
-    
+
     $allUsers = fetchAll($query, $params);
-    
+
     if ($allUsers) {
         return array_slice($allUsers, $offset, $limit);
     }
-    
+
     return [];
 }
 
 // Función para obtener el total de usuarios
-function getTotalUsers($search, $filterRole, $filterCompany, $filterStatus) {
+function getTotalUsers($search, $filterRole, $filterCompany, $filterStatus)
+{
     $whereConditions = ["u.status != 'deleted'"];
     $params = [];
-    
+
     if (!empty($search)) {
         $whereConditions[] = "(u.first_name LIKE :search OR u.last_name LIKE :search OR u.username LIKE :search OR u.email LIKE :search)";
         $params['search'] = '%' . $search . '%';
     }
-    
+
     if (!empty($filterRole)) {
         $whereConditions[] = "u.role = :role";
         $params['role'] = $filterRole;
     }
-    
+
     if (!empty($filterCompany)) {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $filterCompany;
     }
-    
+
     if (!empty($filterStatus)) {
         $whereConditions[] = "u.status = :status";
         $params['status'] = $filterStatus;
     }
-    
+
     $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
-    
+
     $query = "SELECT COUNT(*) as total FROM users u $whereClause";
     $result = fetchOne($query, $params);
-    
+
     return $result['total'] ?? 0;
 }
 
 // Función para obtener empresas
-function getCompanies() {
+function getCompanies()
+{
     $query = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
     return fetchAll($query) ?: [];
 }
 
 // Función para obtener estadísticas
-function getUsersStats() {
+function getUsersStats()
+{
     $stats = [];
-    
+
     $query = "SELECT COUNT(*) as total FROM users WHERE status != 'deleted'";
     $result = fetchOne($query);
     $stats['total'] = $result['total'] ?? 0;
-    
+
     $query = "SELECT COUNT(*) as active FROM users WHERE status = 'active'";
     $result = fetchOne($query);
     $stats['active'] = $result['active'] ?? 0;
-    
+
     $query = "SELECT COUNT(*) as download_enabled FROM users WHERE download_enabled = 1 AND status = 'active'";
     $result = fetchOne($query);
     $stats['download_enabled'] = $result['download_enabled'] ?? 0;
-    
+
     $query = "SELECT role, COUNT(*) as count FROM users WHERE status != 'deleted' GROUP BY role";
     $roles = fetchAll($query);
     $stats['by_role'] = [];
@@ -127,7 +131,7 @@ function getUsersStats() {
             $stats['by_role'][$role['role']] = $role['count'];
         }
     }
-    
+
     return $stats;
 }
 
@@ -154,6 +158,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -162,7 +167,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/users.css">
     <link rel="stylesheet" href="../../assets/css/users2.css">
-    <script src="https://unpkg.com/feather-icons"></script>   
+    <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body class="dashboard-layout">
@@ -365,14 +370,13 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                                             <button class="action-btn" onclick="showUserDetails(<?php echo $user['id']; ?>)" title="Ver detalles">
                                                 <i data-feather="eye"></i>
                                             </button>
-                                            <button class="action-btn" onclick="editUser(<?php echo $user['id']; ?>)" title="Editar">
+                                            <button class="action-btn" onclick="editUser(<?php echo $user['id']; ?>)" title="Editar usuario">
                                                 <i data-feather="edit"></i>
                                             </button>
-                                            <button class="action-btn" onclick="toggleUserStatus(<?php echo $user['id']; ?>, '<?php echo $user['status']; ?>')" title="Cambiar estado">
+                                            <button class="action-btn <?php echo ($user['status'] ?? 'inactive') === 'active' ? 'warning' : 'success'; ?>"
+                                                onclick="toggleUserStatus(<?php echo $user['id']; ?>, '<?php echo $user['status']; ?>')"
+                                                title="<?php echo ($user['status'] ?? 'inactive') === 'active' ? 'Desactivar usuario' : 'Activar usuario'; ?>">
                                                 <i data-feather="<?php echo ($user['status'] ?? 'inactive') === 'active' ? 'user-x' : 'user-check'; ?>"></i>
-                                            </button>
-                                            <button class="action-btn danger" onclick="deleteUser(<?php echo $user['id']; ?>)" title="Eliminar">
-                                                <i data-feather="trash-2"></i>
                                             </button>
                                         </div>
                                     </td>
@@ -390,24 +394,24 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                         $currentUrl = strtok($currentUrl, '?');
                         $queryParams = $_GET;
                         ?>
-                        
+
                         <?php if ($page > 1): ?>
-                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $page - 1])); ?>" 
-                               style="padding: 8px 12px; text-decoration: none; color: #6b7280; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $page - 1])); ?>"
+                                style="padding: 8px 12px; text-decoration: none; color: #6b7280; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
                                 <i data-feather="chevron-left"></i> Anterior
                             </a>
                         <?php endif; ?>
 
                         <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $i])); ?>" 
-                               style="padding: 8px 12px; text-decoration: none; border-radius: 6px; <?php echo $i === $page ? 'background: #6366f1; color: white; border: 1px solid #6366f1;' : 'color: #6b7280; border: 1px solid #d1d5db; background: white;'; ?>">
+                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $i])); ?>"
+                                style="padding: 8px 12px; text-decoration: none; border-radius: 6px; <?php echo $i === $page ? 'background: #6366f1; color: white; border: 1px solid #6366f1;' : 'color: #6b7280; border: 1px solid #d1d5db; background: white;'; ?>">
                                 <?php echo $i; ?>
                             </a>
                         <?php endfor; ?>
 
                         <?php if ($page < $totalPages): ?>
-                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $page + 1])); ?>" 
-                               style="padding: 8px 12px; text-decoration: none; color: #6b7280; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                            <a href="<?php echo $currentUrl . '?' . http_build_query(array_merge($queryParams, ['page' => $page + 1])); ?>"
+                                style="padding: 8px 12px; text-decoration: none; color: #6b7280; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
                                 Siguiente <i data-feather="chevron-right"></i>
                             </a>
                         <?php endif; ?>
@@ -425,13 +429,13 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
     <script>
         // Variables globales para JavaScript
         window.companiesData = <?php echo json_encode($companies); ?>;
-        
+
         // Configuración inicial
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-            
+
             // Manejar mensajes de URL
             handleURLMessages();
         });
@@ -456,7 +460,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             const overlay = document.getElementById('sidebarOverlay');
-            
+
             if (window.innerWidth <= 768) {
                 sidebar.classList.toggle('active');
                 overlay.classList.toggle('active');
@@ -477,18 +481,15 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
             const urlParams = new URLSearchParams(window.location.search);
             const success = urlParams.get('success');
             const error = urlParams.get('error');
-            
+
             if (success) {
                 let message = '';
-                switch(success) {
+                switch (success) {
                     case 'user_created':
                         message = '✅ Usuario creado exitosamente';
                         break;
                     case 'user_updated':
                         message = '✅ Usuario actualizado exitosamente';
-                        break;
-                    case 'user_deleted':
-                        message = '✅ Usuario eliminado exitosamente';
                         break;
                     case 'status_changed':
                         message = '✅ Estado del usuario actualizado';
@@ -499,10 +500,10 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                     cleanURL();
                 }
             }
-            
+
             if (error) {
                 let message = '';
-                switch(error) {
+                switch (error) {
                     case 'user_not_found':
                         message = '❌ Usuario no encontrado';
                         break;
@@ -517,6 +518,9 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                         break;
                     case 'username_exists':
                         message = '❌ El nombre de usuario ya existe';
+                        break;
+                    case 'connection_error':
+                        message = '❌ Error de conexión a la base de datos';
                         break;
                 }
                 if (message) {
@@ -550,7 +554,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                 align-items: center;
                 gap: 12px;
             `;
-            
+
             notification.innerHTML = `
                 <i data-feather="${type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info'}"></i>
                 <span>${message}</span>
@@ -558,17 +562,17 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                     <i data-feather="x"></i>
                 </button>
             `;
-            
+
             document.body.appendChild(notification);
             feather.replace();
-            
+
             setTimeout(() => {
                 if (notification.parentElement) {
                     notification.remove();
                 }
             }, duration);
         }
-        
     </script>
 </body>
+
 </html>

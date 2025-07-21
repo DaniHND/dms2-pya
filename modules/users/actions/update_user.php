@@ -1,6 +1,6 @@
 <?php
 // modules/users/actions/update_user.php
-// Actualizar datos de usuario - DMS2 (CORREGIDO)
+// Actualizar datos de usuario - DMS2 (CORREGIDO - SIN ELIMINAR)
 
 require_once '../../../config/session.php';
 require_once '../../../config/database.php';
@@ -86,7 +86,7 @@ try {
         throw new Exception('La empresa seleccionada no es válida');
     }
     
-    // Preparar datos para actualizar
+    // Preparar datos para actualización
     $updateData = [
         'first_name' => $firstName,
         'last_name' => $lastName,
@@ -94,12 +94,14 @@ try {
         'email' => $email,
         'role' => $role,
         'company_id' => $companyId,
-        'download_enabled' => $downloadEnabled
+        'download_enabled' => $downloadEnabled,
+        'updated_at' => date('Y-m-d H:i:s')
     ];
     
-    // Si se va a cambiar la contraseña
-    if ($changePassword) {
-        $password = $_POST['password'] ?? '';
+    // Si se solicita cambio de contraseña
+    if ($changePassword && !empty($_POST['password'])) {
+        $password = $_POST['password'];
+        
         if (strlen($password) < 6) {
             throw new Exception('La contraseña debe tener al menos 6 caracteres');
         }
@@ -107,20 +109,57 @@ try {
         $updateData['password'] = password_hash($password, PASSWORD_DEFAULT);
     }
     
-    // Actualizar el usuario usando updateRecord
-    $result = updateRecord('users', $updateData, 'id = :id', ['id' => $userId]);
+    // Usar transacción para garantizar consistencia
+    $database = new Database();
+    $conn = $database->getConnection();
     
-    if ($result) {
+    if (!$conn) {
+        throw new Exception('Error de conexión a la base de datos');
+    }
+    
+    // Iniciar transacción
+    $conn->beginTransaction();
+    
+    try {
+        // Construir query de actualización
+        $setClause = [];
+        $params = [];
+        
+        foreach ($updateData as $field => $value) {
+            $setClause[] = "$field = :$field";
+            $params[$field] = $value;
+        }
+        
+        $params['id'] = $userId;
+        
+        $query = "UPDATE users SET " . implode(', ', $setClause) . " WHERE id = :id";
+        $stmt = $conn->prepare($query);
+        
+        if (!$stmt->execute($params)) {
+            throw new Exception('Error al actualizar el usuario');
+        }
+        
+        // Verificar que se actualizó al menos un registro
+        if ($stmt->rowCount() === 0) {
+            throw new Exception('No se actualizó ningún registro');
+        }
+        
         // Registrar actividad
         logActivity($currentUser['id'], 'update_user', 'users', $userId, 
-                   "Actualizó el usuario: {$firstName} {$lastName} (@{$username})");
+                   "Actualizó el usuario {$firstName} {$lastName}");
+        
+        // Confirmar transacción
+        $conn->commit();
         
         echo json_encode([
             'success' => true,
             'message' => 'Usuario actualizado exitosamente'
         ]);
-    } else {
-        throw new Exception('Error al actualizar el usuario');
+        
+    } catch (Exception $e) {
+        // Revertir transacción
+        $conn->rollback();
+        throw $e;
     }
     
 } catch (Exception $e) {

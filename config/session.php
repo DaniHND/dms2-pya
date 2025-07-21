@@ -1,6 +1,6 @@
 <?php
 // config/session.php
-// Manejo de sesiones para DMS2 - CON requireRole() AGREGADO
+// Manejo de sesiones para DMS2 - VERSIÓN CORREGIDA SIN WARNINGS
 
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -16,36 +16,47 @@ class SessionManager {
     
     public static function login($user) {
         self::startSession();
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['email'] = $user['email'];
-        $_SESSION['first_name'] = $user['first_name'];
-        $_SESSION['last_name'] = $user['last_name'];
-        $_SESSION['company_id'] = $user['company_id'];
-        $_SESSION['department_id'] = $user['department_id'];
-        $_SESSION['group_id'] = $user['group_id'];
-        $_SESSION['role'] = $user['role'];
-        $_SESSION['permissions'] = self::getUserPermissions($user['group_id']);
+        
+        // Verificar que $user es un array y tiene los índices necesarios
+        if (!is_array($user)) {
+            return false;
+        }
+        
+        $_SESSION['user_id'] = $user['id'] ?? null;
+        $_SESSION['username'] = $user['username'] ?? '';
+        $_SESSION['email'] = $user['email'] ?? '';
+        $_SESSION['first_name'] = $user['first_name'] ?? '';
+        $_SESSION['last_name'] = $user['last_name'] ?? '';
+        $_SESSION['company_id'] = $user['company_id'] ?? null;
+        $_SESSION['department_id'] = $user['department_id'] ?? null;
+        $_SESSION['role'] = $user['role'] ?? 'user';
         $_SESSION['last_activity'] = time();
         
+        // Obtener permisos del usuario
+        $_SESSION['permissions'] = self::getUserPermissions($user['id'] ?? null);
+        
         // Actualizar último login
-        try {
-            require_once 'database.php';
-            updateRecord('users', 
-                ['last_login' => date('Y-m-d H:i:s')], 
-                'id = :id', 
-                ['id' => $user['id']]
-            );
-        } catch (Exception $e) {
-            error_log("Error updating last login: " . $e->getMessage());
+        if (isset($user['id'])) {
+            try {
+                require_once 'database.php';
+                updateRecord('users', 
+                    ['last_login' => date('Y-m-d H:i:s')], 
+                    'id = :id', 
+                    ['id' => $user['id']]
+                );
+            } catch (Exception $e) {
+                error_log("Error updating last login: " . $e->getMessage());
+            }
+            
+            try {
+                // Log de actividad
+                logActivity($user['id'], 'login', 'users', $user['id'], 'Usuario inició sesión');
+            } catch (Exception $e) {
+                error_log("Error logging login activity: " . $e->getMessage());
+            }
         }
         
-        try {
-            // Log de actividad
-            logActivity($user['id'], 'login', 'users', $user['id'], 'Usuario inició sesión');
-        } catch (Exception $e) {
-            error_log("Error logging login activity: " . $e->getMessage());
-        }
+        return true;
     }
     
     public static function logout() {
@@ -90,7 +101,7 @@ class SessionManager {
         }
         
         // Verificar timeout de sesión
-        $timeout = 3600; // 1 hora por defecto
+        $timeout = 7200; // 2 horas por defecto
         
         if (isset($_SESSION['last_activity']) && 
             (time() - $_SESSION['last_activity']) > $timeout) {
@@ -104,79 +115,133 @@ class SessionManager {
     
     public static function requireLogin() {
         if (!self::checkSession()) {
-            header('Location: /dms2/login.php');
+            $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            $path = rtrim(dirname($_SERVER['REQUEST_URI']), '/\\');
+            
+            // Construir URL base
+            $baseUrl = $protocol . '://' . $host;
+            if (strpos($_SERVER['REQUEST_URI'], '/dms2/') !== false) {
+                $baseUrl .= '/dms2';
+            }
+            
+            header('Location: ' . $baseUrl . '/login.php');
             exit();
         }
     }
     
     public static function requireAdmin() {
         self::requireLogin();
-        if ($_SESSION['role'] !== 'admin') {
-            header('Location: /dms2/dashboard.php?error=access_denied');
-            exit();
+        if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+            self::redirectUnauthorized();
         }
     }
     
-    // ✅ FUNCIÓN FALTANTE AGREGADA - requireRole()
     public static function requireRole($role) {
         self::requireLogin();
-        if ($_SESSION['role'] !== $role) {
-            header('Location: /dms2/dashboard.php?error=access_denied');
-            exit();
+        if (!isset($_SESSION['role']) || $_SESSION['role'] !== $role) {
+            self::redirectUnauthorized();
         }
     }
     
-    public static function getUserPermissions($groupId) {
-        if (!$groupId) return [];
+    public static function requireManager() {
+        self::requireLogin();
+        $allowedRoles = ['admin', 'manager'];
+        if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], $allowedRoles)) {
+            self::redirectUnauthorized();
+        }
+    }
+    
+    private static function redirectUnauthorized() {
+        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        
+        // Construir URL base
+        $baseUrl = $protocol . '://' . $host;
+        if (strpos($_SERVER['REQUEST_URI'], '/dms2/') !== false) {
+            $baseUrl .= '/dms2';
+        }
+        
+        self::setFlashMessage('error', 'No tiene permisos para acceder a esta sección');
+        header('Location: ' . $baseUrl . '/dashboard.php');
+        exit();
+    }
+    
+    public static function getUserPermissions($userId) {
+        if (!$userId) {
+            return [];
+        }
         
         try {
             require_once 'database.php';
-            $query = "SELECT permissions FROM security_groups WHERE id = :id AND status = 'active'";
-            $result = fetchOne($query, ['id' => $groupId]);
             
-            if ($result && $result['permissions']) {
-                return json_decode($result['permissions'], true);
+            // Obtener permisos del usuario basados en su grupo
+            $query = "SELECT ug.permissions 
+                      FROM user_groups ug
+                      INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+                      WHERE ugm.user_id = :user_id AND ug.status = 'active'";
+            
+            $result = fetchOne($query, ['user_id' => $userId]);
+            
+            if ($result && isset($result['permissions']) && !empty($result['permissions'])) {
+                return json_decode($result['permissions'], true) ?: [];
             }
+            
+            // Permisos por defecto si no tiene grupo
+            return [
+                'documents' => ['view' => true, 'download' => true],
+                'users' => ['view' => false]
+            ];
+            
         } catch (Exception $e) {
             error_log("Error getting user permissions: " . $e->getMessage());
+            return [];
         }
-        
-        return [];
     }
     
     public static function hasPermission($permission) {
         self::startSession();
         
-        if (!isset($_SESSION['permissions'])) {
+        if (!isset($_SESSION['permissions']) || !is_array($_SESSION['permissions'])) {
             return false;
         }
         
-        return isset($_SESSION['permissions'][$permission]) && 
-               $_SESSION['permissions'][$permission] === true;
+        // Navegar por el array de permisos
+        $parts = explode('.', $permission);
+        $current = $_SESSION['permissions'];
+        
+        foreach ($parts as $part) {
+            if (!isset($current[$part])) {
+                return false;
+            }
+            $current = $current[$part];
+        }
+        
+        return $current === true;
     }
     
     public static function canAccessCompany($companyId) {
         self::startSession();
         
         // Admin puede acceder a todas las empresas
-        if ($_SESSION['role'] === 'admin') {
+        if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
             return true;
         }
         
         // Usuario solo puede acceder a su empresa
-        return $_SESSION['company_id'] == $companyId;
+        return isset($_SESSION['company_id']) && $_SESSION['company_id'] == $companyId;
     }
     
     public static function canAccessDepartment($departmentId) {
         self::startSession();
         
         // Admin puede acceder a todos los departamentos
-        if ($_SESSION['role'] === 'admin') {
+        if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
             return true;
         }
         
         // Usuario solo puede acceder a su departamento
-        return $_SESSION['department_id'] == $departmentId;
+        return isset($_SESSION['department_id']) && $_SESSION['department_id'] == $departmentId;
     }
     
     public static function getCurrentUser() {
@@ -187,22 +252,38 @@ class SessionManager {
         }
         
         return [
-            'id' => $_SESSION['user_id'],
-            'username' => $_SESSION['username'],
-            'email' => $_SESSION['email'],
-            'first_name' => $_SESSION['first_name'],
-            'last_name' => $_SESSION['last_name'],
-            'company_id' => $_SESSION['company_id'],
-            'department_id' => $_SESSION['department_id'],
-            'group_id' => $_SESSION['group_id'],
-            'role' => $_SESSION['role'],
-            'permissions' => $_SESSION['permissions']
+            'id' => $_SESSION['user_id'] ?? null,
+            'username' => $_SESSION['username'] ?? '',
+            'email' => $_SESSION['email'] ?? '',
+            'first_name' => $_SESSION['first_name'] ?? '',
+            'last_name' => $_SESSION['last_name'] ?? '',
+            'company_id' => $_SESSION['company_id'] ?? null,
+            'department_id' => $_SESSION['department_id'] ?? null,
+            'role' => $_SESSION['role'] ?? 'user',
+            'permissions' => $_SESSION['permissions'] ?? []
         ];
     }
     
     public static function getFullName() {
         self::startSession();
-        return ($_SESSION['first_name'] ?? '') . ' ' . ($_SESSION['last_name'] ?? '');
+        $firstName = $_SESSION['first_name'] ?? '';
+        $lastName = $_SESSION['last_name'] ?? '';
+        return trim($firstName . ' ' . $lastName);
+    }
+    
+    public static function getUserRole() {
+        self::startSession();
+        return $_SESSION['role'] ?? 'user';
+    }
+    
+    public static function getUserId() {
+        self::startSession();
+        return $_SESSION['user_id'] ?? null;
+    }
+    
+    public static function getCompanyId() {
+        self::startSession();
+        return $_SESSION['company_id'] ?? null;
     }
     
     public static function setFlashMessage($type, $message) {
@@ -224,20 +305,109 @@ class SessionManager {
         
         return null;
     }
+    
+    public static function regenerateSession() {
+        self::startSession();
+        session_regenerate_id(true);
+    }
+    
+    public static function isAdmin() {
+        return self::getUserRole() === 'admin';
+    }
+    
+    public static function isManager() {
+        $role = self::getUserRole();
+        return in_array($role, ['admin', 'manager']);
+    }
+    
+    public static function canDownloadDocuments() {
+        self::startSession();
+        
+        try {
+            require_once 'database.php';
+            $userId = self::getUserId();
+            
+            if (!$userId) {
+                return false;
+            }
+            
+            $query = "SELECT download_enabled FROM users WHERE id = :id";
+            $result = fetchOne($query, ['id' => $userId]);
+            
+            return $result && ($result['download_enabled'] ?? false);
+            
+        } catch (Exception $e) {
+            error_log("Error checking download permission: " . $e->getMessage());
+            return false;
+        }
+    }
 }
 
-// Función auxiliar para verificar permisos
+// Funciones auxiliares globales
 function checkPermission($permission) {
     return SessionManager::hasPermission($permission);
 }
 
-// Función auxiliar para obtener el usuario actual
 function getCurrentUser() {
     return SessionManager::getCurrentUser();
 }
 
-// Función auxiliar para obtener el nombre completo
 function getFullName() {
     return SessionManager::getFullName();
 }
+
+function requireLogin() {
+    SessionManager::requireLogin();
+}
+
+function requireAdmin() {
+    SessionManager::requireAdmin();
+}
+
+function requireRole($role) {
+    SessionManager::requireRole($role);
+}
+
+function isLoggedIn() {
+    return SessionManager::isLoggedIn();
+}
+
+function getUserRole() {
+    return SessionManager::getUserRole();
+}
+
+function getUserId() {
+    return SessionManager::getUserId();
+}
+
+function setFlashMessage($type, $message) {
+    SessionManager::setFlashMessage($type, $message);
+}
+
+function getFlashMessage() {
+    return SessionManager::getFlashMessage();
+}
+
+// Función para obtener configuración del sistema
+function getSystemConfig($key, $default = null) {
+    try {
+        require_once 'database.php';
+        $query = "SELECT setting_value FROM system_settings WHERE setting_key = :key";
+        $result = fetchOne($query, ['key' => $key]);
+        
+        if ($result && isset($result['setting_value'])) {
+            return $result['setting_value'];
+        }
+        
+        return $default;
+        
+    } catch (Exception $e) {
+        error_log("Error getting system config '$key': " . $e->getMessage());
+        return $default;
+    }
+}
+
+// Inicializar sesión automáticamente
+SessionManager::startSession();
+
 ?>
