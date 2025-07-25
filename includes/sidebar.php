@@ -13,10 +13,11 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 $currentDir = basename(dirname($_SERVER['PHP_SELF']));
 
 // Función para determinar rutas relativas mejorada
-function getRelativePath($targetPath) {
+function getRelativePath($targetPath)
+{
     $currentPath = $_SERVER['PHP_SELF'];
     $currentDir = dirname($currentPath);
-    
+
     // Detectar si estamos en root o en subdirectorio
     if (strpos($currentPath, '/modules/') !== false) {
         // Estamos en un módulo, ir dos niveles arriba
@@ -28,9 +29,10 @@ function getRelativePath($targetPath) {
 }
 
 // Función mejorada para el logo
-function getLogoPath() {
+function getLogoPath()
+{
     $currentPath = $_SERVER['PHP_SELF'];
-    
+
     if (strpos($currentPath, '/modules/') !== false) {
         // Estamos en un módulo
         return 'https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png';
@@ -41,13 +43,14 @@ function getLogoPath() {
 }
 
 // Función para verificar si un enlace está activo
-function isActive($page, $module = null) {
+function isActive($page, $module = null)
+{
     global $currentPage, $currentDir;
-    
+
     if ($module) {
         return $currentDir === $module;
     }
-    
+
     return $currentPage === $page;
 }
 ?>
@@ -131,29 +134,16 @@ function isActive($page, $module = null) {
                         <span>Documentos</span>
                     </a>
                 </li>
-           <?php endif; ?>           
+            <?php endif; ?>
         </ul>
     </nav>
-
-    <!-- Información del usuario en la parte inferior -->
-    <div class="sidebar-footer">
-        <div class="user-info">
-            <div class="user-avatar">
-                <i data-feather="user"></i>
-            </div>
-            <div class="user-details">
-                <div class="user-name"><?php echo htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']); ?></div>
-                <div class="user-role"><?php echo ucfirst($currentUser['role']); ?></div>
-            </div>
-        </div>
-    </div>
 </aside>
 
 <!-- Overlay para móvil -->
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
 <script>
-function showComingSoon(feature) {
-    alert(feature + ' - Próximamente disponible');
-}
+    function showComingSoon(feature) {
+        alert(feature + ' - Próximamente disponible');
+    }
 </script>

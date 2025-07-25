@@ -479,3 +479,112 @@
         flex-wrap: wrap;
     }
 }
+/* ============ ESTILOS PARA BOTONES DE EXPORTACIÓN ============ */
+.export-section {
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    border: 1px solid #e5e7eb;
+}
+
+.export-section h4 {
+    margin: 0 0 1rem 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.export-buttons {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    border: 1px solid;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 140px;
+    justify-content: center;
+}
+
+/* Botón CSV - Verde */
+.csv-btn {
+    background-color: #22c55e;
+    color: white;
+    border-color: #22c55e;
+}
+
+.csv-btn:hover {
+    background-color: #16a34a;
+    border-color: #16a34a;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Botón Excel - Verde oscuro */
+.excel-btn {
+    background-color: #10b981;
+    color: white;
+    border-color: #10b981;
+}
+
+.excel-btn:hover {
+    background-color: #059669;
+    border-color: #059669;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Botón PDF - Rojo */
+.pdf-btn {
+    background-color: #ef4444;
+    color: white;
+    border-color: #ef4444;
+}
+
+.pdf-btn:hover {
+    background-color: #dc2626;
+    border-color: #dc2626;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Iconos en los botones */
+.export-btn i {
+    width: 16px;
+    height: 16px;
+}
+
+/* Responsive para botones de exportación */
+@media (max-width: 768px) {
+    .export-buttons {
+        flex-direction: column;
+    }
+    
+    .export-btn {
+        width: 100%;
+        min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .export-section {
+        padding: 1rem;
+        margin-left: -1rem;
+        margin-right: -1rem;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+}
