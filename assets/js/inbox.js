@@ -1,18 +1,40 @@
-// assets/js/inbox.js
+// assets/js/inbox.js - CÓDIGO COMPLETO CON ORDENACIÓN
 // JavaScript completo para la Bandeja de Entrada - DMS2
 
-console.log('🚀 INBOX DMS2 - Cargando módulo JavaScript');
+console.log('🚀 INBOX DMS2 - Cargando módulo JavaScript COMPLETO');
 
 // Variables globales
 let currentView = 'grid';
+let documentsData = [];
+let currentUserId = null;
+let currentUserRole = null;
+let canDownload = true;
 
 // Inicializar cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('📱 DOM cargado - Inicializando Inbox');
+    console.log('📱 DOM cargado - Inicializando Inbox COMPLETO');
+    
+    // Obtener datos del usuario desde PHP
+    try {
+        if (typeof phpUserData !== 'undefined') {
+            currentUserId = phpUserData.id;
+            currentUserRole = phpUserData.role;
+            canDownload = phpUserData.canDownload || true;
+            console.log('👤 Usuario cargado:', currentUserId, currentUserRole);
+        }
+        
+        if (typeof phpDocumentsData !== 'undefined') {
+            documentsData = phpDocumentsData;
+            console.log('📄 Documentos cargados:', documentsData.length);
+        }
+    } catch (e) {
+        console.warn('⚠️ No se pudieron cargar datos PHP:', e);
+    }
     
     // Inicializar iconos de Feather
     if (typeof feather !== 'undefined') {
         feather.replace();
+        console.log('✅ Iconos Feather inicializados');
     }
     
     // Inicializar reloj
@@ -28,10 +50,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Configurar responsive
     setupResponsive();
     
-    console.log('✅ Inbox inicializado correctamente');
+    // Inicializar ordenación
+    initializeSorting();
+    
+    console.log('✅ Inbox COMPLETO inicializado correctamente');
 });
 
-// Configurar eventos principales
+// ==========================================
+// CONFIGURACIÓN DE EVENTOS
+// ==========================================
+
 function setupEventListeners() {
     console.log('🎯 Configurando eventos del inbox');
     
@@ -82,12 +110,15 @@ function setupEventListeners() {
     });
 }
 
-// FUNCIÓN VER DOCUMENTO
+// ==========================================
+// FUNCIONES DE DOCUMENTOS
+// ==========================================
+
+// Ver documento
 function viewDocument(documentId) {
     console.log('👁️ Ver documento ID:', documentId);
     
-    // Verificar que el documento existe
-    if (typeof documentsData !== 'undefined') {
+    if (documentsData.length > 0) {
         const document = documentsData.find(doc => doc.id == documentId);
         if (!document) {
             showNotification('Documento no encontrado', 'error');
@@ -96,21 +127,18 @@ function viewDocument(documentId) {
         console.log('📄 Abriendo documento:', document.name);
     }
     
-    // Abrir en la misma ventana
     window.location.href = 'view.php?id=' + documentId;
 }
 
-// FUNCIÓN DESCARGAR
+// Descargar documento
 function downloadDocument(documentId) {
     console.log('⬇️ Descargar documento ID:', documentId);
     
-    // Verificar permisos globales
-    if (typeof canDownload !== 'undefined' && !canDownload) {
+    if (!canDownload) {
         showNotification('No tienes permisos para descargar', 'error');
         return;
     }
 
-    // Crear formulario para descarga
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = 'download.php';
@@ -127,7 +155,6 @@ function downloadDocument(documentId) {
     
     showNotification('Iniciando descarga...', 'info');
     
-    // Limpiar formulario después de un tiempo
     setTimeout(() => {
         if (document.body.contains(form)) {
             document.body.removeChild(form);
@@ -135,222 +162,259 @@ function downloadDocument(documentId) {
     }, 2000);
 }
 
-// FUNCIÓN ELIMINAR CORREGIDA - Sin conflicto de nombres
+// Eliminar documento
 function deleteDocument(documentId) {
     console.log('🗑️ INICIO - Eliminar documento ID:', documentId);
-    console.log('🗑️ Tipo de documentId:', typeof documentId);
-    console.log('🗑️ documentsData disponible:', typeof documentsData !== 'undefined');
     
-    // CORREGIDO: Usar 'docData' en lugar de 'document' para evitar conflicto
-    let docData = null;
-    if (typeof documentsData !== 'undefined') {
-        docData = documentsData.find(doc => doc.id == documentId);
-        console.log('🗑️ Documento encontrado:', docData ? docData.name : 'NO ENCONTRADO');
-    } else {
-        console.log('🗑️ WARNING: documentsData no está definido');
+    if (!documentId) {
+        console.error('🗑️ ERROR: ID de documento vacío');
+        showNotification('Error: ID de documento no válido', 'error');
+        return;
     }
     
-    if (!docData) {
-        console.log('🗑️ ERROR: Documento no encontrado');
-        showNotification('Documento no encontrado', 'error');
-        return;
+    // Buscar información del documento
+    let docData = null;
+    if (documentsData && documentsData.length > 0) {
+        docData = documentsData.find(doc => doc.id == documentId);
+        console.log('🗑️ Documento encontrado:', docData ? docData.name : 'NO ENCONTRADO');
     }
     
     // Verificar permisos de eliminación
-    console.log('🗑️ Verificando permisos');
-    console.log('🗑️ currentUserRole:', typeof currentUserRole !== 'undefined' ? currentUserRole : 'NO DEFINIDO');
-    console.log('🗑️ currentUserId:', typeof currentUserId !== 'undefined' ? currentUserId : 'NO DEFINIDO');
-    console.log('🗑️ docData.user_id:', docData.user_id);
-    
-    const canDelete = (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin') || 
-                     (typeof currentUserId !== 'undefined' && docData.user_id == currentUserId);
-    
-    console.log('🗑️ Puede eliminar:', canDelete);
-    
-    if (!canDelete) {
-        console.log('🗑️ ERROR: Sin permisos para eliminar');
-        showNotification('No tienes permisos para eliminar este documento', 'error');
-        return;
+    if (docData) {
+        const canDelete = (currentUserRole === 'admin') || (docData.user_id == currentUserId);
+        if (!canDelete) {
+            console.log('🗑️ ERROR: Sin permisos para eliminar');
+            showNotification('No tienes permisos para eliminar este documento', 'error');
+            return;
+        }
     }
     
-    // Confirmación detallada
-    console.log('🗑️ Mostrando confirmación');
-    const confirmMessage = `¿Eliminar documento?
+    // Preparar mensaje de confirmación
+    let confirmMessage = '¿Eliminar documento?';
+    
+    if (docData) {
+        confirmMessage = `¿Eliminar documento?
+
+📄 ${docData.name}
+🏢 ${docData.company_name || 'Sin empresa'}
+📁 ${docData.department_name || 'Sin departamento'}
+📏 ${formatBytes(docData.file_size)}
 
 ⚠️ Esta acción no se puede deshacer.`;
+    } else {
+        confirmMessage = `¿Eliminar documento ID: ${documentId}?
+
+⚠️ Esta acción no se puede deshacer.`;
+    }
     
-    const firstConfirm = confirm(confirmMessage);
-    console.log('🗑️ Primera confirmación:', firstConfirm);
-    
-    if (!firstConfirm) {
+    // Confirmaciones
+    if (!confirm(confirmMessage)) {
         console.log('🗑️ Usuario canceló en primera confirmación');
         return;
     }
     
-    // Confirmación final
-    const finalConfirm = confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.');
-    console.log('🗑️ Confirmación final:', finalConfirm);
-    
-    if (!finalConfirm) {
-        console.log('🗑️ Usuario canceló en confirmación final');
+    if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) {
+        console.log('🗑️ Usuario canceló en segunda confirmación');
         return;
     }
     
-    console.log('🗑️ EJECUTANDO ELIMINACIÓN - Documento:', docData.name);
-
-    // Mostrar indicador visual
-    showNotification('Eliminando documento...', 'warning');
-
-    // CORREGIDO: Ahora document se refiere al DOM correctamente
-    console.log('🗑️ Creando formulario de eliminación');
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = 'delete.php';
-    form.style.display = 'none';
+    console.log('🗑️ Usuario confirmó eliminación, procediendo...');
     
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'document_id';
-    input.value = documentId;
-    
-    console.log('🗑️ Formulario creado con document_id:', documentId);
-    
-    form.appendChild(input);
-    document.body.appendChild(form);
-    
-    // Verificar que el formulario se creó correctamente
-    console.log('🗑️ Formulario en DOM:', document.body.contains(form));
-    console.log('🗑️ Acción del formulario:', form.action);
-    console.log('🗑️ Método del formulario:', form.method);
-    console.log('🗑️ Valor del input:', input.value);
-    
-    // Enviar formulario
+    // Crear y enviar formulario de eliminación
     try {
-        console.log('🗑️ Enviando formulario...');
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'delete.php';
+        form.style.display = 'none';
+        
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'document_id';
+        input.value = documentId.toString();
+        
+        form.appendChild(input);
+        document.body.appendChild(form);
+        
+        console.log('🗑️ Enviando formulario de eliminación');
+        showNotification('Eliminando documento...', 'warning', 3000);
+        
         form.submit();
-        console.log('🗑️ Formulario enviado exitosamente');
+        
     } catch (error) {
-        console.error('🗑️ ERROR al enviar formulario:', error);
-        showNotification('Error al enviar formulario', 'error');
+        console.error('🗑️ ERROR al crear/enviar formulario:', error);
+        showNotification('Error al eliminar documento', 'error');
+    }
+}
+
+// ==========================================
+// FUNCIONES DE ORDENACIÓN
+// ==========================================
+
+// Función para cambiar ordenación
+function sortDocuments() {
+    const sortBy = document.getElementById('sortBy').value;
+    console.log('📊 Ordenando documentos por:', sortBy);
+    
+    const url = new URL(window.location);
+    url.searchParams.set('sort', sortBy);
+    
+    // Mantener el orden actual, o usar 'asc' por defecto
+    if (!url.searchParams.has('order')) {
+        url.searchParams.set('order', 'asc');
     }
     
-    // Limpiar formulario después de un tiempo
-    setTimeout(() => {
-        if (document.body.contains(form)) {
-            document.body.removeChild(form);
-            console.log('🗑️ Formulario limpiado del DOM');
-        }
-    }, 5000);
+    showNotification(`📊 Ordenando por ${getSortName(sortBy)}...`, 'info', 2000);
+    window.location.href = url.toString();
 }
-// Función para formatear bytes
+
+// Función para alternar orden ascendente/descendente
+function toggleSortOrder() {
+    const url = new URL(window.location);
+    const currentOrder = url.searchParams.get('order') || 'asc';
+    const newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+    
+    url.searchParams.set('order', newOrder);
+    
+    console.log('🔄 Cambiando orden a:', newOrder);
+    showNotification(`🔄 Orden ${newOrder === 'asc' ? 'ascendente' : 'descendente'}`, 'info', 2000);
+    
+    window.location.href = url.toString();
+}
+
+// Función auxiliar para obtener nombre descriptivo del campo
+function getSortName(sortField) {
+    const sortNames = {
+        'name': 'nombre',
+        'date': 'fecha',
+        'size': 'tamaño',
+        'type': 'tipo'
+    };
+    return sortNames[sortField] || sortField;
+}
+
+// Inicializar select de ordenación
+function initializeSorting() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentSort = urlParams.get('sort') || 'name';
+    const currentOrder = urlParams.get('order') || 'asc';
+    
+    const sortSelect = document.getElementById('sortBy');
+    if (sortSelect) {
+        sortSelect.value = currentSort;
+        console.log('🔧 Select inicializado con:', currentSort);
+    }
+    
+    // Actualizar icono de orden
+    const orderIcon = document.querySelector('.sort-controls i[data-feather]');
+    if (orderIcon) {
+        orderIcon.setAttribute('data-feather', currentOrder === 'asc' ? 'arrow-up' : 'arrow-down');
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+    }
+}
+
+// ==========================================
+// FUNCIONES DE VISTA
+// ==========================================
+
+// Cambiar vista entre grid y lista
+function changeView(viewType) {
+    console.log('👁️ Cambiando vista a:', viewType);
+    
+    const gridView = document.querySelector('.documents-grid');
+    const listView = document.querySelector('.documents-list');
+    const viewButtons = document.querySelectorAll('.view-btn');
+    
+    // Actualizar botones activos
+    viewButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === viewType);
+    });
+    
+    // Mostrar/ocultar vistas
+    if (gridView && listView) {
+        if (viewType === 'grid') {
+            gridView.style.display = 'grid';
+            listView.style.display = 'none';
+        } else {
+            gridView.style.display = 'none';
+            listView.style.display = 'flex';
+        }
+    }
+    
+    // Guardar preferencia
+    try {
+        localStorage.setItem('inbox_view_preference', viewType);
+    } catch (e) {
+        console.log('ℹ️ No se pudo guardar preferencia de vista');
+    }
+    
+    showNotification(`👁️ Vista ${viewType === 'grid' ? 'cuadros' : 'lista'} activada`, 'info', 1500);
+}
+
+// ==========================================
+// FUNCIONES AUXILIARES
+// ==========================================
+
+// Formatear bytes
 function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes || bytes === 0) return '0 Bytes';
+    
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    
     const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Función para cambiar vista
-function changeView(view) {
-    console.log('🔄 Cambiando vista a:', view);
-    
-    currentView = view;
-    
-    // Actualizar botones
-    document.querySelectorAll('.view-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.view === view) {
-            btn.classList.add('active');
-        }
-    });
-
-    // Actualizar clases del contenedor
-    const documentsGrid = document.getElementById('documentsGrid');
-    if (documentsGrid) {
-        documentsGrid.className = view === 'grid' ? 'documents-grid' : 'documents-list';
-    }
-}
-
-// Función para actualizar la hora
+// Actualizar reloj
 function updateTime() {
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
     const timeElement = document.getElementById('currentTime');
     if (timeElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString('es-ES', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        const dateString = now.toLocaleDateString('es-ES', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
-        timeElement.textContent = `${dateString} ${timeString}`;
+        timeElement.textContent = timeString;
     }
 }
 
-// Función para mostrar notificaciones
+// Mostrar notificaciones
 function showNotification(message, type = 'info', duration = 4000) {
-    console.log(`📢 ${type.toUpperCase()}: ${message}`);
+    console.log(`📢 Notificación [${type}]: ${message}`);
     
-    // Remover notificaciones existentes
-    const existingNotifications = document.querySelectorAll('.notification-toast');
-    existingNotifications.forEach(notif => notif.remove());
-    
-    // Crear elemento de notificación
     const notification = document.createElement('div');
-    notification.className = `notification-toast ${type}`;
-    
-    const colors = {
-        'info': '#3b82f6',
-        'success': '#10b981',
-        'warning': '#f59e0b',
-        'error': '#ef4444'
-    };
-    
-    const iconMap = {
-        'info': 'info',
-        'success': 'check-circle',
-        'warning': 'alert-triangle',
-        'error': 'alert-circle'
-    };
-    
-    const color = colors[type] || colors.info;
-    const icon = iconMap[type] || 'info';
-    
     notification.innerHTML = `
-        <i data-feather="${icon}"></i>
-        <span>${message}</span>
-        <button onclick="this.parentElement.remove()">
-            <i data-feather="x"></i>
-        </button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-feather="${getNotificationIcon(type)}"></i>
+            <span>${message}</span>
+        </div>
     `;
     
     notification.style.cssText = `
         position: fixed;
         top: 20px;
         right: 20px;
-        background: ${color};
+        background: ${getNotificationColor(type)};
         color: white;
-        padding: 16px 20px;
+        padding: 12px 16px;
         border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 9999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
         font-size: 14px;
         font-weight: 500;
-        max-width: 350px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
+        max-width: 400px;
         transform: translateX(100%);
         transition: transform 0.3s ease;
     `;
     
     document.body.appendChild(notification);
     
-    // Reemplazar iconos de Feather
     if (typeof feather !== 'undefined') {
         feather.replace();
     }
@@ -371,7 +435,28 @@ function showNotification(message, type = 'info', duration = 4000) {
     }, duration);
 }
 
-// Función para alternar sidebar en móvil
+// Funciones auxiliares para notificaciones
+function getNotificationIcon(type) {
+    const icons = {
+        'success': 'check-circle',
+        'error': 'alert-circle',
+        'warning': 'alert-triangle',
+        'info': 'info'
+    };
+    return icons[type] || 'info';
+}
+
+function getNotificationColor(type) {
+    const colors = {
+        'success': '#10b981',
+        'error': '#ef4444',
+        'warning': '#f59e0b',
+        'info': '#3b82f6'
+    };
+    return colors[type] || '#3b82f6';
+}
+
+// Alternar sidebar en móvil
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebarOverlay');
@@ -385,23 +470,37 @@ function toggleSidebar() {
     }
 }
 
-// Función para limpiar filtros
+// Configurar responsive
+function setupResponsive() {
+    window.addEventListener('resize', function() {
+        if (window.innerWidth > 768) {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            
+            if (sidebar) sidebar.classList.remove('active');
+            if (overlay) overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+    });
+    
+    // Cargar preferencia de vista
+    try {
+        const savedView = localStorage.getItem('inbox_view_preference');
+        if (savedView && ['grid', 'list'].includes(savedView)) {
+            changeView(savedView);
+        }
+    } catch (e) {
+        console.log('ℹ️ No se pudo cargar preferencia de vista');
+    }
+}
+
+// Limpiar filtros
 function clearAllFilters() {
     console.log('🗑️ Limpiando todos los filtros');
     window.location.href = window.location.pathname;
 }
 
-// Función para ordenar documentos
-function sortDocuments() {
-    const sortBy = document.getElementById('sortBy').value;
-    console.log('📊 Ordenando documentos por:', sortBy);
-    
-    const url = new URL(window.location);
-    url.searchParams.set('sort', sortBy);
-    window.location.href = url.toString();
-}
-
-// Función para manejar mensajes de URL
+// Manejar mensajes de URL
 function handleURLMessages() {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success');
@@ -432,178 +531,31 @@ function handleURLMessages() {
                 message = '❌ Archivo no encontrado en el servidor.';
                 break;
             default:
-                message = '❌ Error: ' + error;
+                message = '❌ Error desconocido: ' + error;
         }
-        
         showNotification(message, 'error', 6000);
         cleanURL();
     }
 }
 
-// Función para limpiar la URL
+// Limpiar URL de parámetros de mensaje
 function cleanURL() {
-    const newUrl = window.location.pathname + 
-        (window.location.search
-            .replace(/[?&](success|error|name)=[^&]*/g, '')
-            .replace(/^&/, '?')
-            .replace(/^\?$/, ''));
-    window.history.replaceState({}, document.title, newUrl);
-}
-
-// Función para configurar responsive
-function setupResponsive() {
-    window.addEventListener('resize', function() {
-        const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-
-        if (window.innerWidth > 768) {
-            sidebar.classList.remove('active');
-            if (overlay) {
-                overlay.classList.remove('active');
-            }
-            document.body.style.overflow = '';
-        }
-    });
-}
-
-// Función para registrar actividad
-function logActivity(action, documentId) {
-    if (typeof fetch !== 'undefined') {
-        fetch('log_activity.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                action: action,
-                document_id: documentId
-            })
-        }).catch(error => {
-            console.log('Log de actividad falló (no crítico):', error);
-        });
-    }
-}
-
-// Funciones placeholder para compatibilidad
-function showComingSoon(feature) {
-    showNotification(`${feature} - Próximamente`, 'info');
-}
-
-function showNotifications() {
-    showNotification('Sistema de notificaciones próximamente', 'info');
-}
-
-function showUserMenu() {
-    showNotification('Menú de usuario próximamente', 'info');
-}
-
-// Función para búsqueda rápida (futura implementación)
-function quickSearch(query) {
-    if (!query || query.length < 2) {
-        return [];
-    }
+    const url = new URL(window.location);
+    url.searchParams.delete('success');
+    url.searchParams.delete('error');
+    url.searchParams.delete('name');
     
-    console.log('🔍 Búsqueda rápida:', query);
-    
-    // Simular búsqueda en los datos actuales
-    if (typeof documentsData !== 'undefined') {
-        return documentsData.filter(doc => 
-            doc.name.toLowerCase().includes(query.toLowerCase()) ||
-            (doc.description && doc.description.toLowerCase().includes(query.toLowerCase())) ||
-            (doc.document_type && doc.document_type.toLowerCase().includes(query.toLowerCase()))
-        );
-    }
-    
-    return [];
+    window.history.replaceState({}, document.title, url.pathname + url.search);
 }
 
-// Función para exportar datos (futura implementación)
-function exportDocuments(format = 'csv') {
-    console.log('📤 Exportando documentos en formato:', format);
-    
-    if (typeof documentsData === 'undefined' || documentsData.length === 0) {
-        showNotification('No hay documentos para exportar', 'warning');
-        return;
-    }
-    
-    showNotification('Función de exportación próximamente', 'info');
+// Función para debugging
+function debugInbox() {
+    console.log('🔍 DEBUG INBOX:');
+    console.log('- currentUserId:', currentUserId);
+    console.log('- currentUserRole:', currentUserRole);
+    console.log('- canDownload:', canDownload);
+    console.log('- documentsData.length:', documentsData ? documentsData.length : 'undefined');
+    console.log('- feather available:', typeof feather !== 'undefined');
+    console.log('- Current sort:', new URLSearchParams(window.location.search).get('sort') || 'name');
+    console.log('- Current order:', new URLSearchParams(window.location.search).get('order') || 'asc');
 }
-
-// Función para seleccionar múltiples documentos (futura implementación)
-function toggleDocumentSelection(documentId) {
-    console.log('☑️ Seleccionar documento:', documentId);
-    showNotification('Selección múltiple próximamente', 'info');
-}
-
-// Función para operaciones por lotes (futura implementación)
-function bulkOperation(operation) {
-    console.log('📋 Operación por lotes:', operation);
-    showNotification('Operaciones por lotes próximamente', 'info');
-}
-
-// Event listeners adicionales para mejoras futuras
-document.addEventListener('keydown', function(e) {
-    // Atajos de teclado
-    if (e.ctrlKey || e.metaKey) {
-        switch(e.key) {
-            case 'f':
-                e.preventDefault();
-                const searchInput = document.querySelector('input[name="search"]');
-                if (searchInput) {
-                    searchInput.focus();
-                }
-                break;
-            case 'n':
-                e.preventDefault();
-                window.location.href = 'upload.php';
-                break;
-        }
-    }
-    
-    // Tecla Escape para cerrar modales o limpiar búsqueda
-    if (e.key === 'Escape') {
-        const searchInput = document.querySelector('input[name="search"]');
-        if (searchInput && searchInput.value) {
-            searchInput.value = '';
-            searchInput.form.submit();
-        }
-    }
-});
-
-// Función para manejar errores de JavaScript
-window.addEventListener('error', function(e) {
-    console.error('❌ Error de JavaScript en inbox:', e.error);
-    
-    // Mostrar notificación de error solo en desarrollo
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        showNotification('Error de JavaScript - Ver consola', 'error');
-    }
-});
-
-// Función para detectar si el usuario está online/offline
-window.addEventListener('online', function() {
-    showNotification('✅ Conexión restaurada', 'success');
-});
-
-window.addEventListener('offline', function() {
-    showNotification('⚠️ Sin conexión a internet', 'warning');
-});
-
-// Función para detectar visibilidad de la página
-document.addEventListener('visibilitychange', function() {
-    if (document.hidden) {
-        console.log('📱 Página oculta');
-    } else {
-        console.log('📱 Página visible');
-        // Actualizar datos si es necesario
-        updateTime();
-    }
-});
-
-// Función para manejar el beforeunload
-window.addEventListener('beforeunload', function(e) {
-    // Limpiar recursos si es necesario
-    console.log('👋 Saliendo del inbox');
-});
-
-console.log('✅ Módulo JavaScript del inbox cargado completamente');

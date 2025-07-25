@@ -1,62 +1,58 @@
 <?php
-// modules/documents/inbox.php - VERSIÓN UNIFICADA Y COMPLETA
+// modules/documents/inbox.php - CÓDIGO COMPLETO REPARADO
+// Bandeja de entrada de documentos - DMS2
+
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
+// Verificar que el usuario esté logueado
 SessionManager::requireLogin();
+
 $currentUser = SessionManager::getCurrentUser();
 
-if (!$currentUser || !isset($currentUser['id'])) {
-    header('Location: ../../login.php');
-    exit();
-}
+// ==========================================
+// FUNCIONES AUXILIARES
+// ==========================================
 
-function formatBytes($size, $precision = 2)
+function getDocumentsByPermissions($userId, $userCompanyId, $userRole)
 {
-    if ($size == 0) return '0 B';
-    $units = array('B', 'KB', 'MB', 'GB', 'TB');
-    $base = log($size, 1024);
-    return round(pow(1024, $base - floor($base)), $precision) . ' ' . $units[floor($base)];
-}
-
-function getDocumentsByPermissions($userId, $companyId, $role)
-{
-    if ($role === 'admin') {
-        $query = "SELECT d.*, c.name as company_name, dep.name as department_name, 
-                         dt.name as document_type, u.first_name, u.last_name,
-                         CASE 
-                            WHEN d.mime_type LIKE 'image/%' THEN 'image'
-                            WHEN d.mime_type = 'application/pdf' THEN 'pdf'
-                            WHEN d.mime_type LIKE '%excel%' OR d.mime_type LIKE '%spreadsheet%' THEN 'excel'
-                            WHEN d.mime_type LIKE '%word%' OR d.mime_type LIKE '%document%' THEN 'word'
-                            ELSE 'file'
-                         END as file_icon
-                  FROM documents d
-                  LEFT JOIN companies c ON d.company_id = c.id
-                  LEFT JOIN departments dep ON d.department_id = dep.id
-                  LEFT JOIN document_types dt ON d.document_type_id = dt.id
-                  LEFT JOIN users u ON d.user_id = u.id
-                  WHERE d.status = 'active'
-                  ORDER BY d.created_at DESC";
-        return fetchAll($query) ?: [];
-    } else {
-        $query = "SELECT d.*, c.name as company_name, dep.name as department_name, 
-                         dt.name as document_type, u.first_name, u.last_name,
-                         CASE 
-                            WHEN d.mime_type LIKE 'image/%' THEN 'image'
-                            WHEN d.mime_type = 'application/pdf' THEN 'pdf'
-                            WHEN d.mime_type LIKE '%excel%' OR d.mime_type LIKE '%spreadsheet%' THEN 'excel'
-                            WHEN d.mime_type LIKE '%word%' OR d.mime_type LIKE '%document%' THEN 'word'
-                            ELSE 'file'
-                         END as file_icon
-                  FROM documents d
-                  LEFT JOIN companies c ON d.company_id = c.id
-                  LEFT JOIN departments dep ON d.department_id = dep.id
-                  LEFT JOIN document_types dt ON d.document_type_id = dt.id
-                  LEFT JOIN users u ON d.user_id = u.id
-                  WHERE d.status = 'active' AND d.company_id = :company_id
-                  ORDER BY d.created_at DESC";
-        return fetchAll($query, ['company_id' => $companyId]) ?: [];
+    try {
+        if ($userRole === 'admin') {
+            // Admin puede ver todos los documentos
+            $query = "SELECT d.*, 
+                             dt.name as document_type, dt.icon as file_icon,
+                             c.name as company_name, 
+                             dep.name as department_name,
+                             CONCAT(u.first_name, ' ', u.last_name) as uploaded_by
+                      FROM documents d
+                      LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                      LEFT JOIN companies c ON d.company_id = c.id  
+                      LEFT JOIN departments dep ON d.department_id = dep.id
+                      LEFT JOIN users u ON d.user_id = u.id
+                      WHERE d.status = 'active'
+                      ORDER BY d.created_at DESC";
+            
+            return fetchAll($query);
+        } else {
+            // Usuario normal solo ve documentos de su empresa
+            $query = "SELECT d.*, 
+                             dt.name as document_type, dt.icon as file_icon,
+                             c.name as company_name, 
+                             dep.name as department_name,
+                             CONCAT(u.first_name, ' ', u.last_name) as uploaded_by
+                      FROM documents d
+                      LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                      LEFT JOIN companies c ON d.company_id = c.id  
+                      LEFT JOIN departments dep ON d.department_id = dep.id
+                      LEFT JOIN users u ON d.user_id = u.id
+                      WHERE d.status = 'active' AND d.company_id = :company_id
+                      ORDER BY d.created_at DESC";
+            
+            return fetchAll($query, ['company_id' => $userCompanyId]);
+        }
+    } catch (Exception $e) {
+        error_log("Error getting documents: " . $e->getMessage());
+        return [];
     }
 }
 
@@ -95,6 +91,76 @@ function canUserDelete($userId, $role, $documentOwnerId)
     return ($role === 'admin') || ($userId == $documentOwnerId);
 }
 
+// Función para ordenar documentos
+function sortDocuments($documents, $sortBy, $sortOrder) {
+    if (empty($documents)) {
+        return $documents;
+    }
+    
+    usort($documents, function($a, $b) use ($sortBy, $sortOrder) {
+        $result = 0;
+        
+        switch ($sortBy) {
+            case 'name':
+                $result = strcasecmp($a['name'], $b['name']);
+                break;
+                
+            case 'date':
+                $dateA = strtotime($a['created_at']);
+                $dateB = strtotime($b['created_at']);
+                $result = $dateA - $dateB;
+                break;
+                
+            case 'size':
+                $sizeA = intval($a['file_size'] ?? 0);
+                $sizeB = intval($b['file_size'] ?? 0);
+                $result = $sizeA - $sizeB;
+                break;
+                
+            case 'type':
+                $typeA = $a['document_type'] ?? '';
+                $typeB = $b['document_type'] ?? '';
+                $result = strcasecmp($typeA, $typeB);
+                break;
+        }
+        
+        // Aplicar orden ascendente o descendente
+        return $sortOrder === 'desc' ? -$result : $result;
+    });
+    
+    return $documents;
+}
+
+function formatFileSize($bytes) {
+    if ($bytes == 0) return '0 B';
+    
+    $k = 1024;
+    $sizes = ['B', 'KB', 'MB', 'GB'];
+    $i = floor(log($bytes) / log($k));
+    
+    return round($bytes / pow($k, $i), 2) . ' ' . $sizes[$i];
+}
+
+function formatDate($dateString) {
+    $date = new DateTime($dateString);
+    $now = new DateTime();
+    $diff = $now->diff($date);
+    
+    if ($diff->days == 0) {
+        return 'Hoy ' . $date->format('H:i');
+    } elseif ($diff->days == 1) {
+        return 'Ayer ' . $date->format('H:i');
+    } elseif ($diff->days < 7) {
+        return $diff->days . ' días';
+    } else {
+        return $date->format('d/m/Y');
+    }
+}
+
+// ==========================================
+// OBTENER Y PROCESAR DATOS
+// ==========================================
+
 // Obtener datos
 $documents = getDocumentsByPermissions($currentUser['id'], $currentUser['company_id'], $currentUser['role']);
 $folders = organizeDocumentsByFolders($documents);
@@ -105,6 +171,23 @@ $selectedFolder = $_GET['folder'] ?? '';
 $searchTerm = $_GET['search'] ?? '';
 $selectedType = $_GET['type'] ?? '';
 
+// Parámetros de ordenación
+$sortBy = $_GET['sort'] ?? 'name';
+$sortOrder = $_GET['order'] ?? 'asc';
+
+// Validar parámetros de ordenación
+$validSortFields = ['name', 'date', 'size', 'type'];
+$validSortOrders = ['asc', 'desc'];
+
+if (!in_array($sortBy, $validSortFields)) {
+    $sortBy = 'name';
+}
+
+if (!in_array($sortOrder, $validSortOrders)) {
+    $sortOrder = 'asc';
+}
+
+// Aplicar filtros
 if ($selectedFolder || $searchTerm || $selectedType) {
     $filteredDocuments = [];
     foreach ($documents as $doc) {
@@ -144,12 +227,15 @@ if ($selectedFolder || $searchTerm || $selectedType) {
     $documents = $filteredDocuments;
 }
 
+// Aplicar ordenación después de filtros
+$documents = sortDocuments($documents, $sortBy, $sortOrder);
+
+// Registrar acceso
 logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a la bandeja de entrada');
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -157,13 +243,11 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/inbox.css">
-
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-
     <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
@@ -174,22 +258,22 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Archivos</h1>
+                <h1>Bandeja de Entrada</h1>
                 <div class="header-stats">
-                    <span class="stat-item">
-                        <i data-feather="folder"></i>
-                        <?php echo count($folders); ?> carpetas
-                    </span>
-                    <span class="stat-item">
+                    <div class="stat-item">
                         <i data-feather="file"></i>
-                        <?php echo count($documents); ?> documentos
-                    </span>
+                        <span><?php echo count($documents); ?> documentos</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="folder"></i>
+                        <span><?php echo count($folders); ?> carpetas</span>
+                    </div>
                 </div>
             </div>
 
             <div class="header-right">
                 <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars(getFullName()); ?></div>
+                    <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
@@ -231,6 +315,12 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <?php if ($selectedType): ?>
                             <input type="hidden" name="type" value="<?php echo htmlspecialchars($selectedType); ?>">
                         <?php endif; ?>
+                        <?php if ($sortBy !== 'name'): ?>
+                            <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sortBy); ?>">
+                        <?php endif; ?>
+                        <?php if ($sortOrder !== 'asc'): ?>
+                            <input type="hidden" name="order" value="<?php echo htmlspecialchars($sortOrder); ?>">
+                        <?php endif; ?>
                     </form>
                 </div>
 
@@ -245,12 +335,12 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         </a>
 
                         <?php foreach ($folders as $folderKey => $folder): ?>
-                            <a href="?folder=<?php echo urlencode($folderKey); ?><?php echo $searchTerm ? '&search=' . urlencode($searchTerm) : ''; ?>"
+                            <a href="?folder=<?php echo urlencode($folderKey); ?><?php echo $searchTerm ? '&search=' . urlencode($searchTerm) : ''; ?><?php echo $sortBy !== 'name' ? '&sort=' . urlencode($sortBy) : ''; ?><?php echo $sortOrder !== 'asc' ? '&order=' . urlencode($sortOrder) : ''; ?>"
                                 class="folder-item <?php echo $selectedFolder === $folderKey ? 'active' : ''; ?>">
                                 <i data-feather="folder"></i>
                                 <div class="folder-info">
                                     <span class="folder-name"><?php echo htmlspecialchars($folder['company']); ?></span>
-                                    <small class="folder-dept"><?php echo htmlspecialchars($folder['department']); ?></small>
+                                    <span class="folder-dept"><?php echo htmlspecialchars($folder['department']); ?></span>
                                 </div>
                                 <span class="count"><?php echo $folder['count']; ?></span>
                             </a>
@@ -258,19 +348,32 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                     </div>
                 </div>
 
-                <!-- Tipos -->
+                <!-- Tipos de archivo -->
                 <div class="types-section">
-                    <h4>Tipos de archivo</h4>
+                    <h4>Tipos</h4>
                     <div class="types-list">
-                        <a href="?" class="type-item <?php echo !$selectedType ? 'active' : ''; ?>">
+                        <a href="?<?php echo http_build_query(array_merge($_GET, ['type' => ''])); ?>" 
+                           class="type-item <?php echo !$selectedType ? 'active' : ''; ?>">
                             <i data-feather="file"></i>
                             <span>Todos</span>
                         </a>
-                        <a href="?type=pdf" class="type-item <?php echo $selectedType === 'pdf' ? 'active' : ''; ?>">
+                        <a href="?<?php echo http_build_query(array_merge($_GET, ['type' => 'pdf'])); ?>" 
+                           class="type-item <?php echo $selectedType === 'pdf' ? 'active' : ''; ?>">
                             <i data-feather="file-text"></i>
                             <span>PDF</span>
                         </a>
-                        <a href="?type=image" class="type-item <?php echo $selectedType === 'image' ? 'active' : ''; ?>">
+                        <a href="?<?php echo http_build_query(array_merge($_GET, ['type' => 'word'])); ?>" 
+                           class="type-item <?php echo $selectedType === 'word' ? 'active' : ''; ?>">
+                            <i data-feather="file-text"></i>
+                            <span>Word</span>
+                        </a>
+                        <a href="?<?php echo http_build_query(array_merge($_GET, ['type' => 'excel'])); ?>" 
+                           class="type-item <?php echo $selectedType === 'excel' ? 'active' : ''; ?>">
+                            <i data-feather="grid"></i>
+                            <span>Excel</span>
+                        </a>
+                        <a href="?<?php echo http_build_query(array_merge($_GET, ['type' => 'image'])); ?>" 
+                           class="type-item <?php echo $selectedType === 'image' ? 'active' : ''; ?>">
                             <i data-feather="image"></i>
                             <span>Imágenes</span>
                         </a>
@@ -299,12 +402,27 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                             <span>Lista</span>
                         </button>
                     </div>
+                    
                     <div class="sort-controls">
                         <select id="sortBy" onchange="sortDocuments()">
-                            <option value="name">Ordenar por nombre</option>
-                            <option value="date">Ordenar por fecha</option>
-                            <option value="size">Ordenar por tamaño</option>
+                            <option value="name" <?php echo $sortBy === 'name' ? 'selected' : ''; ?>>
+                                📝 Ordenar por nombre <?php echo $sortBy === 'name' ? ($sortOrder === 'asc' ? '↑' : '↓') : ''; ?>
+                            </option>
+                            <option value="date" <?php echo $sortBy === 'date' ? 'selected' : ''; ?>>
+                                📅 Ordenar por fecha <?php echo $sortBy === 'date' ? ($sortOrder === 'asc' ? '↑' : '↓') : ''; ?>
+                            </option>
+                            <option value="size" <?php echo $sortBy === 'size' ? 'selected' : ''; ?>>
+                                📏 Ordenar por tamaño <?php echo $sortBy === 'size' ? ($sortOrder === 'asc' ? '↑' : '↓') : ''; ?>
+                            </option>
+                            <option value="type" <?php echo $sortBy === 'type' ? 'selected' : ''; ?>>
+                                📁 Ordenar por tipo <?php echo $sortBy === 'type' ? ($sortOrder === 'asc' ? '↑' : '↓') : ''; ?>
+                            </option>
                         </select>
+                        
+                        <!-- Botón para alternar orden -->
+                        <button type="button" class="btn-icon-sm" onclick="toggleSortOrder()" title="Cambiar orden">
+                            <i data-feather="<?php echo $sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'; ?>"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -327,7 +445,10 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                         <div class="documents-grid" id="documentsGrid">
                             <?php foreach ($documents as $doc): ?>
                                 <?php $canDelete = canUserDelete($currentUser['id'], $currentUser['role'], $doc['user_id']); ?>
-                                <div class="document-card" data-id="<?php echo $doc['id']; ?>">
+                                <div class="document-card" data-id="<?php echo $doc['id']; ?>"
+                                     data-date="<?php echo strtotime($doc['created_at']); ?>"
+                                     data-size="<?php echo $doc['file_size'] ?? 0; ?>"
+                                     data-type="<?php echo htmlspecialchars($doc['document_type'] ?? ''); ?>">
                                     <div class="document-preview">
                                         <div class="document-icon <?php echo $doc['file_icon']; ?>">
                                             <?php
@@ -356,44 +477,31 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
                                         </h4>
                                         <div class="document-meta">
                                             <span class="document-type">
-                                                <?php echo htmlspecialchars($doc['document_type'] ?? 'Sin tipo'); ?>
+                                                <?php echo htmlspecialchars($doc['document_type'] ?? 'Documento'); ?>
                                             </span>
                                             <span class="document-size">
-                                                <?php echo formatBytes($doc['file_size']); ?>
+                                                <?php echo formatFileSize($doc['file_size'] ?? 0); ?>
+                                            </span>
+                                            <span class="document-date">
+                                                <?php echo formatDate($doc['created_at']); ?>
                                             </span>
                                         </div>
-                                        <div class="document-location">
-                                            <i data-feather="map-pin"></i>
-                                            <span><?php echo htmlspecialchars($doc['company_name']); ?></span>
-                                            <?php if ($doc['department_name']): ?>
-                                                <span> / <?php echo htmlspecialchars($doc['department_name']); ?></span>
-                                            <?php endif; ?>
-                                        </div>
-                                        <div class="document-date">
-                                            <i data-feather="calendar"></i>
-                                            <span><?php echo date('d/m/Y H:i', strtotime($doc['created_at'])); ?></span>
+                                        <div class="document-company">
+                                            <?php echo htmlspecialchars($doc['company_name'] . ' • ' . $doc['department_name']); ?>
                                         </div>
                                     </div>
 
-                                    <!-- BOTONES DE ACCIÓN -->
                                     <div class="document-actions">
-                                        <!-- VER -->
-                                        <button class="action-btn view-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Ver documento">
+                                        <button class="action-btn view-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Ver">
                                             <i data-feather="eye"></i>
                                         </button>
-
-                                        <!-- DESCARGAR -->
+                                        
                                         <?php if ($canDownload): ?>
                                             <button class="action-btn download-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Descargar">
                                                 <i data-feather="download"></i>
                                             </button>
-                                        <?php else: ?>
-                                            <button class="action-btn disabled" title="Descarga deshabilitada">
-                                                <i data-feather="download-cloud"></i>
-                                            </button>
                                         <?php endif; ?>
-
-                                        <!-- ELIMINAR -->
+                                        
                                         <?php if ($canDelete): ?>
                                             <button class="action-btn delete-btn" data-doc-id="<?php echo $doc['id']; ?>" title="Eliminar">
                                                 <i data-feather="trash-2"></i>
@@ -409,355 +517,49 @@ logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a l
         </div>
     </main>
 
-    <!-- Variables JavaScript -->
+    <!-- DATOS PARA JAVASCRIPT -->
     <script>
-        var documentsData = <?php echo json_encode($documents); ?>;
-        var canDownload = <?php echo $canDownload ? 'true' : 'false'; ?>;
-        var currentUserId = <?php echo $currentUser['id']; ?>;
-        var currentUserRole = '<?php echo $currentUser['role']; ?>';
+        // Datos del usuario actual para JavaScript
+        const phpUserData = {
+            id: <?php echo json_encode($currentUser['id']); ?>,
+            role: <?php echo json_encode($currentUser['role']); ?>,
+            canDownload: <?php echo json_encode($canDownload); ?>,
+            firstName: <?php echo json_encode($currentUser['first_name']); ?>,
+            lastName: <?php echo json_encode($currentUser['last_name']); ?>
+        };
 
-        console.log('🚀 INBOX DMS2 - Inicializando');
+        // Datos de documentos para JavaScript  
+        const phpDocumentsData = <?php echo json_encode($documents); ?>;
 
-        // Variables globales
-        let currentView = 'grid';
-
-        // Inicializar cuando el DOM esté listo
-        document.addEventListener('DOMContentLoaded', function() {
-            feather.replace();
-            updateTime();
-            setInterval(updateTime, 1000);
-            setupEventListeners();
-            handleURLMessages();
-            console.log('✅ Inbox inicializado correctamente');
-        });
-
-        // Configurar eventos
-        function setupEventListeners() {
-            // Delegación de eventos para botones de acción
-            document.addEventListener('click', function(e) {
-                // Botón VER
-                if (e.target.closest('.view-btn')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const docId = e.target.closest('.view-btn').dataset.docId;
-                    if (docId) {
-                        viewDocument(docId);
-                    }
-                }
-
-                // Botón DESCARGAR
-                if (e.target.closest('.download-btn')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const docId = e.target.closest('.download-btn').dataset.docId;
-                    if (docId) {
-                        downloadDocument(docId);
-                    }
-                }
-
-                // Botón ELIMINAR
-                if (e.target.closest('.delete-btn')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const docId = e.target.closest('.delete-btn').dataset.docId;
-                    if (docId) {
-                        deleteDocument(docId);
-                    }
-                }
-
-                // Click en vista previa del documento
-                if (e.target.closest('.document-preview')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const card = e.target.closest('.document-card');
-                    if (card) {
-                        const docId = card.dataset.id;
-                        if (docId) {
-                            viewDocument(docId);
-                        }
-                    }
-                }
-            });
-        }
-
-        // FUNCIÓN VER DOCUMENTO
-        function viewDocument(documentId) {
-            console.log('👁️ Ver documento ID:', documentId);
-
-            // Verificar que el documento existe
-            if (typeof documentsData !== 'undefined') {
-                const document = documentsData.find(doc => doc.id == documentId);
-                if (!document) {
-                    showNotification('Documento no encontrado', 'error');
-                    return;
-                }
-                console.log('📄 Abriendo documento:', document.name);
-            }
-
-            // Abrir en la misma ventana
-            window.location.href = 'view.php?id=' + documentId;
-        }
-
-        // FUNCIÓN DESCARGAR
-        function downloadDocument(documentId) {
-            console.log('⬇️ Descargar documento ID:', documentId);
-
-            if (!canDownload) {
-                showNotification('No tienes permisos para descargar', 'error');
-                return;
-            }
-
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = 'download.php';
-            form.style.display = 'none';
-
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'document_id';
-            input.value = documentId;
-
-            form.appendChild(input);
-            document.body.appendChild(form);
-            form.submit();
-
-            showNotification('Iniciando descarga...', 'info');
-
-            setTimeout(() => {
-                if (document.body.contains(form)) {
-                    document.body.removeChild(form);
-                }
-            }, 2000);
-        }
-
-        // FUNCIÓN ELIMINAR - CORREGIDA
-        function deleteDocument(documentId) {
-            console.log('🗑️ Eliminar documento ID:', documentId);
-
-            // CORREGIDO: Usar 'docData' en lugar de 'document' para evitar conflicto
-            const docData = documentsData.find(doc => doc.id == documentId);
-            if (!docData) {
-                showNotification('Documento no encontrado', 'error');
-                return;
-            }
-
-            // Verificar permisos
-            const canDelete = (currentUserRole === 'admin') || (docData.user_id == currentUserId);
-            if (!canDelete) {
-                showNotification('No tienes permisos para eliminar', 'error');
-                return;
-            }
-
-            // Confirmación detallada
-            const confirmMsg = `¿Eliminar documento?
-
-📄 ${docData.name}
-🏢 ${docData.company_name || 'Sin empresa'}
-📁 ${docData.department_name || 'Sin departamento'}
-📏 ${formatBytes(docData.file_size)}
-
-⚠️ Esta acción no se puede deshacer.`;
-
-            if (!confirm(confirmMsg)) return;
-
-            // Confirmación final
-            if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) return;
-
-            // CORREGIDO: Ahora document se refiere al DOM correctamente
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = 'delete.php';
-            form.style.display = 'none';
-
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'document_id';
-            input.value = documentId;
-
-            form.appendChild(input);
-            document.body.appendChild(form);
-            form.submit();
-
-            showNotification('Eliminando documento...', 'warning');
-        }
-
-        // Función para formatear bytes
-        function formatBytes(bytes, decimals = 2) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const dm = decimals < 0 ? 0 : decimals;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-        }
-
-        // Funciones auxiliares
-        function changeView(view) {
-            currentView = view;
-            document.querySelectorAll('.view-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.dataset.view === view) {
-                    btn.classList.add('active');
-                }
-            });
-            const grid = document.getElementById('documentsGrid');
-            if (grid) {
-                grid.className = view === 'grid' ? 'documents-grid' : 'documents-list';
-            }
-        }
-
-        function updateTime() {
-            const timeElement = document.getElementById('currentTime');
-            if (timeElement) {
-                const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-                const dateString = now.toLocaleDateString('es-ES', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                timeElement.textContent = `${dateString} ${timeString}`;
-            }
-        }
-
-        function showNotification(message, type = 'info') {
-            console.log(`📢 ${type.toUpperCase()}: ${message}`);
-
-            // Crear notificación visual
-            const notification = document.createElement('div');
-            notification.className = `notification-toast ${type}`;
-
-            const colors = {
-                'info': '#3b82f6',
-                'success': '#10b981',
-                'warning': '#f59e0b',
-                'error': '#ef4444'
-            };
-
-            const icons = {
-                'info': 'info',
-                'success': 'check-circle',
-                'warning': 'alert-triangle',
-                'error': 'alert-circle'
-            };
-
-            notification.innerHTML = `
-                <i data-feather="${icons[type] || 'info'}"></i>
-                <span>${message}</span>
-                <button onclick="this.parentElement.remove()">
-                    <i data-feather="x"></i>
-                </button>
-            `;
-
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${colors[type] || colors.info};
-                color: white;
-                padding: 16px 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                z-index: 9999;
-                font-size: 14px;
-                font-weight: 500;
-                max-width: 350px;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                transform: translateX(100%);
-                transition: transform 0.3s ease;
-            `;
-
-            document.body.appendChild(notification);
-            feather.replace();
-
-            // Animar entrada
-            setTimeout(() => {
-                notification.style.transform = 'translateX(0)';
-            }, 10);
-
-            // Auto-remover después de 4 segundos
-            setTimeout(() => {
-                notification.style.transform = 'translateX(100%)';
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                    }
-                }, 300);
-            }, 4000);
-        }
-
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            if (window.innerWidth <= 768) {
-                sidebar.classList.toggle('active');
-            }
-        }
-
-        function clearAllFilters() {
-            window.location.href = window.location.pathname;
-        }
-
-        function sortDocuments() {
-            const sortBy = document.getElementById('sortBy').value;
-            const url = new URL(window.location);
-            url.searchParams.set('sort', sortBy);
-            window.location.href = url.toString();
-        }
-
-        function handleURLMessages() {
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('success') === 'document_deleted') {
-                const name = urlParams.get('name') || 'el documento';
-                showNotification(`${name} eliminado exitosamente`, 'success');
-
-                // Limpiar URL
-                const newUrl = window.location.pathname;
-                window.history.replaceState({}, document.title, newUrl);
-            }
-
-            if (urlParams.get('error')) {
-                const error = urlParams.get('error');
-                let message = 'Error desconocido';
-
-                switch (error) {
-                    case 'delete_failed':
-                        message = 'Error al eliminar el documento';
-                        break;
-                    case 'document_not_found':
-                        message = 'Documento no encontrado';
-                        break;
-                    case 'download_disabled':
-                        message = 'Descarga deshabilitada';
-                        break;
-                    case 'file_not_found':
-                        message = 'Archivo no encontrado';
-                        break;
-                }
-
-                showNotification(message, 'error');
-
-                // Limpiar URL
-                const newUrl = window.location.pathname;
-                window.history.replaceState({}, document.title, newUrl);
-            }
-        }
-
-        function showComingSoon(feature) {
-            showNotification(`${feature} - Próximamente`, 'info');
-        }
-
-        // Configurar eventos responsive
-        window.addEventListener('resize', function() {
-            if (window.innerWidth > 768) {
-                document.getElementById('sidebar').classList.remove('active');
-            }
-        });
+        // Variables globales para compatibilidad
+        const currentUserId = phpUserData.id;
+        const currentUserRole = phpUserData.role;
+        const canDownload = phpUserData.canDownload;
+        
+        console.log('🔧 DATOS PHP CARGADOS:');
+        console.log('- Usuario ID:', currentUserId);
+        console.log('- Rol:', currentUserRole);
+        console.log('- Puede descargar:', canDownload);
+        console.log('- Documentos:', phpDocumentsData.length);
+        console.log('- Ordenado por:', '<?php echo $sortBy; ?>', '<?php echo $sortOrder; ?>');
     </script>
-</body>
 
+    <!-- Scripts principales -->
+    <script src="../../assets/js/inbox.js"></script>
+    <script>
+        // Inicializar iconos Feather después de cargar la página
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof feather !== 'undefined') {
+                feather.replace();
+                console.log('✅ Iconos Feather renderizados');
+            }
+        });
+
+        // Función para mostrar mensajes "próximamente"
+        function showComingSoon(feature) {
+            showNotification(`🚧 ${feature} estará disponible próximamente`, 'info', 3000);
+        }
+    </script>
+
+</body>
 </html>
