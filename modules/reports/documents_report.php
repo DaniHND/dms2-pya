@@ -246,6 +246,7 @@ function getFilterOptions($currentUser)
     return $options;
 }
 
+// Obtener datos
 $stats = getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
 $activity = getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
 $documents = getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
@@ -273,9 +274,11 @@ function formatBytes($size, $precision = 2)
     <title>Reportes de Documentos - DMS2</title>
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
+    <link rel="stylesheet" href="../../assets/css/reports.css">
     <link rel="stylesheet" href="../../assets/css/modal.css">
     <link rel="stylesheet" href="../../assets/css/summary.css">
     <script src="https://unpkg.com/feather-icons"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body class="dashboard-layout">
@@ -340,6 +343,7 @@ function formatBytes($size, $precision = 2)
                         <div class="stat-label">Espacio Total</div>
                     </div>
                 </div>
+                
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="download"></i>
@@ -348,16 +352,36 @@ function formatBytes($size, $precision = 2)
                         <div class="stat-number">
                             <?php
                             $totalDownloads = 0;
-                            foreach ($activity['by_action'] as $action) {
-                                if ($action['action'] === 'download') {
-                                    $totalDownloads = $action['count'];
-                                    break;
+                            if (isset($activity['by_action']) && is_array($activity['by_action'])) {
+                                foreach ($activity['by_action'] as $action) {
+                                    if ($action['action'] === 'download') {
+                                        $totalDownloads = $action['count'];
+                                        break;
+                                    }
                                 }
                             }
                             echo number_format($totalDownloads);
                             ?>
                         </div>
                         <div class="stat-label">Total Descargas</div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="users"></i>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-number">
+                            <?php
+                            $uniqueUsers = 0;
+                            if (isset($stats['top_uploaders']) && is_array($stats['top_uploaders'])) {
+                                $uniqueUsers = count($stats['top_uploaders']);
+                            }
+                            echo number_format($uniqueUsers);
+                            ?>
+                        </div>
+                        <div class="stat-label">Usuarios Únicos</div>
                     </div>
                 </div>
             </div>
@@ -375,32 +399,39 @@ function formatBytes($size, $precision = 2)
                             <label for="date_to">Hasta</label>
                             <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>">
                         </div>
-
-                        <?php if ($currentUser['role'] === 'admin' && !empty($filterOptions['companies'])): ?>
-                            <div class="filter-group">
-                                <label for="company_id">Empresa</label>
-                                <select id="company_id" name="company_id">
-                                    <option value="">Todas las empresas</option>
+                        <?php if ($currentUser['role'] === 'admin'): ?>
+                        <div class="filter-group">
+                            <label for="company_id">Empresa</label>
+                            <select id="company_id" name="company_id">
+                                <option value="">Todas las empresas</option>
+                                <?php if (isset($filterOptions['companies']) && is_array($filterOptions['companies'])): ?>
                                     <?php foreach ($filterOptions['companies'] as $company): ?>
-                                        <option value="<?php echo $company['id']; ?>"
-                                            <?php echo $companyId == $company['id'] ? 'selected' : ''; ?>>
+                                        <option value="<?php echo $company['id']; ?>" <?php echo $companyId == $company['id'] ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($company['name']); ?>
                                         </option>
                                     <?php endforeach; ?>
-                                </select>
-                            </div>
+                                <?php endif; ?>
+                            </select>
+                        </div>
                         <?php endif; ?>
-
                         <div class="filter-group">
                             <label for="document_type">Tipo de Documento</label>
                             <select id="document_type" name="document_type">
                                 <option value="">Todos los tipos</option>
-                                <?php foreach ($filterOptions['document_types'] as $type): ?>
-                                    <option value="<?php echo $type['name']; ?>"
-                                        <?php echo $documentType == $type['name'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($type['name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
+                                <?php if (isset($filterOptions['document_types']) && is_array($filterOptions['document_types'])): ?>
+                                    <?php foreach ($filterOptions['document_types'] as $type): ?>
+                                        <option value="<?php echo htmlspecialchars($type['name']); ?>" <?php echo $documentType == $type['name'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($type['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="report_type">Vista</label>
+                            <select id="report_type" name="report_type">
+                                <option value="summary" <?php echo $reportType == 'summary' ? 'selected' : ''; ?>>Resumen</option>
+                                <option value="detailed" <?php echo $reportType == 'detailed' ? 'selected' : ''; ?>>Detallado</option>
                             </select>
                         </div>
                     </div>
@@ -417,93 +448,126 @@ function formatBytes($size, $precision = 2)
                 </form>
             </div>
 
+            <!-- Exportación -->
+            <div class="export-section">
+                <h3>Exportar Datos</h3>
+                <div class="export-buttons">
+                    <button class="export-btn" onclick="exportData('csv')">
+                        <i data-feather="file-text"></i>
+                        Exportar CSV
+                    </button>
+                    <button class="export-btn" onclick="exportData('excel')">
+                        <i data-feather="grid"></i>
+                        Exportar Excel
+                    </button>
+                    <button class="export-btn" onclick="printReport()">
+                        <i data-feather="printer"></i>
+                        Imprimir
+                    </button>
+                </div>
+            </div>
+
             <?php if ($reportType === 'summary'): ?>
-                <!-- Vista de resumen con gráficos -->
-                <div class="charts-section">
-                    <div class="chart-row">
-                        <div class="chart-container">
+                <!-- Vista resumen con gráficos -->
+                <div class="reports-charts">
+                    <div class="chart-grid">
+                        <!-- Documentos por tipo -->
+                        <div class="chart-card">
                             <h3>Documentos por Tipo</h3>
-                            <canvas id="documentsByTypeChart"></canvas>
-                        </div>
-
-                        <div class="chart-container">
-                            <h3>Documentos por Día</h3>
-                            <canvas id="documentsByDateChart"></canvas>
-                        </div>
-                    </div>
-
-                    <?php if ($currentUser['role'] === 'admin' && !empty($stats['by_company'])): ?>
-                        <div class="chart-row">
                             <div class="chart-container">
-                                <h3>Documentos por Empresa</h3>
-                                <canvas id="documentsByCompanyChart"></canvas>
+                                <canvas id="typeChart"></canvas>
                             </div>
-
-                            <div class="top-uploaders-section">
-                                <h3>Usuarios que Más Suben</h3>
-                                <div class="top-users-list">
-                                    <?php foreach ($stats['top_uploaders'] as $index => $uploader): ?>
-                                        <div class="top-user-item">
-                                            <div class="user-rank"><?php echo $index + 1; ?></div>
-                                            <div class="user-info">
-                                                <div class="user-name">
-                                                    <?php echo htmlspecialchars($uploader['first_name'] . ' ' . $uploader['last_name']); ?>
-                                                </div>
-                                                <div class="user-username">@<?php echo htmlspecialchars($uploader['username']); ?></div>
-                                            </div>
-                                            <div class="user-count">
-                                                <span class="count-number"><?php echo number_format($uploader['documents_count']); ?></span>
-                                                <span class="count-label">documentos</span>
-                                            </div>
+                            <div class="chart-data">
+                                <?php if (isset($stats['by_type']) && is_array($stats['by_type']) && !empty($stats['by_type'])): ?>
+                                    <?php foreach ($stats['by_type'] as $type): ?>
+                                        <div class="data-item">
+                                            <div class="item-name"><?php echo htmlspecialchars($type['type_name'] ?? 'Sin tipo'); ?></div>
+                                            <div class="item-count"><?php echo number_format($type['count']); ?> documentos</div>
                                         </div>
                                     <?php endforeach; ?>
-                                </div>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-
-                    <!-- Documentos más populares -->
-                    <div class="popular-documents-section">
-                        <div class="popular-section">
-                            <h3>Documentos Más Descargados</h3>
-                            <div class="popular-list">
-                                <?php if (empty($activity['most_downloaded'])): ?>
-                                    <div class="empty-state">
-                                        <i data-feather="download"></i>
-                                        <p>No hay descargas registradas</p>
-                                    </div>
                                 <?php else: ?>
-                                    <?php foreach ($activity['most_downloaded'] as $index => $doc): ?>
-                                        <div class="popular-item">
-                                            <div class="item-rank"><?php echo $index + 1; ?></div>
-                                            <div class="item-info">
-                                                <div class="item-name"><?php echo htmlspecialchars($doc['document_name']); ?></div>
-                                                <div class="item-count"><?php echo $doc['download_count']; ?> descargas</div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
+                                    <div class="empty-state">Sin datos para mostrar</div>
                                 <?php endif; ?>
                             </div>
                         </div>
 
-                        <div class="popular-section">
-                            <h3>Documentos Más Vistos</h3>
-                            <div class="popular-list">
-                                <?php if (empty($activity['most_viewed'])): ?>
-                                    <div class="empty-state">
-                                        <i data-feather="eye"></i>
-                                        <p>No hay visualizaciones registradas</p>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($activity['most_viewed'] as $index => $doc): ?>
-                                        <div class="popular-item">
-                                            <div class="item-rank"><?php echo $index + 1; ?></div>
-                                            <div class="item-info">
-                                                <div class="item-name"><?php echo htmlspecialchars($doc['document_name']); ?></div>
-                                                <div class="item-count"><?php echo $doc['view_count']; ?> visualizaciones</div>
-                                            </div>
+                        <!-- Documentos por empresa (solo para admin) -->
+                        <?php if ($currentUser['role'] === 'admin'): ?>
+                        <div class="chart-card">
+                            <h3>Documentos por Empresa</h3>
+                            <div class="chart-container">
+                                <canvas id="companyChart"></canvas>
+                            </div>
+                            <div class="chart-data">
+                                <?php if (isset($stats['by_company']) && is_array($stats['by_company']) && !empty($stats['by_company'])): ?>
+                                    <?php foreach ($stats['by_company'] as $company): ?>
+                                        <div class="data-item">
+                                            <div class="item-name"><?php echo htmlspecialchars($company['company_name'] ?? 'Sin empresa'); ?></div>
+                                            <div class="item-count"><?php echo number_format($company['count']); ?> documentos</div>
                                         </div>
                                     <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="empty-state">Sin datos para mostrar</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Actividad por día -->
+                        <div class="chart-card full-width">
+                            <h3>Documentos Subidos por Día</h3>
+                            <div class="chart-container">
+                                <canvas id="dateChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Top usuarios -->
+                        <div class="chart-card">
+                            <h3>Top Usuarios que Suben Documentos</h3>
+                            <div class="chart-data">
+                                <?php if (isset($stats['top_uploaders']) && is_array($stats['top_uploaders']) && !empty($stats['top_uploaders'])): ?>
+                                    <?php foreach ($stats['top_uploaders'] as $uploader): ?>
+                                        <div class="data-item">
+                                            <div class="item-name"><?php echo htmlspecialchars(($uploader['first_name'] ?? '') . ' ' . ($uploader['last_name'] ?? '')); ?></div>
+                                            <div class="item-count"><?php echo number_format($uploader['documents_count']); ?> documentos</div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="empty-state">Sin datos para mostrar</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <!-- Documentos más descargados -->
+                        <div class="chart-card">
+                            <h3>Documentos Más Descargados</h3>
+                            <div class="chart-data">
+                                <?php if (isset($activity['most_downloaded']) && is_array($activity['most_downloaded']) && !empty($activity['most_downloaded'])): ?>
+                                    <?php foreach ($activity['most_downloaded'] as $doc): ?>
+                                        <div class="data-item">
+                                            <div class="item-name"><?php echo htmlspecialchars($doc['document_name']); ?></div>
+                                            <div class="item-count"><?php echo $doc['download_count']; ?> descargas</div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="empty-state">Sin datos para mostrar</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <!-- Documentos más vistos -->
+                        <div class="chart-card">
+                            <h3>Documentos Más Vistos</h3>
+                            <div class="chart-data">
+                                <?php if (isset($activity['most_viewed']) && is_array($activity['most_viewed']) && !empty($activity['most_viewed'])): ?>
+                                    <?php foreach ($activity['most_viewed'] as $doc): ?>
+                                        <div class="data-item">
+                                            <div class="item-name"><?php echo htmlspecialchars($doc['document_name']); ?></div>
+                                            <div class="item-count"><?php echo $doc['view_count']; ?> visualizaciones</div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="empty-state">Sin datos para mostrar</div>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -528,242 +592,68 @@ function formatBytes($size, $precision = 2)
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (empty($documents)): ?>
-                                    <tr>
-                                        <td colspan="8" class="empty-state">
-                                            <i data-feather="file-text"></i>
-                                            <p>No se encontraron documentos con los filtros seleccionados</p>
-                                        </td>
-                                    </tr>
-                                <?php else: ?>
+                                <?php if (!empty($documents)): ?>
                                     <?php foreach ($documents as $doc): ?>
                                         <tr>
                                             <td>
-                                                <div class="document-cell">
-                                                    <div class="document-icon">
-                                                        <i data-feather="file-text"></i>
-                                                    </div>
-                                                    <div class="document-info">
-                                                        <strong><?php echo htmlspecialchars($doc['name']); ?></strong>
-                                                        <?php if ($doc['description']): ?>
-                                                            <br><small><?php echo htmlspecialchars(substr($doc['description'], 0, 50)); ?>...</small>
-                                                        <?php endif; ?>
-                                                    </div>
+                                                <div class="document-info">
+                                                    <i data-feather="file-text"></i>
+                                                    <span><?php echo htmlspecialchars($doc['name']); ?></span>
                                                 </div>
                                             </td>
+                                            <td><?php echo htmlspecialchars($doc['document_type'] ?? 'Sin tipo'); ?></td>
+                                            <td><?php echo htmlspecialchars($doc['company_name'] ?? 'Sin empresa'); ?></td>
                                             <td>
-                                                <span class="type-badge">
-                                                    <?php echo htmlspecialchars($doc['document_type'] ?? 'Sin tipo'); ?>
-                                                </span>
-                                            </td>
-                                            <td><?php echo htmlspecialchars($doc['company_name']); ?></td>
-                                            <td>
-                                                <div class="user-cell-small">
-                                                    <strong><?php echo htmlspecialchars($doc['first_name'] . ' ' . $doc['last_name']); ?></strong>
-                                                    <br><small>@<?php echo htmlspecialchars($doc['username']); ?></small>
+                                                <div class="user-info">
+                                                    <span class="user-name"><?php echo htmlspecialchars(($doc['first_name'] ?? '') . ' ' . ($doc['last_name'] ?? '')); ?></span>
+                                                    <small class="username">@<?php echo htmlspecialchars($doc['username'] ?? 'usuario'); ?></small>
                                                 </div>
                                             </td>
-                                            <td><?php echo formatBytes($doc['file_size']); ?></td>
+                                            <td><?php echo formatBytes($doc['file_size'] ?? 0); ?></td>
                                             <td><?php echo date('d/m/Y H:i', strtotime($doc['created_at'])); ?></td>
                                             <td>
-                                                <span class="stat-badge"><?php echo number_format($doc['download_count']); ?></span>
+                                                <span class="badge badge-info"><?php echo number_format($doc['download_count'] ?? 0); ?></span>
                                             </td>
                                             <td>
-                                                <span class="stat-badge"><?php echo number_format($doc['view_count']); ?></span>
+                                                <span class="badge badge-success"><?php echo number_format($doc['view_count'] ?? 0); ?></span>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="8" class="empty-state">
+                                            <div class="empty-content">
+                                                <i data-feather="inbox"></i>
+                                                <h4>No se encontraron documentos</h4>
+                                                <p>No hay documentos que coincidan con los filtros seleccionados.</p>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
                 </div>
             <?php endif; ?>
-
-            <!-- Exportación -->
-            <div class="export-section">
-                <h3>Exportar Datos</h3>
-                <div class="export-buttons">
-                    <button class="export-btn" onclick="exportarDatos('csv')">
-                        <i data-feather="file-text"></i>
-                        Descargar CSV
-                    </button>
-                    <button class="export-btn" onclick="exportarDatos('excel')">
-                        <i data-feather="grid"></i>
-                        Descargar Excel
-                    </button>
-                    <button class="export-btn" onclick="exportarDatos('pdf')">
-                        <i data-feather="file"></i>
-                        Descargar PDF
-                    </button>
-                </div>
-            </div>
         </div>
     </main>
 
-    <!-- Modal para vista previa del PDF -->
-    <div id="pdfModal" class="pdf-modal">
-        <div class="pdf-modal-content">
-            <div class="pdf-modal-header">
-                <h3 class="pdf-modal-title">Vista Previa del PDF - Reportes de Documentos</h3>
-                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
-            </div>
-            <div class="pdf-modal-body">
-                <div class="pdf-loading" id="pdfLoading">
-                    <div class="spinner"></div>
-                    <p>Generando vista previa del PDF...</p>
-                </div>
-                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
-            </div>
-        </div>
-    </div>
-
+    <!-- Scripts -->
+    <script src="../../assets/js/dashboard.js"></script>
     <script>
         // Variables de configuración
         var currentFilters = <?php echo json_encode($_GET); ?>;
-        var documentsByType = <?php echo json_encode($stats['by_type']); ?>;
-        var documentsByDate = <?php echo json_encode($stats['by_date']); ?>;
-        var documentsByCompany = <?php echo json_encode($stats['by_company'] ?? []); ?>;
-        var reportType = '<?php echo $reportType; ?>';
 
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-
-            if (reportType === 'summary') {
-                initCharts();
-            }
+            
+            <?php if ($reportType === 'summary'): ?>
+            initCharts();
+            <?php endif; ?>
         });
-
-        function initCharts() {
-            initDocumentsByTypeChart();
-            initDocumentsByDateChart();
-
-            if (documentsByCompany.length > 0) {
-                initDocumentsByCompanyChart();
-            }
-        }
-
-        function initDocumentsByTypeChart() {
-            const ctx = document.getElementById('documentsByTypeChart').getContext('2d');
-
-            const labels = documentsByType.map(item => item.type_name || 'Sin tipo');
-            const data = documentsByType.map(item => parseInt(item.count));
-
-            const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460'];
-
-            new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: data,
-                        backgroundColor: colors.slice(0, data.length),
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 15,
-                                usePointStyle: true
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function initDocumentsByDateChart() {
-            const ctx = document.getElementById('documentsByDateChart').getContext('2d');
-
-            const labels = documentsByDate.map(item => {
-                const date = new Date(item.date);
-                return date.toLocaleDateString('es-ES', {
-                    month: 'short',
-                    day: 'numeric'
-                });
-            });
-            const data = documentsByDate.map(item => parseInt(item.count));
-
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Documentos',
-                        data: data,
-                        borderColor: '#8B4513',
-                        backgroundColor: 'rgba(139, 69, 19, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function initDocumentsByCompanyChart() {
-            const ctx = document.getElementById('documentsByCompanyChart').getContext('2d');
-
-            const labels = documentsByCompany.map(item => item.company_name);
-            const data = documentsByCompany.map(item => parseInt(item.count));
-
-            const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460', '#DAA520', '#B8860B'];
-
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Documentos',
-                        data: data,
-                        backgroundColor: colors.slice(0, data.length),
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
-                            }
-                        }
-                    }
-                }
-            });
-        }
 
         function updateTime() {
             const timeElement = document.getElementById('currentTime');
@@ -789,118 +679,147 @@ function formatBytes($size, $precision = 2)
             }
         }
 
-        function exportarDatos(formato) {
-            // Obtener parámetros actuales de la URL
-            const urlParams = new URLSearchParams(window.location.search);
-
-            // Construir URL de exportación
-            const exportUrl = 'export.php?format=' + formato + '&type=documents_report&modal=1&' + urlParams.toString();
-
-            if (formato === 'pdf') {
-                // Para PDF, abrir modal
-                abrirModalPDF(exportUrl);
-            } else {
-                // Para CSV y Excel, abrir en nueva ventana para descarga
-                mostrarNotificacion('Preparando descarga...', 'info');
-                window.open(exportUrl.replace('&modal=1', ''), '_blank');
-            }
+        function exportData(format) {
+            const url = `export.php?format=${format}&type=documents_report&${new URLSearchParams(currentFilters).toString()}`;
+            window.open(url, '_blank');
         }
 
-        function abrirModalPDF(url) {
-            const modal = document.getElementById('pdfModal');
-            const iframe = document.getElementById('pdfIframe');
-            const loading = document.getElementById('pdfLoading');
-
-            // Mostrar modal y loading
-            modal.style.display = 'block';
-            loading.style.display = 'flex';
-            iframe.style.display = 'none';
-
-            // Cargar PDF en iframe
-            iframe.onload = function() {
-                loading.style.display = 'none';
-                iframe.style.display = 'block';
-            };
-
-            iframe.onerror = function() {
-                loading.innerHTML = '<div class="spinner"></div><p>Error al cargar la vista previa. <a href="' + url.replace('&modal=1', '&download=1') + '" target="_blank">Descargar PDF directamente</a></p>';
-            };
-
-            iframe.src = url;
-        }
-
-        function cerrarModalPDF() {
-            const modal = document.getElementById('pdfModal');
-            const iframe = document.getElementById('pdfIframe');
-            
-            modal.style.display = 'none';
-            iframe.src = '';
-        }
-
-        function mostrarNotificacion(mensaje, tipo = 'info') {
-            // Crear elemento de notificación
-            const notification = document.createElement('div');
-            notification.className = `notification-toast ${tipo}`;
-            notification.innerHTML = `
-                <i data-feather="${getNotificationIcon(tipo)}"></i>
-                <span>${mensaje}</span>
-                <button onclick="this.parentElement.remove()">
-                    <i data-feather="x"></i>
-                </button>
-            `;
-
-            // Agregar al DOM
-            document.body.appendChild(notification);
-            feather.replace();
-
-            // Mostrar animación
-            setTimeout(() => notification.classList.add('visible'), 100);
-
-            // Auto-remover después de 5 segundos
-            setTimeout(() => {
-                if (notification.parentElement) {
-                    notification.classList.remove('visible');
-                    setTimeout(() => notification.remove(), 300);
-                }
-            }, 5000);
-        }
-
-        function getNotificationIcon(tipo) {
-            const icons = {
-                'success': 'check-circle',
-                'error': 'alert-circle',
-                'warning': 'alert-triangle',
-                'info': 'info'
-            };
-            return icons[tipo] || 'info';
+        function printReport() {
+            window.print();
         }
 
         function showComingSoon(feature) {
-            mostrarNotificacion(`${feature} - Próximamente`, 'info');
+            alert(`${feature} - Próximamente`);
         }
 
-        // Cerrar modal al hacer clic fuera
-        window.onclick = function(event) {
-            const modal = document.getElementById('pdfModal');
-            if (event.target === modal) {
-                cerrarModalPDF();
+        <?php if ($reportType === 'summary'): ?>
+        function initCharts() {
+            // Datos para gráficos
+            const typeData = <?php echo json_encode($stats['by_type'] ?? []); ?>;
+            const companyData = <?php echo json_encode($stats['by_company'] ?? []); ?>;
+            const dateData = <?php echo json_encode($stats['by_date'] ?? []); ?>;
+
+            // Gráfico de documentos por tipo
+            if (typeData.length > 0) {
+                const typeCtx = document.getElementById('typeChart');
+                if (typeCtx) {
+                    new Chart(typeCtx.getContext('2d'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: typeData.map(item => item.type_name || 'Sin tipo'),
+                            datasets: [{
+                                data: typeData.map(item => item.count),
+                                backgroundColor: [
+                                    '#4e342e',    // Café oscuro
+                                    '#A0522D',    // Café medio  
+                                    '#654321',    // Café muy oscuro
+                                    '#D2B48C',    // Beige
+                                    '#CD853F',    // Café claro
+                                    '#DEB887',    // Café claro accent
+                                    '#8B4513',    // Café silla de montar
+                                    '#A0522D'     // Café medio repetido
+                                ]
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom'
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Gráfico de documentos por empresa (solo admin)
+            <?php if ($currentUser['role'] === 'admin'): ?>
+            if (companyData.length > 0) {
+                const companyCtx = document.getElementById('companyChart');
+                if (companyCtx) {
+                    new Chart(companyCtx.getContext('2d'), {
+                        type: 'bar',
+                        data: {
+                            labels: companyData.map(item => item.company_name || 'Sin empresa'),
+                            datasets: [{
+                                label: 'Documentos',
+                                data: companyData.map(item => item.count),
+                                backgroundColor: '#4e342e'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            <?php endif; ?>
+
+            // Gráfico de documentos por día
+            if (dateData.length > 0) {
+                const dateCtx = document.getElementById('dateChart');
+                if (dateCtx) {
+                    new Chart(dateCtx.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: dateData.map(item => {
+                                const date = new Date(item.date);
+                                return date.toLocaleDateString('es-ES');
+                            }),
+                            datasets: [{
+                                label: 'Documentos subidos',
+                                data: dateData.map(item => item.count),
+                                borderColor: '#4e342e',
+                                backgroundColor: 'rgba(78, 52, 46, 0.1)',
+                                tension: 0.4,
+                                fill: true
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        stepSize: 1
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
             }
         }
-
-        // Cerrar modal con Escape
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                cerrarModalPDF();
-            }
-        });
+        <?php endif; ?>
 
         // Responsive
         window.addEventListener('resize', function() {
             if (window.innerWidth > 768) {
-                document.getElementById('sidebar').classList.remove('active');
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) {
+                    sidebar.classList.remove('active');
+                }
             }
         });
     </script>
 </body>
-
 </html>

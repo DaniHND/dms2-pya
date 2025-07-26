@@ -1,6 +1,6 @@
 <?php
 // modules/reports/activity_log.php
-// Log de actividades del sistema - DMS2
+// Log de actividades con filtros avanzados - DMS2
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -10,153 +10,149 @@ SessionManager::requireLogin();
 
 $currentUser = SessionManager::getCurrentUser();
 
-// Parámetros de filtrado - convertir formato de fecha dd/mm/yyyy a yyyy-mm-dd
+// Parámetros de filtro
 $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
 $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 $userId = $_GET['user_id'] ?? '';
 $action = $_GET['action'] ?? '';
-$page = intval($_GET['page'] ?? 1);
+$module = $_GET['module'] ?? '';
+$page = (int)($_GET['page'] ?? 1);
 $limit = 50;
 $offset = ($page - 1) * $limit;
 
-// Función para obtener actividades con filtros - VERSIÓN CORREGIDA
-function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset)
+// Función para obtener actividades
+function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $module, $limit, $offset)
 {
     $whereConditions = [];
-    $params = [];
+    $params = [
+        'date_from' => $dateFrom . ' 00:00:00',
+        'date_to' => $dateTo . ' 23:59:59',
+        'limit' => $limit,
+        'offset' => $offset
+    ];
 
-    // Filtro por fechas
-    $whereConditions[] = "al.created_at >= :date_from";
-    $whereConditions[] = "al.created_at <= :date_to";
-    $params['date_from'] = $dateFrom . ' 00:00:00';
-    $params['date_to'] = $dateTo . ' 23:59:59';
-
-    // Filtro por usuario
-    if (!empty($userId)) {
-        $whereConditions[] = "al.user_id = :user_id";
-        $params['user_id'] = $userId;
-    }
-
-    // Filtro por acción
-    if (!empty($action)) {
-        $whereConditions[] = "al.action = :action";
-        $params['action'] = $action;
-    }
-
-    // Filtro por empresa (si no es admin)
+    // Control de acceso por rol
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
 
-    $whereClause = implode(' AND ', $whereConditions);
+    // Filtros adicionales
+    if (!empty($userId)) {
+        $whereConditions[] = "al.user_id = :user_id";
+        $params['user_id'] = $userId;
+    }
 
-    // Query principal - SIN LIMIT en los parámetros
-    $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name
-              FROM activity_logs al
-              LEFT JOIN users u ON al.user_id = u.id
+    if (!empty($action)) {
+        $whereConditions[] = "al.action = :action";
+        $params['action'] = $action;
+    }
+
+    if (!empty($module)) {
+        $whereConditions[] = "al.module = :module";
+        $params['module'] = $module;
+    }
+
+    $whereClause = $whereConditions ? 'AND ' . implode(' AND ', $whereConditions) : '';
+
+    $query = "SELECT al.*, 
+                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                     u.username,
+                     u.email,
+                     c.name as company_name
+              FROM activity_logs al 
+              LEFT JOIN users u ON al.user_id = u.id 
               LEFT JOIN companies c ON u.company_id = c.id
-              WHERE $whereClause
-              ORDER BY al.created_at DESC
-              LIMIT $limit OFFSET $offset";
+              WHERE al.created_at >= :date_from 
+              AND al.created_at <= :date_to
+              $whereClause
+              ORDER BY al.created_at DESC 
+              LIMIT :limit OFFSET :offset";
 
-    // NO incluir limit y offset en $params
-    try {
-        $result = fetchAll($query, $params);
-        return $result ?: []; // Devolver array vacío si es false
-    } catch (Exception $e) {
-        error_log("Error en getActivities: " . $e->getMessage());
-        return []; // Devolver array vacío en caso de error
-    }
+    return fetchAll($query, $params);
 }
-// Función para obtener el total de registros
-function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
+
+// Función para obtener total de actividades
+function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $module)
 {
     $whereConditions = [];
-    $params = [];
+    $params = [
+        'date_from' => $dateFrom . ' 00:00:00',
+        'date_to' => $dateTo . ' 23:59:59'
+    ];
 
-    // Filtro por fechas
-    $whereConditions[] = "al.created_at >= :date_from";
-    $whereConditions[] = "al.created_at <= :date_to";
-    $params['date_from'] = $dateFrom . ' 00:00:00';
-    $params['date_to'] = $dateTo . ' 23:59:59';
-
-    // Filtro por usuario
-    if (!empty($userId)) {
-        $whereConditions[] = "al.user_id = :user_id";
-        $params['user_id'] = $userId;
-    }
-
-    // Filtro por acción
-    if (!empty($action)) {
-        $whereConditions[] = "al.action = :action";
-        $params['action'] = $action;
-    }
-
-    // Filtro por empresa (si no es admin)
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
 
-    $whereClause = implode(' AND ', $whereConditions);
+    if (!empty($userId)) {
+        $whereConditions[] = "al.user_id = :user_id";
+        $params['user_id'] = $userId;
+    }
+
+    if (!empty($action)) {
+        $whereConditions[] = "al.action = :action";
+        $params['action'] = $action;
+    }
+
+    if (!empty($module)) {
+        $whereConditions[] = "al.module = :module";
+        $params['module'] = $module;
+    }
+
+    $whereClause = $whereConditions ? 'AND ' . implode(' AND ', $whereConditions) : '';
 
     $query = "SELECT COUNT(*) as total
-              FROM activity_logs al
-              LEFT JOIN users u ON al.user_id = u.id
-              LEFT JOIN companies c ON u.company_id = c.id
-              WHERE $whereClause";
+              FROM activity_logs al 
+              LEFT JOIN users u ON al.user_id = u.id 
+              WHERE al.created_at >= :date_from 
+              AND al.created_at <= :date_to
+              $whereClause";
 
     $result = fetchOne($query, $params);
     return $result['total'] ?? 0;
 }
 
-// Función para obtener usuarios para filtro
+// Función para obtener usuarios
 function getUsers($currentUser)
 {
     if ($currentUser['role'] === 'admin') {
-        $query = "SELECT id, username, first_name, last_name FROM users WHERE status = 'active' ORDER BY first_name, last_name";
-        return fetchAll($query);
+        $query = "SELECT id, first_name, last_name, email, username FROM users ORDER BY first_name, last_name";
+        $params = [];
     } else {
-        $query = "SELECT id, username, first_name, last_name FROM users WHERE company_id = :company_id AND status = 'active' ORDER BY first_name, last_name";
-        return fetchAll($query, ['company_id' => $currentUser['company_id']]);
+        $query = "SELECT id, first_name, last_name, email, username FROM users WHERE company_id = :company_id ORDER BY first_name, last_name";
+        $params = ['company_id' => $currentUser['company_id']];
     }
+
+    return fetchAll($query, $params);
 }
 
 // Función para obtener tipos de acciones
 function getActionTypes()
 {
     $query = "SELECT DISTINCT action FROM activity_logs ORDER BY action";
-    return fetchAll($query);
+    return fetchAll($query, []);
 }
 
-// Función para traducir acciones
-function translateAction($action)
+// Función para obtener módulos
+function getModules()
 {
-    $translations = [
-        'login' => 'Iniciar Sesión',
-        'logout' => 'Cerrar Sesión',
-        'upload' => 'Subir Archivo',
-        'download' => 'Descargar',
-        'delete' => 'Eliminar',
-        'create' => 'Crear',
-        'update' => 'Actualizar',
-        'view' => 'Ver',
-        'share' => 'Compartir',
-        'access_denied' => 'Acceso Denegado',
-        'view_activity_log' => 'Ver Log de Actividades',
-        'export_csv' => 'Exportar CSV',
-        'export_pdf' => 'Exportar PDF',
-        'export_excel' => 'Exportar Excel'
-    ];
-
-    return $translations[$action] ?? ucfirst(str_replace('_', ' ', $action));
+    $query = "SELECT DISTINCT module FROM activity_logs ORDER BY module";
+    return fetchAll($query, []);
 }
 
-$activities = getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset);
-$totalActivities = getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action);
+// Función para formatear nombres de acciones
+function formatActionName($action)
+{
+    return ucfirst(str_replace('_', ' ', $action));
+}
+
+$activities = getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $module, $limit, $offset);
+$totalActivities = getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $module);
 $users = getUsers($currentUser);
 $actionTypes = getActionTypes();
+$modules = getModules();
 
 $totalPages = ceil($totalActivities / $limit);
 
@@ -173,13 +169,11 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <title>Log de Actividades - DMS2</title>
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
-    <link rel="stylesheet" href="../../assets/css/summary.css">
-    <link rel="stylesheet" href="../../assets/css/modal.css">
-    <link rel="stylesheet" href="../../assets/css/vista_filtro.css">
+    <link rel="stylesheet" href="../../assets/css/reports.css">
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
-<body class="dashboard-layout">
+<body class="dashboard-layout reports-page">
     <!-- Sidebar -->
     <?php include '../../includes/sidebar.php'; ?>
 
@@ -191,7 +185,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Actividades</h1>
+                <h1>Log de Actividades</h1>
             </div>
 
             <div class="header-right">
@@ -220,24 +214,46 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </a>
             </div>
 
-            <!-- Resumen de resultados -->
-            <div class="results-summary">
-                <div class="summary-stats">
-                    <div class="stat-item">
+            <!-- Estadísticas principales con diseño consistente del index -->
+            <div class="reports-stats-grid">
+                <div class="reports-stat-card">
+                    <div class="reports-stat-icon">
                         <i data-feather="activity"></i>
-                        <span class="stat-number"><?php echo number_format($totalActivities); ?></span>
-                        <span class="stat-label">Total Actividades</span>
                     </div>
-                    <div class="stat-item">
-                        <i data-feather="calendar"></i>
-                        <span class="stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></span>
-                        <span class="stat-label">Período</span>
+                    <div class="reports-stat-info">
+                        <div class="reports-stat-number"><?php echo number_format($totalActivities); ?></div>
+                        <div class="reports-stat-label">Total Actividades</div>
                     </div>
                 </div>
+
+                <div class="reports-stat-card">
+                    <div class="reports-stat-icon">
+                        <i data-feather="calendar"></i>
+                    </div>
+                    <div class="reports-stat-info">
+                        <div class="reports-stat-number"><?php echo date('d/m/Y', strtotime($dateFrom)) . ' - ' . date('d/m/Y', strtotime($dateTo)); ?></div>
+                        <div class="reports-stat-label">Período</div>
+                    </div>
+                </div>
+
+                <?php if (!empty($_GET['date_from']) || !empty($_GET['user_id']) || !empty($_GET['action'])): ?>
+                <div class="reports-stat-card">
+                    <div class="reports-stat-icon">
+                        <i data-feather="users"></i>
+                    </div>
+                    <div class="reports-stat-info">
+                        <div class="reports-stat-number"><?php 
+                            $uniqueUsers = array_unique(array_column($activities, 'user_id'));
+                            echo count($uniqueUsers);
+                        ?></div>
+                        <div class="reports-stat-label">Usuarios Únicos</div>
+                    </div>
+                </div>
+                <?php endif; ?>
             </div>
 
             <!-- Filtros -->
-            <div class="reports-filters">
+            <div class="reports-filters" id="filtersPanel" style="display: block;">
                 <h3>Filtros de Búsqueda</h3>
                 <form method="GET" action="">
                     <div class="filters-row">
@@ -249,6 +265,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <label for="date_to">Hasta</label>
                             <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>" required>
                         </div>
+                        <?php if ($currentUser['role'] === 'admin'): ?>
                         <div class="filter-group">
                             <label for="user_id">Usuario</label>
                             <select id="user_id" name="user_id">
@@ -261,14 +278,15 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                        <?php endif; ?>
                         <div class="filter-group">
                             <label for="action">Acción</label>
                             <select id="action" name="action">
                                 <option value="">Todas las acciones</option>
                                 <?php foreach ($actionTypes as $actionType): ?>
-                                    <option value="<?php echo $actionType['action']; ?>"
+                                    <option value="<?php echo htmlspecialchars($actionType['action']); ?>"
                                         <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars(translateAction($actionType['action'])); ?>
+                                        <?php echo htmlspecialchars(formatActionName($actionType['action'])); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -285,254 +303,222 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         </a>
                     </div>
                 </form>
+            </div>
 
-                <!-- Vista Previa de Resultados (solo se muestra cuando hay filtros aplicados) -->
-                <?php if (!empty($_GET['date_from']) || !empty($_GET['user_id']) || !empty($_GET['action'])): ?>
-                    <div class="filter-preview">
-                        <div class="preview-header">
-                            <h4>
-                                <i data-feather="list"></i>
-                                Vista Previa de Resultados
-                            </h4>
-                            <span class="preview-count">
-                                <?php echo number_format($totalActivities); ?> actividades encontradas
-                            </span>
+            <!-- Tabla de actividades - Solo mostrar si hay filtros aplicados -->
+            <?php if (!empty($_GET['date_from']) || !empty($_GET['user_id']) || !empty($_GET['action'])): ?>
+                <?php if (!empty($activities)): ?>
+                <div class="activity-table-container">
+                    <div class="activity-table-wrapper">
+                        <table class="activity-table">
+                            <thead>
+                                <tr>
+                                    <th>FECHA/HORA</th>
+                                    <th>USUARIO</th>
+                                    <th>EMPRESA</th>
+                                    <th>DESCRIPCIÓN</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($activities as $activity): ?>
+                                <tr data-activity-id="<?php echo $activity['id']; ?>">
+                                    <td class="date-column">
+                                        <div class="date-primary"><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></div>
+                                        <div class="time-secondary"><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></div>
+                                    </td>
+                                    <td class="user-column">
+                                        <div class="user-primary"><?php echo htmlspecialchars($activity['user_name'] ?? ($activity['first_name'] . ' ' . $activity['last_name'])); ?></div>
+                                        <div class="user-secondary">@<?php echo htmlspecialchars($activity['username'] ?? 'sistema'); ?></div>
+                                    </td>
+                                    <td class="company-column">
+                                        <?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?>
+                                    </td>
+                                    <td class="description-column">
+                                        <?php 
+                                        $description = formatActionName($activity['action']);
+                                        if (!empty($activity['details'])) {
+                                            $description = $activity['details'];
+                                        }
+                                        echo htmlspecialchars($description);
+                                        ?>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Paginación -->
+                    <?php if ($totalPages > 1): ?>
+                    <div class="pagination">
+                        <div class="pagination-info">
+                            Mostrando <?php echo number_format(($page - 1) * $limit + 1); ?> - 
+                            <?php echo number_format(min($page * $limit, $totalActivities)); ?> 
+                            de <?php echo number_format($totalActivities); ?> registros
                         </div>
+                        <div class="pagination-controls">
+                            <?php if ($page > 1): ?>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>" class="pagination-btn">
+                                    <i data-feather="chevrons-left"></i>
+                                </a>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" class="pagination-btn">
+                                    <i data-feather="chevron-left"></i>
+                                </a>
+                            <?php endif; ?>
 
-                        <div class="preview-content">
-                            <?php if (!empty($activities)): ?>
-                                <div class="preview-table-container">
-                                    <table class="preview-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Fecha/Hora</th>
-                                                <th>Usuario</th>
-                                                <th>Empresa</th>
-                                                <th>Descripción</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php
-                                            // Mostrar máximo 10 registros en la vista previa
-                                            $previewActivities = array_slice($activities, 0, 10);
-                                            foreach ($previewActivities as $activity):
-                                            ?>
-                                                <tr>
-                                                    <td>
-                                                        <div class="datetime-preview">
-                                                            <strong><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></strong>
-                                                            <small><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></small>
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        <div class="user-preview">
-                                                            <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
-                                                            <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        <span class="company-preview"><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></span>
-                                                    </td>
-                                                    <td>
-                                                        <div class="description-preview" title="<?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>">
-                                                            <?php
-                                                            $description = $activity['description'] ?? 'Sin descripción';
-                                                            echo htmlspecialchars(strlen($description) > 80 ? substr($description, 0, 80) . '...' : $description);
-                                                            ?>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <?php 
+                            $startPage = max(1, $page - 2);
+                            $endPage = min($totalPages, $page + 2);
+                            
+                            for ($i = $startPage; $i <= $endPage; $i++): 
+                            ?>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>" 
+                                   class="pagination-btn <?php echo $i == $page ? 'active' : ''; ?>">
+                                    <?php echo $i; ?>
+                                </a>
+                            <?php endfor; ?>
 
-                                <?php if ($totalActivities > 10): ?>
-                                    <div class="preview-footer">
-                                        <p>
-                                            Mostrando 10 de <?php echo number_format($totalActivities); ?> registros.
-                                            <strong>Use la exportación para obtener todos los resultados.</strong>
-                                        </p>
-                                    </div>
-                                <?php endif; ?>
-                            <?php else: ?>
-                                <div class="preview-empty">
-                                    <i data-feather="search"></i>
-                                    <h4>No se encontraron resultados</h4>
-                                    <p>No hay actividades que coincidan con los filtros aplicados.</p>
-                                </div>
+                            <?php if ($page < $totalPages): ?>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" class="pagination-btn">
+                                    <i data-feather="chevron-right"></i>
+                                </a>
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $totalPages])); ?>" class="pagination-btn">
+                                    <i data-feather="chevrons-right"></i>
+                                </a>
                             <?php endif; ?>
                         </div>
                     </div>
-                <?php endif; ?>
-            </div>
-            <!-- Exportación -->
-            <div class="export-section">
-                <h3>Exportar Datos</h3>
-                <div class="export-buttons">
-                    <button class="export-btn" onclick="exportarDatos('csv')">
-                        <i data-feather="file-text"></i>
-                        Descargar CSV
-                    </button>
-                    <button class="export-btn" onclick="exportarDatos('excel')">
-                        <i data-feather="grid"></i>
-                        Descargar Excel
-                    </button>
-                    <button class="export-btn" onclick="exportarDatos('pdf')">
-                        <i data-feather="file"></i>
-                        Descargar PDF
-                    </button>
+                    <?php endif; ?>
                 </div>
-            </div>
+                <?php else: ?>
+                    <!-- Mensaje cuando no hay resultados -->
+                    <div class="empty-state">
+                        <i data-feather="search"></i>
+                        <p>No se encontraron actividades con los filtros seleccionados.</p>
+                        <p>Prueba modificar los criterios de búsqueda.</p>
+                    </div>
+                <?php endif; ?>
+
+                <!-- Exportar datos - Solo mostrar si hay resultados -->
+                <?php if (!empty($activities)): ?>
+                <div class="export-section">
+                    <h3>Exportar Datos</h3>
+                    <div class="export-buttons">
+                        <a href="export.php?type=activity_log&format=csv&<?php echo http_build_query($_GET); ?>" class="export-btn csv-btn">
+                            <i data-feather="file-text"></i>
+                            Descargar CSV
+                        </a>
+                        <a href="export.php?type=activity_log&format=excel&<?php echo http_build_query($_GET); ?>" class="export-btn excel-btn">
+                            <i data-feather="grid"></i>
+                            Descargar Excel
+                        </a>
+                        <a href="export.php?type=activity_log&format=pdf&<?php echo http_build_query($_GET); ?>" class="export-btn pdf-btn">
+                            <i data-feather="file"></i>
+                            Descargar PDF
+                        </a>
+                    </div>
+                </div>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
     </main>
 
-    <!-- Modal para vista previa del PDF -->
-    <div id="pdfModal" class="pdf-modal">
-        <div class="pdf-modal-content">
-            <div class="pdf-modal-header">
-                <h3 class="pdf-modal-title">Vista Previa del PDF - Actividades</h3>
-                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
-            </div>
-            <div class="pdf-modal-body">
-                <div class="pdf-loading" id="pdfLoading">
-                    <div class="spinner"></div>
-                    <p>Generando vista previa del PDF...</p>
-                </div>
-                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
-            </div>
-        </div>
-    </div>
-
+    <!-- Scripts -->
     <script>
-        // Inicializar página
-        document.addEventListener('DOMContentLoaded', function() {
-            feather.replace();
-            updateTime();
-            setInterval(updateTime, 1000);
-        });
+        // Inicializar Feather Icons
+        feather.replace();
 
+        // Actualizar tiempo
         function updateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleString('es-ES', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
-                const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-                const dateString = now.toLocaleDateString('es-ES', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                timeElement.textContent = `${dateString} ${timeString}`;
+                timeElement.textContent = timeString;
             }
         }
 
+        updateTime();
+        setInterval(updateTime, 60000);
+
+        // Toggle sidebar
         function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            if (window.innerWidth <= 768) {
-                sidebar.classList.toggle('active');
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            
+            if (sidebar && mainContent) {
+                sidebar.classList.toggle('collapsed');
+                mainContent.classList.toggle('sidebar-collapsed');
             }
         }
 
-        function exportarDatos(formato) {
-            // Obtener parámetros actuales de la URL
-            const urlParams = new URLSearchParams(window.location.search);
-
-            // Construir URL de exportación
-            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&modal=1&' + urlParams.toString();
-
-            if (formato === 'pdf') {
-                // Para PDF, abrir modal
-                abrirModalPDF(exportUrl);
-            } else {
-                // Para CSV y Excel, abrir en nueva ventana para descarga
-                mostrarNotificacion('Preparando descarga de ' + formato.toUpperCase() + '...', 'info');
-                window.open(exportUrl, '_blank');
-            }
+        // Función placeholder para próximamente
+        function showComingSoon(feature) {
+            alert(`${feature} estará disponible próximamente.`);
         }
 
-        function abrirModalPDF(url) {
-            const modal = document.getElementById('pdfModal');
-            const iframe = document.getElementById('pdfIframe');
-            const loading = document.getElementById('pdfLoading');
+        // Función placeholder para próximamente
+        function showComingSoon(feature) {
+            alert(`${feature} estará disponible próximamente.`);
+        }
 
-            // Mostrar modal
-            modal.style.display = 'block';
+        // Validación de fechas
+        document.getElementById('date_from').addEventListener('change', function() {
+            const dateFrom = new Date(this.value);
+            const dateTo = new Date(document.getElementById('date_to').value);
+            
+            if (dateFrom > dateTo) {
+                document.getElementById('date_to').value = this.value;
+            }
+        });
 
-            // Mostrar loading y ocultar iframe
-            loading.style.display = 'flex';
-            iframe.style.display = 'none';
+        document.getElementById('date_to').addEventListener('change', function() {
+            const dateFrom = new Date(document.getElementById('date_from').value);
+            const dateTo = new Date(this.value);
+            
+            if (dateTo < dateFrom) {
+                document.getElementById('date_from').value = this.value;
+            }
+        });
 
-            // Cargar PDF en iframe
-            iframe.onload = function() {
-                loading.style.display = 'none';
-                iframe.style.display = 'block';
-            };
-
-            iframe.onerror = function() {
-                loading.innerHTML = '<p style="color: #dc3545;">Error al cargar la vista previa del PDF</p>';
-            };
-
-            iframe.src = url;
-
-            // Cerrar modal con Escape
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    cerrarModalPDF();
+        // Tooltip para detalles largos
+        document.querySelectorAll('.details-text').forEach(element => {
+            element.addEventListener('click', function() {
+                const fullText = this.getAttribute('title');
+                if (fullText && fullText.length > 80) {
+                    alert(fullText);
                 }
             });
+        });
 
-            // Cerrar modal al hacer clic fuera
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) {
-                    cerrarModalPDF();
-                }
+        // Resaltar filas al hacer hover
+        document.querySelectorAll('.data-table tbody tr').forEach(row => {
+            row.addEventListener('mouseenter', function() {
+                this.style.backgroundColor = '#f8fafc';
             });
-        }
+            
+            row.addEventListener('mouseleave', function() {
+                this.style.backgroundColor = '';
+            });
+        });
 
-        function cerrarModalPDF() {
-            const modal = document.getElementById('pdfModal');
-            const iframe = document.getElementById('pdfIframe');
-
-            modal.style.display = 'none';
-            iframe.src = 'about:blank'; // Limpiar iframe
-        }
-
-        function mostrarNotificacion(mensaje, tipo) {
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${tipo === 'info' ? '#17a2b8' : '#28a745'};
-                color: white;
-                padding: 12px 20px;
-                border-radius: 4px;
-                z-index: 1000;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-                font-family: Arial, sans-serif;
-            `;
-            notification.textContent = mensaje;
-
-            document.body.appendChild(notification);
-
-            setTimeout(() => {
-                if (notification.parentElement) {
-                    notification.remove();
-                }
-            }, 3000);
-        }
-
-        // Responsive
-        window.addEventListener('resize', function() {
-            if (window.innerWidth > 768) {
-                const sidebar = document.getElementById('sidebar');
-                if (sidebar) {
-                    sidebar.classList.remove('active');
-                }
-            }
+        // Auto-submit form con delay
+        let filterTimeout;
+        document.querySelectorAll('select[name="user_id"], select[name="action"], select[name="module"]').forEach(select => {
+            select.addEventListener('change', function() {
+                clearTimeout(filterTimeout);
+                filterTimeout = setTimeout(() => {
+                    // Auto-enviar formulario después de 500ms
+                    // this.form.submit();
+                }, 500);
+            });
         });
     </script>
 </body>
@@ -540,30 +526,30 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
 </html>
 
 <?php
-// Función auxiliar para obtener clase CSS según acción
+// Funciones auxiliares para CSS y iconos
+
 function getActionClass($action)
 {
     $classes = [
-        'login' => 'success',
-        'logout' => 'info',
-        'upload' => 'success',
-        'download' => 'info',
-        'delete' => 'error',
-        'create' => 'success',
+        'login' => 'active',
+        'logout' => 'warning',
+        'upload' => 'active',
+        'download' => 'active',
+        'delete' => 'inactive',
+        'create' => 'active',
         'update' => 'warning',
-        'view' => 'info',
+        'view' => 'active',
         'share' => 'warning',
-        'access_denied' => 'error',
-        'view_activity_log' => 'info',
-        'export_csv' => 'info',
-        'export_pdf' => 'info',
-        'export_excel' => 'info'
+        'access_denied' => 'inactive',
+        'view_activity_log' => 'active',
+        'export_csv' => 'active',
+        'export_pdf' => 'active',
+        'export_excel' => 'active'
     ];
 
-    return $classes[$action] ?? 'info';
+    return $classes[$action] ?? 'active';
 }
 
-// Función auxiliar para obtener icono según acción
 function getActionIcon($action)
 {
     $icons = [

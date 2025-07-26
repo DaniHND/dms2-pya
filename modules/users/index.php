@@ -182,7 +182,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Gestión de Usuarios</h1>
+                <h1>Usuarios</h1>
             </div>
 
             <div class="header-right">
@@ -206,7 +206,7 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
             <div class="module-header">
                 <div class="module-title">
                     <div>
-                        <h1>Gestión de Usuarios</h1>
+                        <h1>Gestion de Usuarios</h1>
                         <p class="module-subtitle">Administrar usuarios del sistema</p>
                     </div>
                     <button class="btn btn-primary" onclick="showCreateUserModal()">
