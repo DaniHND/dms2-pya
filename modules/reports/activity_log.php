@@ -173,7 +173,6 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
     <title>Log de Actividades - DMS2</title>
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
-    <link rel="stylesheet" href="../../assets/css/reports.css">
     <link rel="stylesheet" href="../../assets/css/summary.css">
     <link rel="stylesheet" href="../../assets/css/modal.css">
     <link rel="stylesheet" href="../../assets/css/vista_filtro.css">

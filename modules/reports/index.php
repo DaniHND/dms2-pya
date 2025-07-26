@@ -55,7 +55,47 @@ function getReportStats($userId, $companyId, $role)
     $result = fetchOne($query, $params);
     $stats['active_users'] = $result['total'] ?? 0;
 
+    // Acciones más comunes
+    if ($role === 'admin') {
+        $query = "SELECT action, COUNT(*) as count FROM activity_logs 
+                  WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                  GROUP BY action ORDER BY count DESC LIMIT 1";
+        $params = [];
+    } else {
+        $query = "SELECT al.action, COUNT(*) as count FROM activity_logs al 
+                  LEFT JOIN users u ON al.user_id = u.id 
+                  WHERE u.company_id = :company_id AND al.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                  GROUP BY al.action ORDER BY count DESC LIMIT 1";
+        $params = ['company_id' => $companyId];
+    }
+    $result = fetchOne($query, $params);
+    $stats['top_action'] = $result['action'] ?? 'N/A';
+    $stats['top_action_count'] = $result['count'] ?? 0;
+
     return $stats;
+}
+
+// Función para obtener actividad reciente
+function getRecentActivity($userId, $role, $companyId, $limit = 10)
+{
+    if ($role === 'admin') {
+        $query = "SELECT al.*, u.first_name, u.last_name, u.username 
+                  FROM activity_logs al 
+                  LEFT JOIN users u ON al.user_id = u.id 
+                  ORDER BY al.created_at DESC 
+                  LIMIT :limit";
+        $params = ['limit' => $limit];
+    } else {
+        $query = "SELECT al.*, u.first_name, u.last_name, u.username 
+                  FROM activity_logs al 
+                  LEFT JOIN users u ON al.user_id = u.id 
+                  WHERE u.company_id = :company_id OR al.user_id = :user_id
+                  ORDER BY al.created_at DESC 
+                  LIMIT :limit";
+        $params = ['company_id' => $companyId, 'user_id' => $userId, 'limit' => $limit];
+    }
+
+    return fetchAll($query, $params);
 }
 
 // Función para obtener datos de gráficos
@@ -88,6 +128,7 @@ function getChartData($userId, $role, $companyId, $days = 7)
 }
 
 $stats = getReportStats($currentUser['id'], $currentUser['company_id'], $currentUser['role']);
+$recentActivity = getRecentActivity($currentUser['id'], $currentUser['role'], $currentUser['company_id']);
 $chartData = getChartData($currentUser['id'], $currentUser['role'], $currentUser['company_id']);
 
 // Registrar acceso a reportes
@@ -103,13 +144,12 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
     <title>Reportes y Bitácora - DMS2</title>
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
-    <link rel="stylesheet" href="../../assets/css/reports.css">
     <script src="https://unpkg.com/feather-icons"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
+
     <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
@@ -172,6 +212,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                         <div class="stat-label">Usuarios Activos</div>
                     </div>
                 </div>
+
+
             </div>
 
             <!-- Grid principal -->
@@ -188,6 +230,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                             <i data-feather="user"></i>
                             <span>Reportes por Usuario</span>
                         </a>
+
+                        
                         <a href="documents_report.php" class="nav-btn">
                             <i data-feather="file-text"></i>
                             <span>Reportes de Documentos</span>
@@ -202,9 +246,10 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                 </div>
             </div>
         </div>
+        </div>
     </main>
 
-    <!-- Scripts -->
+    <!-- Variables JavaScript -->
     <script>
         var chartData = <?php echo json_encode($chartData); ?>;
         var currentUserRole = '<?php echo $currentUser['role']; ?>';
@@ -223,8 +268,8 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             const labels = chartData.map(item => {
                 const date = new Date(item.date);
                 return date.toLocaleDateString('es-ES', {
-                    day: 'numeric',
-                    month: 'short'
+                    month: 'short',
+                    day: 'numeric'
                 });
             });
             const data = chartData.map(item => item.count);
@@ -238,14 +283,9 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                         data: data,
                         borderColor: '#8B4513',
                         backgroundColor: 'rgba(139, 69, 19, 0.1)',
-                        borderWidth: 3,
+                        borderWidth: 2,
                         fill: true,
-                        tension: 0.4,
-                        pointBackgroundColor: '#8B4513',
-                        pointBorderColor: '#fff',
-                        pointBorderWidth: 2,
-                        pointRadius: 6,
-                        pointHoverRadius: 8
+                        tension: 0.4
                     }]
                 },
                 options: {
@@ -259,24 +299,10 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     scales: {
                         y: {
                             beginAtZero: true,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            },
                             ticks: {
                                 stepSize: 1
                             }
-                        },
-                        x: {
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            }
                         }
-                    },
-                    interaction: {
-                        intersect: false,
-                    },
-                    hover: {
-                        mode: 'index'
                     }
                 }
             });
@@ -314,10 +340,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
         // Responsive
         window.addEventListener('resize', function() {
             if (window.innerWidth > 768) {
-                const sidebar = document.getElementById('sidebar');
-                if (sidebar) {
-                    sidebar.classList.remove('active');
-                }
+                document.getElementById('sidebar').classList.remove('active');
             }
         });
     </script>
