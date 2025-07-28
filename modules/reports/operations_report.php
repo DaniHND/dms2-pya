@@ -96,31 +96,25 @@ function getDetailedOperations($currentUser, $dateFrom, $dateTo, $operation, $li
     $whereConditions[] = "al.created_at >= :date_from";
     $whereConditions[] = "al.created_at <= :date_to";
 
-    // Filtro por tipo de operación
-    if (!empty($operation)) {
-        $whereConditions[] = "al.action = :operation";
-        $params['operation'] = $operation;
-    }
-
     // Filtro por empresa si no es admin
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
         $params['company_id'] = $currentUser['company_id'];
     }
 
+    // Filtro por tipo de operación
+    if (!empty($operation)) {
+        $whereConditions[] = "al.action = :operation";
+        $params['operation'] = $operation;
+    }
+
     $whereClause = implode(' AND ', $whereConditions);
 
-    $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name,
-                     CASE 
-                         WHEN al.table_name = 'documents' THEN d.name
-                         WHEN al.table_name = 'users' THEN CONCAT(target_u.first_name, ' ', target_u.last_name)
-                         ELSE NULL
-                     END as target_name
+    $query = "SELECT al.*, u.first_name, u.last_name, u.username, u.email,
+                     al.details as description, al.ip_address,
+                     CASE WHEN al.table_name IS NOT NULL THEN al.table_name ELSE 'Sistema' END as target_name
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
-              LEFT JOIN companies c ON u.company_id = c.id
-              LEFT JOIN documents d ON al.table_name = 'documents' AND al.record_id = d.id
-              LEFT JOIN users target_u ON al.table_name = 'users' AND al.record_id = target_u.id
               WHERE $whereClause
               ORDER BY al.created_at DESC
               LIMIT :limit";
@@ -208,13 +202,13 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
-
     <?php include '../../includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
@@ -318,12 +312,14 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                             <label for="operation">Tipo de Operación</label>
                             <select id="operation" name="operation">
                                 <option value="">Todas las operaciones</option>
-                                <?php foreach ($stats['by_action'] as $actionStat): ?>
-                                    <option value="<?php echo $actionStat['action']; ?>"
-                                        <?php echo $operation == $actionStat['action'] ? 'selected' : ''; ?>>
-                                        <?php echo ucfirst($actionStat['action']); ?> (<?php echo $actionStat['count']; ?>)
-                                    </option>
-                                <?php endforeach; ?>
+                                <?php if (isset($stats['by_action']) && is_array($stats['by_action'])): ?>
+                                    <?php foreach ($stats['by_action'] as $actionStat): ?>
+                                        <option value="<?php echo $actionStat['action']; ?>"
+                                            <?php echo $operation == $actionStat['action'] ? 'selected' : ''; ?>>
+                                            <?php echo ucfirst($actionStat['action']); ?> (<?php echo $actionStat['count']; ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                             </select>
                         </div>
                     </div>
@@ -463,22 +459,39 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
             <div class="export-section">
                 <h3>Exportar Datos</h3>
                 <div class="export-buttons">
-                    <button class="export-btn" onclick="exportData('csv')">
+                    <button class="export-btn" onclick="exportarDatos('csv')">
                         <i data-feather="file-text"></i>
-                        Exportar CSV
+                        Descargar CSV
                     </button>
-                    <button class="export-btn" onclick="exportData('excel')">
+                    <button class="export-btn" onclick="exportarDatos('excel')">
                         <i data-feather="grid"></i>
-                        Exportar Excel
+                        Descargar Excel
                     </button>
-                    <button class="export-btn" onclick="printReport()">
-                        <i data-feather="printer"></i>
-                        Imprimir
+                    <button class="export-btn" onclick="exportarDatos('pdf')">
+                        <i data-feather="file"></i>
+                        Descargar PDF
                     </button>
                 </div>
             </div>
         </div>
     </main>
+
+    <!-- Modal para vista previa del PDF -->
+    <div id="pdfModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Seguimiento de Operaciones</h3>
+                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div class="pdf-loading" id="pdfLoading">
+                    <div class="spinner"></div>
+                    <p>Generando vista previa del PDF...</p>
+                </div>
+                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Variables de configuración
@@ -492,7 +505,6 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
             feather.replace();
             updateTime();
             setInterval(updateTime, 1000);
-
             initCharts();
         });
 
@@ -504,21 +516,26 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByTypeChart() {
             const ctx = document.getElementById('operationsByTypeChart').getContext('2d');
-
-            const labels = operationsByType.map(item => item.action.charAt(0).toUpperCase() + item.action.slice(1));
+            
+            const labels = operationsByType.map(item => item.action);
             const data = operationsByType.map(item => parseInt(item.count));
 
-            const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2B48C', '#DEB887', '#F4A460', '#DAA520', '#B8860B'];
-
             new Chart(ctx, {
-                type: 'bar',
+                type: 'doughnut',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Operaciones',
                         data: data,
-                        backgroundColor: colors.slice(0, data.length),
-                        borderWidth: 0
+                        backgroundColor: [
+                            '#4e342e',    // Café oscuro
+                            '#A0522D',    // Café medio  
+                            '#654321',    // Café muy oscuro
+                            '#D2B48C',    // Beige
+                            '#CD853F',    // Café claro
+                            '#DEB887',    // Café claro accent
+                            '#8B4513',    // Café silla de montar
+                            '#A0522D'     // Café medio repetido
+                        ]
                     }]
                 },
                 options: {
@@ -526,15 +543,7 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            display: false
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
-                            }
+                            position: 'bottom'
                         }
                     }
                 }
@@ -543,29 +552,23 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByHourChart() {
             const ctx = document.getElementById('operationsByHourChart').getContext('2d');
-
-            // Crear array de 24 horas
+            
+            // Crear array completo de 24 horas
             const hourlyData = new Array(24).fill(0);
             operationsByHour.forEach(item => {
                 hourlyData[parseInt(item.hour)] = parseInt(item.count);
             });
 
-            const labels = Array.from({
-                length: 24
-            }, (_, i) => i.toString().padStart(2, '0') + ':00');
+            const labels = Array.from({length: 24}, (_, i) => i.toString().padStart(2, '0') + ':00');
 
             new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
                         label: 'Operaciones',
                         data: hourlyData,
-                        borderColor: '#8B4513',
-                        backgroundColor: 'rgba(139, 69, 19, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4
+                        backgroundColor: '#4e342e'
                     }]
                 },
                 options: {
@@ -590,25 +593,24 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
 
         function initOperationsByDateChart() {
             const ctx = document.getElementById('operationsByDateChart').getContext('2d');
-
+            
             const labels = operationsByDate.map(item => {
                 const date = new Date(item.date);
-                return date.toLocaleDateString('es-ES', {
-                    month: 'short',
-                    day: 'numeric'
-                });
+                return date.toLocaleDateString('es-ES');
             });
             const data = operationsByDate.map(item => parseInt(item.count));
 
             new Chart(ctx, {
-                type: 'bar',
+                type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
                         label: 'Operaciones',
                         data: data,
-                        backgroundColor: '#8B4513',
-                        borderWidth: 0
+                        borderColor: '#4e342e',
+                        backgroundColor: 'rgba(78, 52, 46, 0.1)',
+                        tension: 0.4,
+                        fill: true
                     }]
                 },
                 options: {
@@ -655,13 +657,85 @@ logActivity($currentUser['id'], 'view_operations_report', 'reports', null, 'Usua
             }
         }
 
-        function exportData(format) {
-            const url = `export.php?format=${format}&type=operations_report&${new URLSearchParams(currentFilters).toString()}`;
-            window.open(url, '_blank');
+        function exportarDatos(formato) {
+            // Obtener parámetros actuales de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Construir URL de exportación
+            const exportUrl = 'export.php?format=' + formato + '&type=operations_report&modal=1&' + urlParams.toString();
+
+            if (formato === 'pdf') {
+                // Para PDF, abrir modal
+                abrirModalPDF(exportUrl);
+            } else {
+                // Para CSV y Excel, abrir en nueva ventana para descarga
+                mostrarNotificacion('Preparando descarga...', 'info');
+                window.open(exportUrl.replace('&modal=1', ''), '_blank');
+            }
         }
 
-        function printReport() {
-            window.print();
+        function abrirModalPDF(url) {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            const loading = document.getElementById('pdfLoading');
+
+            // Mostrar modal y loading
+            modal.style.display = 'block';
+            loading.style.display = 'flex';
+            iframe.style.display = 'none';
+
+            // Cargar PDF en iframe
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+
+            iframe.onerror = function() {
+                loading.innerHTML = '<div class="spinner"></div><p>Error al cargar la vista previa. <button onclick="cerrarModalPDF()" style="margin-left: 10px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Cerrar</button></p>';
+            };
+
+            iframe.src = url;
+
+            // Cerrar modal al hacer clic fuera
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    cerrarModalPDF();
+                }
+            };
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            
+            modal.style.display = 'none';
+            iframe.src = '';
+        }
+
+        function mostrarNotificacion(mensaje, tipo = 'info') {
+            // Crear elemento de notificación
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${tipo === 'error' ? '#dc3545' : tipo === 'success' ? '#28a745' : '#17a2b8'};
+                color: white;
+                border-radius: 4px;
+                z-index: 1000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                font-family: Arial, sans-serif;
+            `;
+            notification.textContent = mensaje;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, 3000);
         }
 
         function showComingSoon(feature) {

@@ -167,7 +167,9 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/users.css">
     <link rel="stylesheet" href="../../assets/css/users2.css">
-    <script src="https://unpkg.com/feather-icons"></script>
+
+    <!-- NO cargar users2.css -->
+    <script src="https://unpkg.com/feather-icons"></script>   
 </head>
 
 <body class="dashboard-layout">
@@ -573,6 +575,8 @@ logActivity($currentUser['id'], 'view_users', 'users', null, 'Usuario accedió a
             }, duration);
         }
     </script>
+    
+    
 </body>
 
 </html>

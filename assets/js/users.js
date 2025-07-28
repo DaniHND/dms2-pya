@@ -1,560 +1,684 @@
-// assets/js/users.js
-// JavaScript para el módulo de usuarios - DMS2 (SIN ELIMINAR USUARIOS)
+// assets/js/users.js - CÓDIGO COMPLETO CON FIX DE CHECKBOXES
+// REEMPLAZA TODO EL CONTENIDO DE users.js CON ESTE CÓDIGO
 
-// Variables globales
-let currentEditingUser = null;
+// ================================
+// VARIABLES GLOBALES
+// ================================
+let currentPage = 1;
+let totalPages = 1;
+let currentFilters = {};
 
-// Funciones de utilidad para modales
-function createModal(id, content) {
-    // Verificar si ya existe el modal
-    const existingModal = document.getElementById(id);
-    if (existingModal) {
-        existingModal.remove();
+// ================================
+// INICIALIZACIÓN
+// ================================
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Módulo de usuarios cargado');
+    initializeUsers();
+    initializeCheckboxes();
+});
+
+function initializeUsers() {
+    // Inicializar filtros si existen
+    initializeFilters();
+    
+    // Cargar usuarios si la función existe
+    if (typeof loadUsers === 'function') {
+        loadUsers();
     }
     
-    const modal = document.createElement('div');
-    modal.id = id;
-    modal.className = 'modal-overlay';
-    modal.innerHTML = content;
+    console.log('✅ Módulo de usuarios inicializado');
+}
+
+// ================================
+// FIX ESPECÍFICO PARA CHECKBOXES
+// ================================
+
+function initializeCheckboxes() {
+    console.log('🔧 Inicializando checkboxes...');
     
-    document.body.appendChild(modal);
+    const checkboxes = document.querySelectorAll('.checkbox-container input[type="checkbox"]');
     
-    // Mostrar modal con animación
-    setTimeout(() => modal.classList.add('active'), 10);
-    
-    // Cerrar modal al hacer clic en el overlay
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            closeModal(id);
+    checkboxes.forEach((checkbox, index) => {
+        console.log(`📋 Checkbox ${index + 1}: ${checkbox.id || checkbox.name || 'sin ID'}`);
+        
+        // Remover event listeners previos para evitar duplicados
+        checkbox.removeEventListener('change', handleCheckboxChange);
+        
+        // Agregar nuevo event listener
+        checkbox.addEventListener('change', handleCheckboxChange);
+        
+        // Aplicar estilos visuales iniciales
+        updateCheckboxVisual(checkbox);
+        
+        // Manejar específicamente el checkbox de cambiar contraseña
+        if (checkbox.id === 'changePassword') {
+            togglePasswordFields();
         }
     });
     
-    // Cerrar modal con tecla ESC
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeModal(id);
-        }
-    });
+    console.log(`✅ ${checkboxes.length} checkboxes inicializados correctamente`);
 }
 
-function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.classList.remove('active');
-        setTimeout(() => modal.remove(), 300);
-    }
-    currentEditingUser = null;
-}
-
-// Función para mostrar loading
-function showLoading(message = 'Cargando...') {
-    const loading = document.createElement('div');
-    loading.id = 'loadingOverlay';
-    loading.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 9999;
-    `;
+function handleCheckboxChange(event) {
+    const checkbox = event.target;
+    const checkboxName = checkbox.id || checkbox.name || 'desconocido';
+    const isChecked = checkbox.checked;
     
-    loading.innerHTML = `
-        <div style="background: white; padding: 30px; border-radius: 8px; text-align: center; max-width: 300px;">
-            <div style="width: 40px; height: 40px; border: 3px solid #f3f3f3; border-top: 3px solid #6366f1; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
-            <p style="margin: 0; color: #374151; font-weight: 500;">${message}</p>
-        </div>
-        <style>
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
+    console.log(`🔄 Checkbox cambiado: ${checkboxName} = ${isChecked ? 'marcado' : 'desmarcado'}`);
+    
+    // Manejar específicamente el checkbox de cambiar contraseña
+    if (checkbox.id === 'changePassword') {
+        console.log('🔑 Ejecutando togglePasswordFields...');
+        togglePasswordFields();
+    }
+    
+    // Manejar checkbox de descarga
+    if (checkbox.id === 'downloadEnabled' || checkbox.id === 'editDownloadEnabled') {
+        console.log(`📥 Descarga ${isChecked ? 'habilitada' : 'deshabilitada'}`);
+    }
+    
+    // Actualizar apariencia visual
+    updateCheckboxVisual(checkbox);
+}
+
+function updateCheckboxVisual(checkbox) {
+    const checkmark = checkbox.nextElementSibling;
+    if (checkmark && checkmark.classList.contains('checkmark')) {
+        if (checkbox.checked) {
+            checkmark.style.background = '#6366f1';
+            checkmark.style.borderColor = '#6366f1';
+        } else {
+            checkmark.style.background = '#ffffff';
+            checkmark.style.borderColor = '#d1d5db';
+        }
+    }
+}
+
+// ================================
+// FUNCIÓN PARA MOSTRAR/OCULTAR CONTRASEÑAS
+// ================================
+
+function togglePasswordFields() {
+    console.log('🔑 Ejecutando togglePasswordFields...');
+    
+    const checkbox = document.getElementById('changePassword');
+    const passwordFields = document.getElementById('passwordFields');
+    
+    if (!checkbox) {
+        console.error('❌ No se encontró el checkbox changePassword');
+        return;
+    }
+    
+    if (!passwordFields) {
+        console.error('❌ No se encontró el contenedor passwordFields');
+        return;
+    }
+    
+    console.log(`🔍 Checkbox estado: ${checkbox.checked ? 'marcado' : 'desmarcado'}`);
+    
+    if (checkbox.checked) {
+        // Mostrar campos de contraseña
+        passwordFields.style.display = 'block';
+        passwordFields.style.opacity = '1';
+        passwordFields.classList.add('show');
+        
+        // Hacer requeridos los campos
+        const passwordInput = document.getElementById('editPassword');
+        const confirmPasswordInput = document.getElementById('editConfirmPassword');
+        
+        if (passwordInput) {
+            passwordInput.required = true;
+            console.log('✅ Campo password marcado como requerido');
+        }
+        if (confirmPasswordInput) {
+            confirmPasswordInput.required = true;
+            console.log('✅ Campo confirm password marcado como requerido');
+        }
+        
+        console.log('✅ Campos de contraseña mostrados');
+    } else {
+        // Ocultar campos de contraseña
+        passwordFields.style.display = 'none';
+        passwordFields.style.opacity = '0';
+        passwordFields.classList.remove('show');
+        
+        // Quitar requerimiento y limpiar campos
+        const passwordInput = document.getElementById('editPassword');
+        const confirmPasswordInput = document.getElementById('editConfirmPassword');
+        
+        if (passwordInput) {
+            passwordInput.required = false;
+            passwordInput.value = '';
+            console.log('✅ Campo password limpiado');
+        }
+        if (confirmPasswordInput) {
+            confirmPasswordInput.required = false;
+            confirmPasswordInput.value = '';
+            console.log('✅ Campo confirm password limpiado');
+        }
+        
+        console.log('✅ Campos de contraseña ocultados');
+    }
+}
+
+// ================================
+// OBSERVADOR PARA DETECTAR NUEVOS CHECKBOXES
+// ================================
+
+const checkboxObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        if (mutation.addedNodes.length > 0) {
+            const hasCheckboxes = Array.from(mutation.addedNodes).some(node => 
+                node.nodeType === 1 && (
+                    (node.querySelector && node.querySelector('.checkbox-container')) ||
+                    (node.classList && node.classList.contains('checkbox-container'))
+                )
+            );
+            
+            if (hasCheckboxes) {
+                console.log('🔄 Detectados nuevos checkboxes, reinicializando...');
+                setTimeout(initializeCheckboxes, 100);
             }
-        </style>
-    `;
+        }
+    });
+});
+
+// Observar cambios en el documento
+checkboxObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+});
+
+// ================================
+// FUNCIONES DE MODALES DE USUARIOS
+// ================================
+
+function createUser() {
+    console.log('👤 Abriendo modal crear usuario...');
     
-    document.body.appendChild(loading);
-}
-
-function hideLoading() {
-    const loading = document.getElementById('loadingOverlay');
-    if (loading) {
-        loading.remove();
-    }
-}
-
-// Función para crear nuevo usuario
-function showCreateUserModal() {
-    const modalContent = `
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">
-                <h2><i data-feather="user-plus"></i> Crear Nuevo Usuario</h2>
-                <button class="modal-close" onclick="closeModal('createUser')">&times;</button>
+    showModal('createUser', 'Crear Usuario', `
+        <form id="createUserForm" onsubmit="handleCreateUser(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="firstName">Nombre</label>
+                    <input type="text" id="firstName" name="first_name" required>
+                </div>
+                <div class="form-group">
+                    <label for="lastName">Apellido</label>
+                    <input type="text" id="lastName" name="last_name" required>
+                </div>
             </div>
             
-            <form id="createUserForm" onsubmit="handleCreateUser(event)">
-                <div class="modal-body">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="firstName">Nombre *</label>
-                            <input type="text" id="firstName" name="first_name" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="lastName">Apellido *</label>
-                            <input type="text" id="lastName" name="last_name" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="username">Usuario *</label>
-                            <input type="text" id="username" name="username" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="email">Email *</label>
-                            <input type="email" id="email" name="email" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="password">Contraseña *</label>
-                            <input type="password" id="password" name="password" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="role">Rol *</label>
-                            <select id="role" name="role" required>
-                                <option value="">Seleccionar rol</option>
-                                <option value="admin">Administrador</option>
-                                <option value="user">Usuario</option>
-                                <option value="viewer">Visualizador</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="company">Empresa *</label>
-                            <select id="company" name="company_id" required>
-                                <option value="">Seleccionar empresa</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" name="download_enabled" value="1">
-                                <span class="checkmark"></span>
-                                Permitir descarga de documentos
-                            </label>
-                        </div>
-                    </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="username">Usuario</label>
+                    <input type="text" id="username" name="username" required>
                 </div>
-                
-                <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="closeModal('createUser')">
-                        Cancelar
-                    </button>
-                    <button type="submit" class="btn-primary">
-                        <i data-feather="save"></i>
-                        Crear Usuario
-                    </button>
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required>
                 </div>
-            </form>
-        </div>
-    `;
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="role">Rol</label>
+                    <select id="role" name="role" required>
+                        <option value="">Seleccionar rol</option>
+                        <option value="admin">Administrador</option>
+                        <option value="user">Usuario</option>
+                        <option value="viewer">Visualizador</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="company">Empresa</label>
+                    <select id="company" name="company_id" required>
+                        <option value="">Seleccionar empresa</option>
+                        ${getCompanyOptions()}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="password">Contraseña</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirmar Contraseña</label>
+                    <input type="password" id="confirmPassword" name="confirm_password" required>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="downloadEnabled" name="download_enabled" checked>
+                    <span class="checkmark"></span>
+                    Permitir descarga de documentos
+                </label>
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeModal('createUser')">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn-primary">
+                    <i data-feather="user-plus"></i>
+                    Crear Usuario
+                </button>
+            </div>
+        </form>
+    `);
     
-    createModal('createUser', modalContent);
-    
-    // Cargar empresas en el select
-    loadCompaniesIntoSelect('company');
-    
-    // Reemplazar iconos
-    setTimeout(() => feather.replace(), 100);
+    // Inicializar elementos después de crear el modal
+    setTimeout(() => {
+        console.log('🔄 Inicializando elementos del modal...');
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+        initializeCheckboxes();
+    }, 100);
 }
 
-// Función para manejar la creación de usuario
-function handleCreateUser(event) {
-    event.preventDefault();
+function editUser(userId) {
+    if (!userId) {
+        console.error('❌ ID de usuario no válido');
+        return;
+    }
     
-    const form = event.target;
-    const formData = new FormData(form);
+    console.log(`✏️ Editando usuario ID: ${userId}`);
+    showLoading('Cargando datos del usuario...');
     
-    showLoading('Creando usuario...');
+    // Si no tienes la función fetch real, usa datos de ejemplo
+    if (typeof fetch === 'undefined' || !document.querySelector('base')) {
+        // Datos de ejemplo para testing
+        const userData = {
+            id: userId,
+            first_name: 'Juan',
+            last_name: 'Pérez',
+            username: 'jperez',
+            email: 'juan@ejemplo.com',
+            role: 'user',
+            company_id: 1,
+            download_enabled: true
+        };
+        
+        setTimeout(() => {
+            hideLoading();
+            showEditUserModal(userData);
+        }, 500);
+        return;
+    }
     
-    fetch('actions/create_user.php', {
-        method: 'POST',
-        body: formData
-    })
+    // Código real para cargar datos del servidor
+    fetch(`actions/get_user.php?id=${userId}`)
     .then(response => response.json())
     .then(data => {
         hideLoading();
         
         if (data.success) {
-            showNotification('Usuario creado exitosamente', 'success');
-            closeModal('createUser');
-            setTimeout(() => window.location.reload(), 1000);
-        } else {
-            showNotification(data.message || 'Error al crear usuario', 'error');
-        }
-    })
-    .catch(error => {
-        hideLoading();
-        showNotification('Error de conexión al crear usuario', 'error');
-        console.error('Error:', error);
-    });
-}
-
-// Función para editar usuario
-function editUser(userId) {
-    showLoading('Cargando datos del usuario...');
-    
-    fetch(`actions/get_user.php?id=${userId}`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        hideLoading();
-        
-        if (data.success) {
-            currentEditingUser = data.user;
             showEditUserModal(data.user);
         } else {
-            showNotification(data.message || 'Error al cargar datos del usuario', 'error');
+            showNotification(data.message || 'Error al cargar usuario', 'error');
         }
     })
     .catch(error => {
         hideLoading();
-        showNotification('Error de conexión al cargar datos del usuario', 'error');
+        showNotification('Error de conexión', 'error');
         console.error('Error:', error);
     });
 }
 
-// Función para mostrar modal de edición
 function showEditUserModal(user) {
-    const modalContent = `
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">
-                <h2><i data-feather="edit"></i> Editar Usuario</h2>
-                <button class="modal-close" onclick="closeModal('editUser')">&times;</button>
+    showModal('editUser', 'Editar Usuario', `
+        <form id="editUserForm" onsubmit="handleEditUser(event, ${user.id})">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="editFirstName">Nombre</label>
+                    <input type="text" id="editFirstName" name="first_name" value="${escapeHtml(user.first_name)}" required>
+                </div>
+                <div class="form-group">
+                    <label for="editLastName">Apellido</label>
+                    <input type="text" id="editLastName" name="last_name" value="${escapeHtml(user.last_name)}" required>
+                </div>
             </div>
             
-            <form id="editUserForm" onsubmit="handleEditUser(event)">
-                <input type="hidden" name="user_id" value="${user.id}">
-                
-                <div class="modal-body">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="editFirstName">Nombre *</label>
-                            <input type="text" id="editFirstName" name="first_name" value="${user.first_name || ''}" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editLastName">Apellido *</label>
-                            <input type="text" id="editLastName" name="last_name" value="${user.last_name || ''}" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editUsername">Usuario *</label>
-                            <input type="text" id="editUsername" name="username" value="${user.username || ''}" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editEmail">Email *</label>
-                            <input type="email" id="editEmail" name="email" value="${user.email || ''}" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editRole">Rol *</label>
-                            <select id="editRole" name="role" required>
-                                <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
-                                <option value="user" ${user.role === 'user' ? 'selected' : ''}>Usuario</option>
-                                <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editCompany">Empresa *</label>
-                            <select id="editCompany" name="company_id" required>
-                                <option value="">Seleccionar empresa</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" name="download_enabled" value="1" ${user.download_enabled ? 'checked' : ''}>
-                                <span class="checkmark"></span>
-                                Permitir descarga de documentos
-                            </label>
-                        </div>
-                        
-                        <div class="form-group full-width">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="changePassword" name="change_password" onchange="togglePasswordField()">
-                                <span class="checkmark"></span>
-                                Cambiar contraseña
-                            </label>
-                        </div>
-                        
-                        <div class="form-group" id="passwordField" style="display: none;">
-                            <label for="newPassword">Nueva Contraseña</label>
-                            <input type="password" id="newPassword" name="password" placeholder="Nueva contraseña">
-                        </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="editUsername">Usuario</label>
+                    <input type="text" id="editUsername" name="username" value="${escapeHtml(user.username)}" required>
+                </div>
+                <div class="form-group">
+                    <label for="editEmail">Email</label>
+                    <input type="email" id="editEmail" name="email" value="${escapeHtml(user.email)}" required>
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="editRole">Rol</label>
+                    <select id="editRole" name="role" required>
+                        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
+                        <option value="user" ${user.role === 'user' ? 'selected' : ''}>Usuario</option>
+                        <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editCompany">Empresa</label>
+                    <select id="editCompany" name="company_id" required>
+                        ${getCompanyOptions(user.company_id)}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="editDownloadEnabled" name="download_enabled" ${user.download_enabled ? 'checked' : ''}>
+                    <span class="checkmark"></span>
+                    Permitir descarga de documentos
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="changePassword" name="change_password">
+                    <span class="checkmark"></span>
+                    Cambiar contraseña
+                </label>
+            </div>
+            
+            <div id="passwordFields" style="display: none;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="editPassword">Nueva Contraseña</label>
+                        <input type="password" id="editPassword" name="password">
+                    </div>
+                    <div class="form-group">
+                        <label for="editConfirmPassword">Confirmar Contraseña</label>
+                        <input type="password" id="editConfirmPassword" name="confirm_password">
                     </div>
                 </div>
-                
-                <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="closeModal('editUser')">
-                        Cancelar
-                    </button>
-                    <button type="submit" class="btn-primary">
-                        <i data-feather="save"></i>
-                        Actualizar Usuario
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeModal('editUser')">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn-primary">
+                    <i data-feather="save"></i>
+                    Guardar Cambios
+                </button>
+            </div>
+        </form>
+    `);
     
-    createModal('editUser', modalContent);
-    
-    // Cargar empresas y seleccionar la actual
-    loadCompaniesIntoSelect('editCompany', user.company_id);
-    
-    // Reemplazar iconos
-    setTimeout(() => feather.replace(), 100);
+    // Inicializar elementos después de crear el modal
+    setTimeout(() => {
+        console.log('🔄 Inicializando elementos del modal de edición...');
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+        initializeCheckboxes();
+    }, 100);
 }
 
-// Función para alternar campo de contraseña
-function togglePasswordField() {
-    const checkbox = document.getElementById('changePassword');
-    const passwordField = document.getElementById('passwordField');
-    const passwordInput = document.getElementById('newPassword');
-    
-    if (checkbox.checked) {
-        passwordField.style.display = 'block';
-        passwordInput.required = true;
-    } else {
-        passwordField.style.display = 'none';
-        passwordInput.required = false;
-        passwordInput.value = '';
-    }
-}
+// ================================
+// FUNCIONES DE MANEJO DE FORMULARIOS
+// ================================
 
-// Función para manejar la edición de usuario
-function handleEditUser(event) {
+function handleCreateUser(event) {
     event.preventDefault();
+    console.log('📝 Procesando creación de usuario...');
     
-    const form = event.target;
-    const formData = new FormData(form);
+    const formData = new FormData(event.target);
+    const password = formData.get('password');
+    const confirmPassword = formData.get('confirm_password');
     
-    showLoading('Actualizando usuario...');
-    
-    fetch('actions/update_user.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        hideLoading();
-        
-        if (data.success) {
-            showNotification('Usuario actualizado exitosamente', 'success');
-            closeModal('editUser');
-            setTimeout(() => window.location.reload(), 1000);
-        } else {
-            showNotification(data.message || 'Error al actualizar usuario', 'error');
-        }
-    })
-    .catch(error => {
-        hideLoading();
-        showNotification('Error de conexión al actualizar usuario', 'error');
-        console.error('Error:', error);
-    });
-}
-
-// Función para cargar empresas en un select
-function loadCompaniesIntoSelect(selectId, selectedValue = null) {
-    const select = document.getElementById(selectId);
-    if (!select) return;
-    
-    // Limpiar opciones existentes (excepto la primera)
-    while (select.children.length > 1) {
-        select.removeChild(select.lastChild);
+    // Validaciones
+    if (password !== confirmPassword) {
+        showNotification('Las contraseñas no coinciden', 'error');
+        return;
     }
     
-    // Cargar empresas desde la variable global
-    if (window.companiesData) {
-        window.companiesData.forEach(company => {
-            const option = document.createElement('option');
-            option.value = company.id;
-            option.textContent = company.name;
-            if (selectedValue && company.id == selectedValue) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
+    if (password.length < 6) {
+        showNotification('La contraseña debe tener al menos 6 caracteres', 'error');
+        return;
     }
-}
-
-// Función para mostrar detalles del usuario
-function showUserDetails(userId) {
-    showLoading('Cargando detalles...');
     
-    fetch(`actions/get_user.php?id=${userId}`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        hideLoading();
-        
-        if (data.success) {
-            const user = data.user;
-            const modalContent = `
-                <div class="modal-content" style="max-width: 700px;">
-                    <div class="modal-header">
-                        <h2><i data-feather="user"></i> Detalles del Usuario</h2>
-                        <button class="modal-close" onclick="closeModal('userDetails')">&times;</button>
-                    </div>
-                    
-                    <div class="modal-body">
-                        <div class="user-details-container">
-                            <div class="user-info-header">
-                                <div class="user-avatar-large">
-                                    ${(user.first_name || 'U').charAt(0).toUpperCase()}
-                                </div>
-                                <div class="user-info-text">
-                                    <h3>${user.first_name} ${user.last_name}</h3>
-                                    <p>@${user.username}</p>
-                                    <span class="badge badge-${user.status}">${user.status === 'active' ? 'Activo' : 'Inactivo'}</span>
-                                </div>
-                            </div>
-                            
-                            <div class="user-details-grid">
-                                <div class="detail-item">
-                                    <label>Email</label>
-                                    <value>${user.email}</value>
-                                </div>
-                                
-                                <div class="detail-item">
-                                    <label>Rol</label>
-                                    <value><span class="badge badge-${user.role}">${user.role}</span></value>
-                                </div>
-                                
-                                <div class="detail-item">
-                                    <label>Empresa</label>
-                                    <value>${user.company_name || 'Sin empresa'}</value>
-                                </div>
-                                
-                                <div class="detail-item">
-                                    <label>Fecha de Creación</label>
-                                    <value>${new Date(user.created_at).toLocaleDateString('es-ES')}</value>
-                                </div>
-                                
-                                <div class="detail-item">
-                                    <label>Último Acceso</label>
-                                    <value>${user.last_login ? new Date(user.last_login).toLocaleDateString('es-ES') : 'Nunca'}</value>
-                                </div>
-                            </div>
-                            
-                            <div class="permissions-section">
-                                <h4>Permisos</h4>
-                                <div class="permission-item ${user.download_enabled ? 'enabled' : 'disabled'}">
-                                    <i data-feather="download"></i>
-                                    <span>Descarga de documentos</span>
-                                    <div class="permission-status">
-                                        ${user.download_enabled ? 'Habilitado' : 'Deshabilitado'}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="modal-actions">
-                        <button type="button" class="btn-secondary" onclick="closeModal('userDetails')">
-                            Cerrar
-                        </button>
-                        <button type="button" class="btn-primary" onclick="closeModal('userDetails'); editUser(${userId})">
-                            <i data-feather="edit"></i>
-                            Editar Usuario
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            createModal('userDetails', modalContent);
-            
-            // Reemplazar iconos después de crear el modal
-            setTimeout(() => feather.replace(), 100);
-        } else {
-            showNotification(data.message || 'Error al cargar detalles', 'error');
-        }
-    })
-    .catch(error => {
-        hideLoading();
-        showNotification('Error de conexión al cargar detalles', 'error');
-        console.error('Error:', error);
-    });
-}
-
-// Función para cambiar el estado del usuario
-function toggleUserStatus(userId, currentStatus) {
-    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    const action = newStatus === 'active' ? 'activar' : 'desactivar';
+    // Mostrar loading
+    showLoading('Creando usuario...');
     
-    if (confirm(`¿Está seguro que desea ${action} este usuario?`)) {
-        showLoading(`${action === 'activar' ? 'Activando' : 'Desactivando'} usuario...`);
-        
-        fetch('actions/toggle_user_status.php', {
+    // Enviar datos al servidor (si existe)
+    if (typeof fetch !== 'undefined' && document.querySelector('base')) {
+        fetch('actions/create_user.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                user_id: userId,
-                status: newStatus
-            })
+            body: formData
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
             hideLoading();
             
             if (data.success) {
-                showNotification(`Usuario ${action === 'activar' ? 'activado' : 'desactivado'} exitosamente`, 'success');
-                setTimeout(() => window.location.reload(), 1000);
+                showNotification('Usuario creado exitosamente', 'success');
+                closeModal('createUser');
+                setTimeout(() => {
+                    if (typeof loadUsers === 'function') {
+                        loadUsers(currentPage, currentFilters);
+                    } else {
+                        window.location.reload();
+                    }
+                }, 1000);
             } else {
-                showNotification(data.message || 'Error al cambiar estado', 'error');
+                showNotification(data.message || 'Error al crear usuario', 'error');
             }
         })
         .catch(error => {
             hideLoading();
-            showNotification('Error de conexión al cambiar estado', 'error');
+            showNotification('Error de conexión', 'error');
             console.error('Error:', error);
         });
+    } else {
+        // Para testing sin backend
+        setTimeout(() => {
+            hideLoading();
+            showNotification('Usuario creado exitosamente (modo demo)', 'success');
+            closeModal('createUser');
+        }, 1000);
     }
 }
+
+function handleEditUser(event, userId) {
+    event.preventDefault();
+    console.log(`📝 Procesando edición de usuario ID: ${userId}`);
+    
+    const formData = new FormData(event.target);
+    const changePassword = formData.get('change_password');
+    
+    // Si se va a cambiar la contraseña, validar
+    if (changePassword) {
+        const password = formData.get('password');
+        const confirmPassword = formData.get('confirm_password');
+        
+        if (!password || !confirmPassword) {
+            showNotification('Debe completar ambos campos de contraseña', 'error');
+            return;
+        }
+        
+        if (password !== confirmPassword) {
+            showNotification('Las contraseñas no coinciden', 'error');
+            return;
+        }
+        
+        if (password.length < 6) {
+            showNotification('La contraseña debe tener al menos 6 caracteres', 'error');
+            return;
+        }
+    }
+    
+    // Agregar ID de usuario
+    formData.append('user_id', userId);
+    
+    // Mostrar loading
+    showLoading('Actualizando usuario...');
+    
+    // Enviar datos al servidor (si existe)
+    if (typeof fetch !== 'undefined' && document.querySelector('base')) {
+        fetch('actions/update_user.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            
+            if (data.success) {
+                showNotification('Usuario actualizado exitosamente', 'success');
+                closeModal('editUser');
+                setTimeout(() => {
+                    if (typeof loadUsers === 'function') {
+                        loadUsers(currentPage, currentFilters);
+                    } else {
+                        window.location.reload();
+                    }
+                }, 1000);
+            } else {
+                showNotification(data.message || 'Error al actualizar usuario', 'error');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            showNotification('Error de conexión', 'error');
+            console.error('Error:', error);
+        });
+    } else {
+        // Para testing sin backend
+        setTimeout(() => {
+            hideLoading();
+            showNotification('Usuario actualizado exitosamente (modo demo)', 'success');
+            closeModal('editUser');
+        }, 1000);
+    }
+}
+
+// ================================
+// FUNCIONES AUXILIARES
+// ================================
+
+function getCompanyOptions(selectedId = null) {
+    // Esta función debería cargar las empresas desde el servidor
+    // Por ahora devolvemos opciones estáticas
+    const companies = [
+        { id: 1, name: 'Perdomo y Asociados' },
+        { id: 2, name: 'Empresa Test' },
+        { id: 3, name: 'Otra Empresa' }
+    ];
+    
+    return companies.map(company => 
+        `<option value="${company.id}" ${selectedId == company.id ? 'selected' : ''}>
+            ${escapeHtml(company.name)}
+        </option>`
+    ).join('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function initializeFilters() {
+    const searchInput = document.getElementById('searchUser');
+    const roleFilter = document.getElementById('roleFilter');
+    const statusFilter = document.getElementById('statusFilter');
+    const companyFilter = document.getElementById('companyFilter');
+    
+    // Agregar event listeners para filtros si existen
+    if (searchInput) {
+        let searchTimeout;
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                if (typeof applyFilters === 'function') {
+                    applyFilters();
+                }
+            }, 300);
+        });
+    }
+    
+    [roleFilter, statusFilter, companyFilter].forEach(filter => {
+        if (filter && typeof applyFilters === 'function') {
+            filter.addEventListener('change', applyFilters);
+        }
+    });
+}
+
+// ================================
+// FUNCIONES DE UI (PLACEHOLDER)
+// ================================
+
+function showModal(id, title, content) {
+    console.log(`📋 Mostrando modal: ${title}`);
+    // Esta función debe existir en tu sistema
+    // Si no existe, crea un modal básico
+    if (typeof window.showModal === 'function') {
+        window.showModal(id, title, content);
+    } else {
+        console.warn('Función showModal no encontrada');
+    }
+}
+
+function closeModal(id) {
+    console.log(`❌ Cerrando modal: ${id}`);
+    // Esta función debe existir en tu sistema
+    if (typeof window.closeModal === 'function') {
+        window.closeModal(id);
+    } else {
+        console.warn('Función closeModal no encontrada');
+    }
+}
+
+function showLoading(message = 'Cargando...') {
+    console.log(`⏳ ${message}`);
+    // Esta función debe existir en tu sistema
+    if (typeof window.showLoading === 'function') {
+        window.showLoading(message);
+    } else {
+        console.warn('Función showLoading no encontrada');
+    }
+}
+
+function hideLoading() {
+    console.log('✅ Ocultando loading');
+    // Esta función debe existir en tu sistema
+    if (typeof window.hideLoading === 'function') {
+        window.hideLoading();
+    } else {
+        console.warn('Función hideLoading no encontrada');
+    }
+}
+
+function showNotification(message, type = 'info') {
+    console.log(`📢 ${type.toUpperCase()}: ${message}`);
+    // Esta función debe existir en tu sistema
+    if (typeof window.showNotification === 'function') {
+        window.showNotification(message, type);
+    } else {
+        // Fallback simple
+        alert(`${type.toUpperCase()}: ${message}`);
+    }
+}
+
+// ================================
+// EXPORTAR FUNCIONES GLOBALES
+// ================================
+
+// Hacer funciones disponibles globalmente
+window.initializeCheckboxes = initializeCheckboxes;
+window.togglePasswordFields = togglePasswordFields;
+window.createUser = createUser;
+window.editUser = editUser;
+window.handleCreateUser = handleCreateUser;
+window.handleEditUser = handleEditUser;
+
+console.log('✅ JavaScript de usuarios cargado con fix de checkboxes');

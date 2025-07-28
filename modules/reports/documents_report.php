@@ -452,17 +452,17 @@ function formatBytes($size, $precision = 2)
             <div class="export-section">
                 <h3>Exportar Datos</h3>
                 <div class="export-buttons">
-                    <button class="export-btn" onclick="exportData('csv')">
+                    <button class="export-btn csv" onclick="exportarDatos('csv')">
                         <i data-feather="file-text"></i>
-                        Exportar CSV
+                        Descargar CSV
                     </button>
-                    <button class="export-btn" onclick="exportData('excel')">
+                    <button class="export-btn excel" onclick="exportarDatos('excel')">
                         <i data-feather="grid"></i>
-                        Exportar Excel
+                        Descargar Excel
                     </button>
-                    <button class="export-btn" onclick="printReport()">
-                        <i data-feather="printer"></i>
-                        Imprimir
+                    <button class="export-btn pdf" onclick="exportarDatos('pdf')">
+                        <i data-feather="file"></i>
+                        Descargar PDF
                     </button>
                 </div>
             </div>
@@ -638,6 +638,23 @@ function formatBytes($size, $precision = 2)
         </div>
     </main>
 
+    <!-- Modal para vista previa del PDF -->
+    <div id="pdfModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h3 class="pdf-modal-title">Vista Previa del PDF - Reportes de Documentos</h3>
+                <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div class="pdf-loading" id="pdfLoading">
+                    <div class="spinner"></div>
+                    <p>Generando vista previa del PDF...</p>
+                </div>
+                <iframe id="pdfIframe" class="pdf-iframe" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="../../assets/js/dashboard.js"></script>
     <script>
@@ -679,13 +696,85 @@ function formatBytes($size, $precision = 2)
             }
         }
 
-        function exportData(format) {
-            const url = `export.php?format=${format}&type=documents_report&${new URLSearchParams(currentFilters).toString()}`;
-            window.open(url, '_blank');
+        function exportarDatos(formato) {
+            // Obtener parámetros actuales de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Construir URL de exportación
+            const exportUrl = 'export.php?format=' + formato + '&type=documents_report&modal=1&' + urlParams.toString();
+
+            if (formato === 'pdf') {
+                // Para PDF, abrir modal
+                abrirModalPDF(exportUrl);
+            } else {
+                // Para CSV y Excel, abrir en nueva ventana para descarga
+                mostrarNotificacion('Preparando descarga...', 'info');
+                window.open(exportUrl.replace('&modal=1', ''), '_blank');
+            }
         }
 
-        function printReport() {
-            window.print();
+        function abrirModalPDF(url) {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            const loading = document.getElementById('pdfLoading');
+
+            // Mostrar modal y loading
+            modal.style.display = 'block';
+            loading.style.display = 'flex';
+            iframe.style.display = 'none';
+
+            // Cargar PDF en iframe
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+
+            iframe.onerror = function() {
+                loading.innerHTML = '<div class="spinner"></div><p>Error al cargar la vista previa. <button onclick="cerrarModalPDF()" style="margin-left: 10px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Cerrar</button></p>';
+            };
+
+            iframe.src = url;
+
+            // Cerrar modal al hacer clic fuera
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    cerrarModalPDF();
+                }
+            };
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.getElementById('pdfModal');
+            const iframe = document.getElementById('pdfIframe');
+            
+            modal.style.display = 'none';
+            iframe.src = '';
+        }
+
+        function mostrarNotificacion(mensaje, tipo = 'info') {
+            // Crear elemento de notificación
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${tipo === 'error' ? '#dc3545' : tipo === 'success' ? '#28a745' : '#17a2b8'};
+                color: white;
+                border-radius: 4px;
+                z-index: 1000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                font-family: Arial, sans-serif;
+            `;
+            notification.textContent = mensaje;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, 3000);
         }
 
         function showComingSoon(feature) {
@@ -821,5 +910,6 @@ function formatBytes($size, $precision = 2)
             }
         });
     </script>
+    
 </body>
 </html>

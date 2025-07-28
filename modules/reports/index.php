@@ -567,5 +567,6 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             }
         });
     </script>
+    
 </body>
 </html>

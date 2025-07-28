@@ -1,27 +1,37 @@
 <?php
 // modules/users/actions/update_user.php
-// Actualizar datos de usuario - DMS2 (CORREGIDO - SIN ELIMINAR)
-
-require_once '../../../config/session.php';
-require_once '../../../config/database.php';
+// Actualizar usuario con soporte para checkboxes
 
 header('Content-Type: application/json');
-
-SessionManager::requireLogin();
-SessionManager::requireRole('admin');
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['success' => false, 'message' => 'Método no permitido']);
-    exit;
-}
+require_once '../../../config/database.php';
+require_once '../../../includes/functions.php';
 
 try {
-    $currentUser = SessionManager::getCurrentUser();
+    // Verificar autenticación
+    session_start();
+    if (!isset($_SESSION['user_id'])) {
+        throw new Exception('Usuario no autenticado');
+    }
     
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        throw new Exception('Usuario no válido');
+    }
+    
+    // Verificar permisos (solo admin puede editar usuarios)
+    if ($currentUser['role'] !== 'admin') {
+        throw new Exception('No tienes permisos para realizar esta acción');
+    }
+    
+    // Verificar método POST
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception('Método no permitido');
+    }
+    
+    // Obtener ID del usuario a actualizar
     $userId = intval($_POST['user_id'] ?? 0);
     if ($userId <= 0) {
-        throw new Exception('ID de usuario inválido');
+        throw new Exception('ID de usuario no válido');
     }
     
     // Verificar que el usuario existe
@@ -30,24 +40,19 @@ try {
         throw new Exception('Usuario no encontrado');
     }
     
-    // Validar campos requeridos
-    $requiredFields = ['first_name', 'last_name', 'username', 'email', 'role', 'company_id'];
-    foreach ($requiredFields as $field) {
-        if (empty($_POST[$field])) {
-            throw new Exception("El campo {$field} es requerido");
-        }
-    }
+    // Obtener y validar datos del formulario
+    $firstName = trim($_POST['first_name'] ?? '');
+    $lastName = trim($_POST['last_name'] ?? '');
+    $username = trim($_POST['username'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $role = trim($_POST['role'] ?? '');
+    $companyId = intval($_POST['company_id'] ?? 0);
     
-    $firstName = trim($_POST['first_name']);
-    $lastName = trim($_POST['last_name']);
-    $username = trim($_POST['username']);
-    $email = trim($_POST['email']);
-    $role = $_POST['role'];
-    $companyId = intval($_POST['company_id']);
+    // Manejar checkboxes correctamente
     $downloadEnabled = isset($_POST['download_enabled']) ? 1 : 0;
-    $changePassword = isset($_POST['change_password']);
+    $changePassword = isset($_POST['change_password']) ? true : false;
     
-    // Validaciones
+    // Validaciones básicas
     if (strlen($firstName) < 2) {
         throw new Exception('El nombre debe tener al menos 2 caracteres');
     }
@@ -68,6 +73,10 @@ try {
         throw new Exception('Rol no válido');
     }
     
+    if ($companyId <= 0) {
+        throw new Exception('Debe seleccionar una empresa válida');
+    }
+    
     // Verificar que no exista el username (excepto el actual)
     $checkUsername = fetchOne("SELECT id FROM users WHERE username = ? AND id != ?", [$username, $userId]);
     if ($checkUsername) {
@@ -86,7 +95,7 @@ try {
         throw new Exception('La empresa seleccionada no es válida');
     }
     
-    // Preparar datos para actualización
+    // Preparar datos para actualizar
     $updateData = [
         'first_name' => $firstName,
         'last_name' => $lastName,
@@ -98,75 +107,129 @@ try {
         'updated_at' => date('Y-m-d H:i:s')
     ];
     
-    // Si se solicita cambio de contraseña
-    if ($changePassword && !empty($_POST['password'])) {
-        $password = $_POST['password'];
+    // Si se va a cambiar la contraseña
+    if ($changePassword) {
+        $password = $_POST['password'] ?? '';
+        $confirmPassword = $_POST['confirm_password'] ?? '';
+        
+        if (empty($password)) {
+            throw new Exception('La contraseña es requerida');
+        }
         
         if (strlen($password) < 6) {
             throw new Exception('La contraseña debe tener al menos 6 caracteres');
         }
         
+        if ($password !== $confirmPassword) {
+            throw new Exception('Las contraseñas no coinciden');
+        }
+        
         $updateData['password'] = password_hash($password, PASSWORD_DEFAULT);
     }
     
-    // Usar transacción para garantizar consistencia
-    $database = new Database();
-    $conn = $database->getConnection();
+    // Construir query de actualización
+    $setParts = [];
+    $params = [];
     
-    if (!$conn) {
-        throw new Exception('Error de conexión a la base de datos');
+    foreach ($updateData as $field => $value) {
+        $setParts[] = "$field = ?";
+        $params[] = $value;
     }
     
-    // Iniciar transacción
-    $conn->beginTransaction();
+    $params[] = $userId; // Para la condición WHERE
     
-    try {
-        // Construir query de actualización
-        $setClause = [];
-        $params = [];
-        
-        foreach ($updateData as $field => $value) {
-            $setClause[] = "$field = :$field";
-            $params[$field] = $value;
-        }
-        
-        $params['id'] = $userId;
-        
-        $query = "UPDATE users SET " . implode(', ', $setClause) . " WHERE id = :id";
-        $stmt = $conn->prepare($query);
-        
-        if (!$stmt->execute($params)) {
-            throw new Exception('Error al actualizar el usuario');
-        }
-        
-        // Verificar que se actualizó al menos un registro
-        if ($stmt->rowCount() === 0) {
-            throw new Exception('No se actualizó ningún registro');
-        }
-        
+    $sql = "UPDATE users SET " . implode(', ', $setParts) . " WHERE id = ?";
+    
+    // Ejecutar la actualización
+    $stmt = $pdo->prepare($sql);
+    $result = $stmt->execute($params);
+    
+    if ($result) {
         // Registrar actividad
-        logActivity($currentUser['id'], 'update_user', 'users', $userId, 
-                   "Actualizó el usuario {$firstName} {$lastName}");
+        $activityDescription = "Actualizó el usuario: {$firstName} {$lastName} (@{$username})";
+        if ($changePassword) {
+            $activityDescription .= " (incluye cambio de contraseña)";
+        }
         
-        // Confirmar transacción
-        $conn->commit();
+        logActivity($currentUser['id'], 'update_user', 'users', $userId, $activityDescription);
         
+        // Respuesta exitosa
         echo json_encode([
             'success' => true,
-            'message' => 'Usuario actualizado exitosamente'
+            'message' => 'Usuario actualizado exitosamente',
+            'data' => [
+                'user_id' => $userId,
+                'username' => $username,
+                'download_enabled' => $downloadEnabled,
+                'password_changed' => $changePassword
+            ]
         ]);
-        
-    } catch (Exception $e) {
-        // Revertir transacción
-        $conn->rollback();
-        throw $e;
+    } else {
+        throw new Exception('Error al actualizar el usuario en la base de datos');
     }
     
 } catch (Exception $e) {
     error_log("Error updating user: " . $e->getMessage());
+    
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage()
+        'message' => $e->getMessage(),
+        'error_code' => 'UPDATE_USER_ERROR'
     ]);
+}
+
+// Función auxiliar para registrar actividad
+function logActivity($userId, $action, $table, $recordId, $description) {
+    global $pdo;
+    
+    try {
+        $sql = "INSERT INTO activity_log (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            $userId,
+            $action,
+            $table,
+            $recordId,
+            $description,
+            $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+            $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
+        ]);
+    } catch (Exception $e) {
+        error_log("Error logging activity: " . $e->getMessage());
+    }
+}
+
+// Función auxiliar para obtener usuario actual
+function getCurrentUser() {
+    global $pdo;
+    
+    try {
+        if (!isset($_SESSION['user_id'])) {
+            return false;
+        }
+        
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND status = 'active'");
+        $stmt->execute([$_SESSION['user_id']]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("Error getting current user: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Función auxiliar para obtener un registro
+function fetchOne($sql, $params = []) {
+    global $pdo;
+    
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("Error fetching record: " . $e->getMessage());
+        return false;
+    }
 }
 ?>
