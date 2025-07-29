@@ -1,6 +1,7 @@
 <?php
 // modules/reports/activity_log.php
 // Log de actividades del sistema - DMS2
+// VERSION CON SEGURIDAD - Usuarios no ven datos de administradores
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -10,17 +11,17 @@ SessionManager::requireLogin();
 
 $currentUser = SessionManager::getCurrentUser();
 
-// Parámetros de filtrado - convertir formato de fecha dd/mm/yyyy a yyyy-mm-dd
-$dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+// Parámetros de filtrado y paginación
+$dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-7 days'));
 $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 $userId = $_GET['user_id'] ?? '';
 $action = $_GET['action'] ?? '';
-$page = intval($_GET['page'] ?? 1);
-$limit = 50;
-$offset = ($page - 1) * $limit;
+$page = max(1, intval($_GET['page'] ?? 1));
+$recordsPerPage = 50;
+$offset = ($page - 1) * $recordsPerPage;
 
-// Función para obtener actividades con filtros - VERSIÓN CORREGIDA
-function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset)
+// Función para obtener actividades con paginación (CON SEGURIDAD)
+function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $offset, $limit)
 {
     $whereConditions = [];
     $params = [];
@@ -31,8 +32,27 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limi
     $params['date_from'] = $dateFrom . ' 00:00:00';
     $params['date_to'] = $dateTo . ' 23:59:59';
 
-    // Filtro por usuario
+    // Filtro por empresa y EXCLUIR ADMINS si no es admin
+    if ($currentUser['role'] !== 'admin') {
+        $whereConditions[] = "u.company_id = :company_id";
+        $whereConditions[] = "u.role != 'admin'";
+        $params['company_id'] = $currentUser['company_id'];
+    }
+
+    // Filtro por usuario CON VALIDACIÓN DE SEGURIDAD
     if (!empty($userId)) {
+        // SEGURIDAD: Verificar que el usuario no sea admin (si el usuario actual no es admin)
+        if ($currentUser['role'] !== 'admin') {
+            $checkQuery = "SELECT role, company_id FROM users WHERE id = :check_user_id";
+            $checkResult = fetchOne($checkQuery, ['check_user_id' => $userId]);
+            if (!$checkResult || 
+                $checkResult['role'] === 'admin' || 
+                $checkResult['company_id'] != $currentUser['company_id']) {
+                // Si intenta ver un admin o usuario de otra empresa, no mostrar nada
+                return [];
+            }
+        }
+        
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
@@ -43,34 +63,28 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limi
         $params['action'] = $action;
     }
 
-    // Filtro por empresa (si no es admin)
-    if ($currentUser['role'] !== 'admin') {
-        $whereConditions[] = "u.company_id = :company_id";
-        $params['company_id'] = $currentUser['company_id'];
-    }
-
     $whereClause = implode(' AND ', $whereConditions);
 
-    // Query principal - SIN LIMIT en los parámetros
     $query = "SELECT al.*, u.first_name, u.last_name, u.username, c.name as company_name
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
               LEFT JOIN companies c ON u.company_id = c.id
               WHERE $whereClause
               ORDER BY al.created_at DESC
-              LIMIT $limit OFFSET $offset";
+              LIMIT :limit OFFSET :offset";
 
-    // NO incluir limit y offset en $params
+    $params['limit'] = $limit;
+    $params['offset'] = $offset;
+
     try {
-        $result = fetchAll($query, $params);
-        return $result ?: []; // Devolver array vacío si es false
+        return fetchAll($query, $params);
     } catch (Exception $e) {
         error_log("Error en getActivities: " . $e->getMessage());
         return []; // Devolver array vacío en caso de error
     }
 }
 
-// Función para obtener el total de registros
+// Función para obtener el total de registros (CON SEGURIDAD)
 function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
 {
     $whereConditions = [];
@@ -84,6 +98,17 @@ function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
 
     // Filtro por usuario
     if (!empty($userId)) {
+        // SEGURIDAD: Verificar que el usuario no sea admin (si el usuario actual no es admin)
+        if ($currentUser['role'] !== 'admin') {
+            $checkQuery = "SELECT role, company_id FROM users WHERE id = :check_user_id";
+            $checkResult = fetchOne($checkQuery, ['check_user_id' => $userId]);
+            if (!$checkResult || 
+                $checkResult['role'] === 'admin' || 
+                $checkResult['company_id'] != $currentUser['company_id']) {
+                return 0; // Si intenta ver un admin, retornar 0
+            }
+        }
+        
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
@@ -97,6 +122,7 @@ function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
     // Filtro por empresa (si no es admin)
     if ($currentUser['role'] !== 'admin') {
         $whereConditions[] = "u.company_id = :company_id";
+        $whereConditions[] = "u.role != 'admin'";
         $params['company_id'] = $currentUser['company_id'];
     }
 
@@ -112,14 +138,23 @@ function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
     return $result['total'] ?? 0;
 }
 
-// Función para obtener usuarios para filtro
+// Función para obtener usuarios para filtro (CON SEGURIDAD)
 function getUsers($currentUser)
 {
     if ($currentUser['role'] === 'admin') {
-        $query = "SELECT id, username, first_name, last_name FROM users WHERE status = 'active' ORDER BY first_name, last_name";
+        $query = "SELECT id, username, first_name, last_name 
+                  FROM users 
+                  WHERE status = 'active' 
+                  ORDER BY first_name, last_name";
         return fetchAll($query);
     } else {
-        $query = "SELECT id, username, first_name, last_name FROM users WHERE company_id = :company_id AND status = 'active' ORDER BY first_name, last_name";
+        // Usuario normal NO puede ver administradores
+        $query = "SELECT id, username, first_name, last_name 
+                  FROM users 
+                  WHERE company_id = :company_id 
+                  AND status = 'active' 
+                  AND role != 'admin'
+                  ORDER BY first_name, last_name";
         return fetchAll($query, ['company_id' => $currentUser['company_id']]);
     }
 }
@@ -151,15 +186,15 @@ function translateAction($action)
         'export_excel' => 'Exportar Excel'
     ];
 
-    return $translations[$action] ?? ucfirst(str_replace('_', ' ', $action));
+    return $translations[$action] ?? ucfirst($action);
 }
 
-$activities = getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $limit, $offset);
-$totalActivities = getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action);
+// Obtener datos
+$activities = getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $offset, $recordsPerPage);
+$totalRecords = getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action);
+$totalPages = ceil($totalRecords / $recordsPerPage);
 $users = getUsers($currentUser);
 $actionTypes = getActionTypes();
-
-$totalPages = ceil($totalActivities / $limit);
 
 // Registrar acceso
 logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario accedió al log de actividades');
@@ -210,7 +245,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             </div>
         </header>
 
-        <!-- Contenido -->
+        <!-- Contenido de reportes -->
         <div class="reports-content">
             <!-- Navegación de reportes -->
             <div class="reports-nav-breadcrumb">
@@ -220,15 +255,25 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </a>
             </div>
 
-            <!-- Estadísticas principales -->
+            <!-- Estadísticas rápidas -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon">
                         <i data-feather="activity"></i>
                     </div>
                     <div class="stat-info">
-                        <div class="stat-number"><?php echo number_format($totalActivities); ?></div>
+                        <div class="stat-number"><?php echo number_format($totalRecords); ?></div>
                         <div class="stat-label">Total Actividades</div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="users"></i>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo count($users); ?></div>
+                        <div class="stat-label"><?php echo $currentUser['role'] === 'admin' ? 'Total Usuarios' : 'Usuarios de mi Empresa'; ?></div>
                     </div>
                 </div>
 
@@ -239,8 +284,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="stat-info">
                         <div class="stat-number">
                             <?php
-                            $days = max(1, ceil((strtotime($dateTo) - strtotime($dateFrom)) / 86400));
-                            echo $days;
+                            $days = max(1, (strtotime($dateTo) - strtotime($dateFrom)) / 86400 + 1);
+                            echo number_format($days);
                             ?>
                         </div>
                         <div class="stat-label">Días Analizados</div>
@@ -254,44 +299,11 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="stat-info">
                         <div class="stat-number">
                             <?php
-                            $days = max(1, ceil((strtotime($dateTo) - strtotime($dateFrom)) / 86400));
-                            echo number_format($totalActivities / $days, 1);
+                            $days = max(1, (strtotime($dateTo) - strtotime($dateFrom)) / 86400 + 1);
+                            echo number_format($totalRecords / $days, 1);
                             ?>
                         </div>
                         <div class="stat-label">Promedio Diario</div>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i data-feather="users"></i>
-                    </div>
-                    <div class="stat-info">
-                        <div class="stat-number">
-                            <?php
-                            // Contar usuarios únicos en el período
-                            $uniqueUsersQuery = "SELECT COUNT(DISTINCT al.user_id) as unique_users
-                                               FROM activity_logs al
-                                               LEFT JOIN users u ON al.user_id = u.id
-                                               WHERE al.created_at >= :date_from 
-                                               AND al.created_at <= :date_to";
-                            
-                            $uniqueUsersParams = [
-                                'date_from' => $dateFrom . ' 00:00:00',
-                                'date_to' => $dateTo . ' 23:59:59'
-                            ];
-
-                            // Filtro por empresa si no es admin
-                            if ($currentUser['role'] !== 'admin') {
-                                $uniqueUsersQuery .= " AND u.company_id = :company_id";
-                                $uniqueUsersParams['company_id'] = $currentUser['company_id'];
-                            }
-
-                            $uniqueUsersResult = fetchOne($uniqueUsersQuery, $uniqueUsersParams);
-                            echo number_format($uniqueUsersResult['unique_users'] ?? 0);
-                            ?>
-                        </div>
-                        <div class="stat-label">Usuarios Únicos</div>
                     </div>
                 </div>
             </div>
@@ -303,20 +315,19 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                     <div class="filters-row">
                         <div class="filter-group">
                             <label for="date_from">Desde</label>
-                            <input type="date" id="date_from" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>" required>
+                            <input type="date" id="date_from" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>">
                         </div>
                         <div class="filter-group">
                             <label for="date_to">Hasta</label>
-                            <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>" required>
+                            <input type="date" id="date_to" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>">
                         </div>
                         <div class="filter-group">
                             <label for="user_id">Usuario</label>
                             <select id="user_id" name="user_id">
-                                <option value="">Todos los usuarios</option>
+                                <option value=""><?php echo $currentUser['role'] === 'admin' ? 'Todos los usuarios' : 'Usuarios de mi empresa'; ?></option>
                                 <?php foreach ($users as $user): ?>
-                                    <option value="<?php echo $user['id']; ?>"
-                                        <?php echo $userId == $user['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
+                                    <option value="<?php echo $user['id']; ?>" <?php echo $userId == $user['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name'] . ' (@' . $user['username'] . ')'); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -326,9 +337,8 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                             <select id="action" name="action">
                                 <option value="">Todas las acciones</option>
                                 <?php foreach ($actionTypes as $actionType): ?>
-                                    <option value="<?php echo $actionType['action']; ?>"
-                                        <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars(translateAction($actionType['action'])); ?>
+                                    <option value="<?php echo htmlspecialchars($actionType['action']); ?>" <?php echo $action == $actionType['action'] ? 'selected' : ''; ?>>
+                                        <?php echo translateAction($actionType['action']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -368,88 +378,107 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
 
             <!-- Tabla de actividades -->
             <div class="reports-table">
-                <h3>Actividades del Sistema (<?php echo count($activities); ?> de <?php echo number_format($totalActivities); ?> registros)</h3>
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Fecha/Hora</th>
-                                <th>Usuario</th>
-                                <th>Acción</th>
-                                <th>Empresa</th>
-                                <th>Descripción</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($activities)): ?>
+                <div class="table-header">
+                    <h3>Log de Actividades (<?php echo number_format($totalRecords); ?> registros)</h3>
+                    <div class="pagination-info">
+                        Página <?php echo $page; ?> de <?php echo $totalPages; ?>
+                        (<?php echo number_format($offset + 1); ?> - <?php echo number_format(min($offset + $recordsPerPage, $totalRecords)); ?>)
+                    </div>
+                </div>
+
+                <?php if (!empty($activities)): ?>
+                    <div class="table-container">
+                        <table class="data-table activity-table">
+                            <thead>
                                 <tr>
-                                    <td colspan="5" class="empty-state">
-                                        <div class="empty-content">
-                                            <i data-feather="search"></i>
-                                            <h4>No se encontraron actividades</h4>
-                                            <p>No hay actividades que coincidan con los filtros aplicados.</p>
-                                        </div>
-                                    </td>
+                                    <th>Fecha/Hora</th>
+                                    <th>Usuario</th>
+                                    <?php if ($currentUser['role'] === 'admin'): ?>
+                                    <th>Empresa</th>
+                                    <?php endif; ?>
+                                    <th>Acción</th>
+                                    <th>Descripción</th>
                                 </tr>
-                            <?php else: ?>
+                            </thead>
+                            <tbody>
                                 <?php foreach ($activities as $activity): ?>
                                     <tr>
-                                        <td><?php echo date('d/m/Y H:i:s', strtotime($activity['created_at'])); ?></td>
-                                        <td>
-                                            <div class="user-info">
-                                                <strong><?php echo htmlspecialchars($activity['first_name'] . ' ' . $activity['last_name']); ?></strong>
-                                                <small>@<?php echo htmlspecialchars($activity['username']); ?></small>
+                                        <td class="datetime-cell">
+                                            <div class="datetime">
+                                                <div class="date"><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></div>
+                                                <div class="time"><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></div>
                                             </div>
                                         </td>
-                                        <td>
-                                            <span class="badge badge-<?php echo getActionClass($activity['action']); ?>">
-                                                <i data-feather="<?php echo getActionIcon($activity['action']); ?>"></i>
-                                                <?php echo htmlspecialchars(translateAction($activity['action'])); ?>
+                                        <td class="user-cell">
+                                            <div class="user-info">
+                                                <span class="user-name">
+                                                    <?php echo htmlspecialchars(($activity['first_name'] ?? '') . ' ' . ($activity['last_name'] ?? '')); ?>
+                                                </span>
+                                                <small class="username">@<?php echo htmlspecialchars($activity['username'] ?? 'usuario'); ?></small>
+                                            </div>
+                                        </td>
+                                        <?php if ($currentUser['role'] === 'admin'): ?>
+                                        <td class="company-cell">
+                                            <?php echo htmlspecialchars($activity['company_name'] ?? 'Sin empresa'); ?>
+                                        </td>
+                                        <?php endif; ?>
+                                        <td class="action-cell">
+                                            <span class="action-badge action-<?php echo $activity['action']; ?>">
+                                                <?php echo translateAction($activity['action']); ?>
                                             </span>
                                         </td>
-                                        <td>
-                                            <span class="company-name"><?php echo htmlspecialchars($activity['company_name'] ?? 'N/A'); ?></span>
-                                        </td>
-                                        <td>
-                                            <div class="description-cell" title="<?php echo htmlspecialchars($activity['details'] ?? 'Sin descripción'); ?>">
-                                                <?php
-                                                $description = $activity['details'] ?? 'Sin descripción';
-                                                echo htmlspecialchars(strlen($description) > 80 ? substr($description, 0, 80) . '...' : $description);
-                                                ?>
-                                            </div>
+                                        <td class="description-cell">
+                                            <?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                            </tbody>
+                        </table>
+                    </div>
 
-            <!-- Paginación -->
-            <?php if ($totalPages > 1): ?>
-            <div class="pagination">
-                <div class="pagination-info">
-                    Página <?php echo $page; ?> de <?php echo $totalPages; ?> 
-                    (<?php echo number_format($totalActivities); ?> registros total)
-                </div>
-                <div class="pagination-buttons">
-                    <?php if ($page > 1): ?>
-                        <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" class="btn-pagination">
-                            <i data-feather="chevron-left"></i>
-                            Anterior
-                        </a>
+                    <!-- Paginación -->
+                    <?php if ($totalPages > 1): ?>
+                        <div class="pagination">
+                            <div class="pagination-info">
+                                Mostrando <?php echo number_format($offset + 1); ?> - <?php echo number_format(min($offset + $recordsPerPage, $totalRecords)); ?> 
+                                de <?php echo number_format($totalRecords); ?> registros
+                            </div>
+                            <div class="pagination-controls">
+                                <?php if ($page > 1): ?>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>" class="pagination-btn">
+                                        <i data-feather="chevrons-left"></i>
+                                    </a>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" class="pagination-btn">
+                                        <i data-feather="chevron-left"></i>
+                                    </a>
+                                <?php endif; ?>
+
+                                <span class="pagination-current">
+                                    <?php echo $page; ?> / <?php echo $totalPages; ?>
+                                </span>
+
+                                <?php if ($page < $totalPages): ?>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" class="pagination-btn">
+                                        <i data-feather="chevron-right"></i>
+                                    </a>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $totalPages])); ?>" class="pagination-btn">
+                                        <i data-feather="chevrons-right"></i>
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     <?php endif; ?>
 
-                    <?php if ($page < $totalPages): ?>
-                        <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" class="btn-pagination">
-                            Siguiente
-                            <i data-feather="chevron-right"></i>
-                        </a>
-                    <?php endif; ?>
-                </div>
+                <?php else: ?>
+                    <div class="empty-state">
+                        <div class="empty-content">
+                            <i data-feather="activity"></i>
+                            <h4>No se encontraron actividades</h4>
+                            <p>No hay actividades que coincidan con los filtros seleccionados.</p>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </div>
-            <?php endif; ?>
         </div>
     </main>
 
@@ -593,62 +622,13 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         // Responsive
         window.addEventListener('resize', function() {
             if (window.innerWidth > 768) {
-                const sidebar = document.getElementById('sidebar');
-                if (sidebar) {
-                    sidebar.classList.remove('active');
-                }
+                document.getElementById('sidebar').classList.remove('active');
             }
         });
+
+        console.log('📊 Log de Actividades cargado con seguridad');
+        console.log('🔒 Modo:', '<?php echo $currentUser['role'] === 'admin' ? 'Admin - Ve todas las actividades' : 'Usuario - Solo su empresa (sin admins)'; ?>');
     </script>
-    
 </body>
 
 </html>
-
-<?php
-// Función auxiliar para obtener clase CSS según acción
-function getActionClass($action)
-{
-    $classes = [
-        'login' => 'success',
-        'logout' => 'info',
-        'upload' => 'success',
-        'download' => 'info',
-        'delete' => 'error',
-        'create' => 'success',
-        'update' => 'warning',
-        'view' => 'info',
-        'share' => 'warning',
-        'access_denied' => 'error',
-        'view_activity_log' => 'info',
-        'export_csv' => 'info',
-        'export_pdf' => 'info',
-        'export_excel' => 'info'
-    ];
-
-    return $classes[$action] ?? 'info';
-}
-
-// Función auxiliar para obtener icono según acción
-function getActionIcon($action)
-{
-    $icons = [
-        'login' => 'log-in',
-        'logout' => 'log-out',
-        'upload' => 'upload',
-        'download' => 'download',
-        'delete' => 'trash-2',
-        'create' => 'plus',
-        'update' => 'edit',
-        'view' => 'eye',
-        'share' => 'share-2',
-        'access_denied' => 'shield-off',
-        'view_activity_log' => 'activity',
-        'export_csv' => 'file-text',
-        'export_pdf' => 'file',
-        'export_excel' => 'grid'
-    ];
-
-    return $icons[$action] ?? 'activity';
-}
-?>

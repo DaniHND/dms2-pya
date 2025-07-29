@@ -1,6 +1,7 @@
 <?php
 // modules/reports/user_reports.php
 // Reportes por usuario del sistema - DMS2
+// VERSION CON SEGURIDAD - Usuarios no ven datos de administradores
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
@@ -16,20 +17,30 @@ $dateTo = $_GET['date_to'] ?? date('Y-m-d');
 $selectedUserId = $_GET['user_id'] ?? '';
 $reportType = $_GET['report_type'] ?? 'summary';
 
-// Función para obtener usuarios para el filtro
+// Función para obtener usuarios para el filtro (CON SEGURIDAD)
 function getUsers($currentUser)
 {
     if ($currentUser['role'] === 'admin') {
-        $query = "SELECT id, username, first_name, last_name, email, company_id FROM users WHERE status = 'active' ORDER BY first_name, last_name";
+        // Admin puede ver todos los usuarios
+        $query = "SELECT id, username, first_name, last_name, email, company_id, role 
+                  FROM users 
+                  WHERE status = 'active' 
+                  ORDER BY first_name, last_name";
         return fetchAll($query);
     } else {
-        $query = "SELECT id, username, first_name, last_name, email, company_id FROM users WHERE company_id = :company_id AND status = 'active' ORDER BY first_name, last_name";
+        // Usuario normal NO puede ver administradores
+        $query = "SELECT id, username, first_name, last_name, email, company_id, role 
+                  FROM users 
+                  WHERE company_id = :company_id 
+                  AND status = 'active' 
+                  AND role != 'admin'
+                  ORDER BY first_name, last_name";
         return fetchAll($query, ['company_id' => $currentUser['company_id']]);
     }
 }
 
-// Función para obtener estadísticas generales de usuarios
-function getUsersStats($currentUser, $dateFrom, $dateTo)
+// Función para obtener estadísticas generales de usuarios (CON SEGURIDAD)
+function getUsersStats($currentUser, $dateFrom, $dateTo, $selectedUserId = '')
 {
     $whereCondition = "";
     $params = [
@@ -37,19 +48,45 @@ function getUsersStats($currentUser, $dateFrom, $dateTo)
         'date_to' => $dateTo . ' 23:59:59'
     ];
 
+    // Filtro por empresa y EXCLUIR ADMINS si no es admin
     if ($currentUser['role'] !== 'admin') {
-        $whereCondition = "AND u.company_id = :company_id";
+        $whereCondition = "AND u.company_id = :company_id AND u.role != 'admin'";
         $params['company_id'] = $currentUser['company_id'];
+    }
+
+    // Filtro por usuario específico CON VALIDACIÓN DE SEGURIDAD
+    if (!empty($selectedUserId)) {
+        // SEGURIDAD: Verificar que el usuario seleccionado no sea admin (si el usuario actual no es admin)
+        if ($currentUser['role'] !== 'admin') {
+            $checkQuery = "SELECT role FROM users WHERE id = :check_user_id";
+            $checkResult = fetchOne($checkQuery, ['check_user_id' => $selectedUserId]);
+            if ($checkResult && $checkResult['role'] === 'admin') {
+                // Si intenta ver un admin, resetear el filtro
+                $selectedUserId = '';
+            }
+        }
+        
+        if (!empty($selectedUserId)) {
+            $whereCondition .= " AND al.user_id = :selected_user_id";
+            $params['selected_user_id'] = $selectedUserId;
+        }
     }
 
     $stats = [];
 
-    // Total de usuarios activos
-    $query = "SELECT COUNT(*) as total FROM users u WHERE u.status = 'active' $whereCondition";
-    $result = fetchOne($query, $currentUser['role'] !== 'admin' ? ['company_id' => $currentUser['company_id']] : []);
+    // Total de usuarios activos (sin filtro de usuario específico, pero SIN ADMINS para users)
+    $userWhereCondition = "";
+    $userParams = [];
+    if ($currentUser['role'] !== 'admin') {
+        $userWhereCondition = "AND u.company_id = :company_id AND u.role != 'admin'";
+        $userParams['company_id'] = $currentUser['company_id'];
+    }
+    
+    $query = "SELECT COUNT(*) as total FROM users u WHERE u.status = 'active' $userWhereCondition";
+    $result = fetchOne($query, $userParams);
     $stats['total_users'] = $result['total'] ?? 0;
 
-    // Usuarios con actividad reciente
+    // Usuarios con actividad reciente (CON SEGURIDAD)
     $query = "SELECT COUNT(DISTINCT al.user_id) as active_users
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
@@ -60,20 +97,20 @@ function getUsersStats($currentUser, $dateFrom, $dateTo)
     $result = fetchOne($query, $params);
     $stats['active_users'] = $result['active_users'] ?? 0;
 
-    // Top usuarios por actividad
+    // Top usuarios por actividad (CON SEGURIDAD)
     $query = "SELECT u.first_name, u.last_name, u.username, COUNT(*) as activity_count
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
               WHERE al.created_at >= :date_from 
               AND al.created_at <= :date_to
               $whereCondition
-              GROUP BY al.user_id
+              GROUP BY al.user_id, u.first_name, u.last_name, u.username
               ORDER BY activity_count DESC
               LIMIT 10";
 
     $stats['top_users'] = fetchAll($query, $params);
 
-    // Actividad por tipo de acción
+    // Actividad por tipo de acción (CON SEGURIDAD)
     $query = "SELECT al.action, COUNT(*) as count
               FROM activity_logs al
               LEFT JOIN users u ON al.user_id = u.id
@@ -119,15 +156,26 @@ function getSelectedUserStats($userId, $dateFrom, $dateTo)
     return $stats;
 }
 
-// Obtener datos
+// Obtener datos (PASANDO EL FILTRO DE USUARIO CON SEGURIDAD)
 $users = getUsers($currentUser);
-$generalStats = getUsersStats($currentUser, $dateFrom, $dateTo);
+$generalStats = getUsersStats($currentUser, $dateFrom, $dateTo, $selectedUserId);
 $selectedUserStats = [];
 $selectedUserActionStats = [];
 
 if (!empty($selectedUserId)) {
-    $selectedUserStats = getSelectedUserStats($selectedUserId, $dateFrom, $dateTo);
-    $selectedUserActionStats = $selectedUserStats['by_action'] ?? [];
+    // VALIDACIÓN ADICIONAL: Verificar que el usuario seleccionado sea válido
+    $validUser = false;
+    foreach ($users as $user) {
+        if ($user['id'] == $selectedUserId) {
+            $validUser = true;
+            break;
+        }
+    }
+    
+    if ($validUser) {
+        $selectedUserStats = getSelectedUserStats($selectedUserId, $dateFrom, $dateTo);
+        $selectedUserActionStats = $selectedUserStats['by_action'] ?? [];
+    }
 }
 
 // Registrar acceso
@@ -198,7 +246,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                     </div>
                     <div class="stat-info">
                         <div class="stat-number"><?php echo number_format($generalStats['total_users']); ?></div>
-                        <div class="stat-label">Total Usuarios</div>
+                        <div class="stat-label"><?php echo $currentUser['role'] === 'admin' ? 'Total Usuarios' : 'Usuarios de mi Empresa'; ?></div>
                     </div>
                 </div>
 
@@ -262,7 +310,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                         <div class="filter-group">
                             <label for="user_id">Usuario Específico</label>
                             <select id="user_id" name="user_id">
-                                <option value="">Todos los usuarios</option>
+                                <option value=""><?php echo $currentUser['role'] === 'admin' ? 'Todos los usuarios' : 'Usuarios de mi empresa'; ?></option>
                                 <?php foreach ($users as $user): ?>
                                     <option value="<?php echo $user['id']; ?>" <?php echo $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name'] . ' (@' . $user['username'] . ')'); ?>
@@ -316,7 +364,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                     <div class="chart-grid">
                         <!-- Top usuarios más activos -->
                         <div class="chart-card">
-                            <h3>Usuarios Más Activos</h3>
+                            <h3><?php echo !empty($selectedUserId) ? 'Actividad del Usuario Seleccionado' : ($currentUser['role'] === 'admin' ? 'Usuarios Más Activos' : 'Usuarios Más Activos de mi Empresa'); ?></h3>
                             <div class="chart-data">
                                 <?php if (!empty($generalStats['top_users'])): ?>
                                     <?php foreach ($generalStats['top_users'] as $user): ?>
@@ -333,7 +381,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
 
                         <!-- Actividades por tipo -->
                         <div class="chart-card">
-                            <h3>Actividades por Tipo</h3>
+                            <h3><?php echo !empty($selectedUserId) ? 'Actividades por Tipo del Usuario' : 'Actividades por Tipo'; ?></h3>
                             <div class="chart-container">
                                 <canvas id="activityTypeChart"></canvas>
                             </div>
@@ -342,7 +390,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                         <?php if (!empty($selectedUserId) && !empty($selectedUserStats)): ?>
                         <!-- Estadísticas del usuario seleccionado -->
                         <div class="chart-card full-width">
-                            <h3>Actividad del Usuario Seleccionado</h3>
+                            <h3>Actividad Detallada del Usuario Seleccionado</h3>
                             <div class="user-stats">
                                 <div class="user-metric">
                                     <div class="metric-number"><?php echo number_format($selectedUserStats['total_activities']); ?></div>
@@ -359,7 +407,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
             <?php else: ?>
                 <!-- Vista detallada -->
                 <div class="reports-table">
-                    <h3>Lista Detallada de Usuarios</h3>
+                    <h3><?php echo $currentUser['role'] === 'admin' ? 'Lista Detallada de Usuarios' : 'Lista de Usuarios de mi Empresa'; ?></h3>
                     <div class="table-container">
                         <table class="data-table">
                             <thead>
@@ -375,13 +423,20 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                                 <?php if (!empty($users)): ?>
                                     <?php foreach ($users as $user): ?>
                                         <?php
-                                        // Obtener actividades del usuario
-                                        $userActivityQuery = "SELECT COUNT(*) as total, MAX(created_at) as last_activity FROM activity_logs WHERE user_id = :user_id AND created_at >= :date_from AND created_at <= :date_to";
-                                        $userActivity = fetchOne($userActivityQuery, [
+                                        // Obtener actividades del usuario con filtro por usuario específico
+                                        $userActivityParams = [
                                             'user_id' => $user['id'],
                                             'date_from' => $dateFrom . ' 00:00:00',
                                             'date_to' => $dateTo . ' 23:59:59'
-                                        ]);
+                                        ];
+                                        
+                                        // Si hay un usuario seleccionado y no es el actual, saltar
+                                        if (!empty($selectedUserId) && $selectedUserId != $user['id']) {
+                                            continue;
+                                        }
+                                        
+                                        $userActivityQuery = "SELECT COUNT(*) as total, MAX(created_at) as last_activity FROM activity_logs WHERE user_id = :user_id AND created_at >= :date_from AND created_at <= :date_to";
+                                        $userActivity = fetchOne($userActivityQuery, $userActivityParams);
                                         ?>
                                         <tr>
                                             <td>
@@ -459,7 +514,7 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
         });
 
         function initCharts() {
-            // Gráfico de actividades por tipo
+            // Gráfico de actividades por tipo (AHORA CON FILTRO Y SEGURIDAD CORRECTOS)
             const activityData = <?php echo json_encode($generalStats['by_action'] ?? []); ?>;
             
             if (activityData.length > 0) {
@@ -642,8 +697,10 @@ logActivity($currentUser['id'], 'view_user_reports', 'reports', null, 'Usuario a
                 document.getElementById('sidebar').classList.remove('active');
             }
         });
+
+        console.log('📊 Seguridad aplicada:', '<?php echo $currentUser['role'] === 'admin' ? 'Admin - Ve todos los usuarios' : 'Usuario - No ve administradores'; ?>');
+        console.log('📊 Filtro de usuario:', '<?php echo !empty($selectedUserId) ? 'Usuario ID: ' . $selectedUserId : 'Todos los usuarios permitidos'; ?>');
     </script>
-    
 </body>
 
 </html>
