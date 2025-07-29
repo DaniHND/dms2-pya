@@ -1,35 +1,22 @@
 <?php
 // modules/users/actions/toggle_user_status.php
-// Cambiar estado de usuario - VERSIÓN CORREGIDA
+// Cambiar estado de un usuario (activo/inactivo)
 
 header('Content-Type: application/json');
+require_once '../../../config/session.php';
 require_once '../../../config/database.php';
-require_once '../../../includes/functions.php';
 
 try {
-    // Verificar autenticación
-    session_start();
-    if (!isset($_SESSION['user_id'])) {
-        throw new Exception('Usuario no autenticado');
-    }
+    SessionManager::requireLogin();
+    SessionManager::requireRole('admin');
     
-    // Obtener usuario actual con consulta directa
-    $currentUser = fetchOne("SELECT * FROM users WHERE id = ? AND status = 'active'", [$_SESSION['user_id']]);
-    if (!$currentUser) {
-        throw new Exception('Usuario no válido');
-    }
+    $currentUser = SessionManager::getCurrentUser();
     
-    // Verificar permisos (solo admin puede cambiar estados)
-    if ($currentUser['role'] !== 'admin') {
-        throw new Exception('No tienes permisos para realizar esta acción');
-    }
-    
-    // Verificar método POST
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         throw new Exception('Método no permitido');
     }
     
-    // Obtener y validar datos
+    // Obtener datos
     $userId = intval($_POST['user_id'] ?? 0);
     $currentStatus = trim($_POST['current_status'] ?? '');
     
@@ -41,7 +28,7 @@ try {
         throw new Exception('Estado actual no válido');
     }
     
-    // Verificar que el usuario a modificar existe
+    // Verificar que el usuario existe
     $targetUser = fetchOne("SELECT * FROM users WHERE id = ?", [$userId]);
     if (!$targetUser) {
         throw new Exception('Usuario no encontrado');
@@ -63,34 +50,15 @@ try {
     // Determinar nuevo estado
     $newStatus = $currentStatus === 'active' ? 'inactive' : 'active';
     
-    // Actualizar estado del usuario
-    $updateSql = "UPDATE users SET status = ? WHERE id = ?";
-    $stmt = $pdo->prepare($updateSql);
-    $result = $stmt->execute([$newStatus, $userId]);
+    // Actualizar estado
+    $stmt = executeQuery("UPDATE users SET status = ? WHERE id = ?", [$newStatus, $userId]);
     
-    if ($result) {
-        // Intentar registrar actividad
-        try {
-            $action = $newStatus === 'active' ? 'activated' : 'deactivated';
-            $activityDescription = "Usuario {$action}: {$targetUser['first_name']} {$targetUser['last_name']} (@{$targetUser['username']})";
-            
-            $logSql = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
-            $logStmt = $pdo->prepare($logSql);
-            $logStmt->execute([
-                $currentUser['id'],
-                'toggle_user_status',
-                'users',
-                $userId,
-                $activityDescription,
-                $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-                $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
-            ]);
-        } catch (Exception $logError) {
-            error_log("Error logging activity: " . $logError->getMessage());
-        }
+    if ($stmt) {
+        // Registrar actividad
+        $action = $newStatus === 'active' ? 'activated' : 'deactivated';
+        logActivity($currentUser['id'], 'toggle_user_status', 'users', $userId, 
+                   "Usuario {$action}: {$targetUser['first_name']} {$targetUser['last_name']} (@{$targetUser['username']})");
         
-        // Respuesta exitosa
         echo json_encode([
             'success' => true,
             'message' => $newStatus === 'active' ? 'Usuario activado exitosamente' : 'Usuario desactivado exitosamente',
@@ -101,21 +69,17 @@ try {
                 'username' => $targetUser['username']
             ]
         ]);
-        
     } else {
         throw new Exception('Error al actualizar el estado del usuario');
     }
     
 } catch (Exception $e) {
-    // Log del error
     error_log("Error toggling user status: " . $e->getMessage());
     
-    // Respuesta de error
     http_response_code(400);
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => 'TOGGLE_STATUS_ERROR'
+        'message' => $e->getMessage()
     ]);
 }
 ?>

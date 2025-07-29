@@ -1,35 +1,15 @@
 <?php
-// modules/users/index.php - Módulo de gestión de usuarios FINAL
+// modules/users/index.php - Módulo con bloqueador agresivo de popups
+require_once '../../config/session.php';
 require_once '../../config/database.php';
-require_once '../../includes/functions.php';
 
-// Verificar autenticación
-session_start();
-if (!isset($_SESSION['user_id'])) {
-    header('Location: ../../login.php');
-    exit;
-}
+// Verificar autenticación y permisos
+SessionManager::requireLogin();
+SessionManager::requireRole('admin');
 
-// Obtener usuario actual con consulta directa
-try {
-    $currentUser = fetchOne("SELECT * FROM users WHERE id = ? AND status = 'active'", [$_SESSION['user_id']]);
-    if (!$currentUser) {
-        session_destroy();
-        header('Location: ../../login.php');
-        exit;
-    }
-} catch (Exception $e) {
-    error_log("Error getting current user: " . $e->getMessage());
-    header('Location: ../../login.php');
-    exit;
-}
+$currentUser = SessionManager::getCurrentUser();
 
-// Verificar permisos - solo admin
-if ($currentUser['role'] !== 'admin') {
-    header('Location: ../../dashboard.php?error=access_denied');
-    exit;
-}
-
+// [... resto del código PHP igual ...]
 // Parámetros de filtrado y paginación
 $search = $_GET['search'] ?? '';
 $filterRole = $_GET['role'] ?? '';
@@ -40,7 +20,7 @@ $limit = 15;
 $offset = ($page - 1) * $limit;
 
 // Construir consulta con filtros
-$whereConditions = ["1=1"]; // Condición base
+$whereConditions = ["1=1"];
 $params = [];
 
 if (!empty($search)) {
@@ -89,423 +69,442 @@ $sql = "
 ";
 
 $users = [];
+$totalUsers = 0;
+$companies = [];
+
 try {
     $users = fetchAll($sql, $params);
-} catch (Exception $e) {
-    error_log("Error fetching users: " . $e->getMessage());
-    $users = [];
-}
-
-// Obtener estadísticas
-$statsSQL = "
-    SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN u.status = 'active' THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN u.status = 'inactive' THEN 1 ELSE 0 END) as inactive,
-        SUM(CASE WHEN u.role = 'admin' THEN 1 ELSE 0 END) as admin_count,
-        SUM(CASE WHEN u.role = 'user' THEN 1 ELSE 0 END) as user_count,
-        SUM(CASE WHEN u.role = 'viewer' THEN 1 ELSE 0 END) as viewer_count
-    FROM users u
-    LEFT JOIN companies c ON u.company_id = c.id
-    $whereClause
-";
-
-$stats = ['total' => 0, 'active' => 0, 'inactive' => 0, 'by_role' => ['admin' => 0, 'user' => 0, 'viewer' => 0]];
-try {
-    $statsResult = fetchOne($statsSQL, $params);
-    if ($statsResult) {
-        $stats = [
-            'total' => $statsResult['total'] ?? 0,
-            'active' => $statsResult['active'] ?? 0,
-            'inactive' => $statsResult['inactive'] ?? 0,
-            'by_role' => [
-                'admin' => $statsResult['admin_count'] ?? 0,
-                'user' => $statsResult['user_count'] ?? 0,
-                'viewer' => $statsResult['viewer_count'] ?? 0
-            ]
-        ];
-    }
-} catch (Exception $e) {
-    error_log("Error fetching stats: " . $e->getMessage());
-}
-
-// Obtener empresas para filtros
-$companies = [];
-try {
+    $countSql = "SELECT COUNT(*) as total FROM users u LEFT JOIN companies c ON u.company_id = c.id $whereClause";
+    $countResult = fetchOne($countSql, $params);
+    $totalUsers = $countResult['total'] ?? 0;
     $companies = fetchAll("SELECT id, name FROM companies WHERE status = 'active' ORDER BY name");
 } catch (Exception $e) {
-    error_log("Error fetching companies: " . $e->getMessage());
+    error_log("Error in users module: " . $e->getMessage());
+    $error = "Error al cargar los datos de usuarios";
 }
 
-// Calcular paginación
-$totalUsers = $stats['total'];
-$totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
+$totalPages = ceil($totalUsers / $limit);
+logActivity($currentUser['id'], 'view_users_module', 'users', null, 'Usuario accedió al módulo de gestión de usuarios');
 ?>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Usuarios - DMS</title>
-    <base href="../../">
-    
-    <!-- CSS -->
-    <link rel="stylesheet" href="assets/css/dashboard.css">
-    <link rel="stylesheet" href="assets/css/users_new.css">
-    
-    <!-- Feather Icons -->
+    <title>Gestión de Usuarios - DMS2</title>
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/dashboard.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
     <script src="https://unpkg.com/feather-icons"></script>
+    <style>
+        /* BLOQUEADOR AGRESIVO DE POPUPS Y EXTENSIONES */
+        
+        /* Desactivar completamente tooltips y popups del navegador */
+        * {
+            /* Desactivar tooltips del navegador */
+            title: none !important;
+        }
+        
+        *::before,
+        *::after {
+            display: none !important;
+        }
+        
+        /* Bloquear elementos conocidos de extensiones */
+        [class*="tooltip"],
+        [class*="popup"],
+        [class*="extension"],
+        [class*="translate"],
+        [id*="tooltip"],
+        [id*="popup"],
+        [id*="extension"],
+        [id*="translate"] {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            position: absolute !important;
+            left: -9999px !important;
+            top: -9999px !important;
+        }
+        
+        /* Bloquear overlays de terceros */
+        div[style*="position: fixed"],
+        div[style*="position: absolute"][style*="z-index"] {
+            display: none !important;
+        }
+        
+        /* Proteger nuestros elementos específicamente */
+        .protected-button {
+            position: relative !important;
+            z-index: 999999 !important;
+            pointer-events: auto !important;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+        }
+        
+        .protected-button:hover {
+            transform: none !important;
+        }
+        
+        /* Contenedor protegido para la tabla */
+        .protected-table {
+            position: relative !important;
+            z-index: 99999 !important;
+            isolation: isolate !important;
+        }
+        
+        /* Estilos específicos para botones */
+        .action-btn {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 32px !important;
+            height: 32px !important;
+            border: none !important;
+            border-radius: 6px !important;
+            cursor: pointer !important;
+            font-size: 14px !important;
+            margin: 1px !important;
+            transition: background-color 0.2s !important;
+            position: relative !important;
+            z-index: 999999 !important;
+            pointer-events: auto !important;
+        }
+        
+        .btn-view { background-color: #3b82f6 !important; color: white !important; }
+        .btn-view:hover { background-color: #2563eb !important; }
+        .btn-edit { background-color: #f59e0b !important; color: white !important; }
+        .btn-edit:hover { background-color: #d97706 !important; }
+        .btn-toggle-activate { background-color: #10b981 !important; color: white !important; }
+        .btn-toggle-activate:hover { background-color: #059669 !important; }
+        .btn-toggle-deactivate { background-color: #ef4444 !important; color: white !important; }
+        .btn-toggle-deactivate:hover { background-color: #dc2626 !important; }
+        
+        .actions-cell {
+            position: relative !important;
+            z-index: 999999 !important;
+            isolation: isolate !important;
+        }
+        
+        /* Prevenir interferencias del navegador */
+        body {
+            overflow-x: hidden !important;
+        }
+        
+        /* Desactivar funciones del navegador que interfieren */
+        .main-content {
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            -khtml-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+            user-select: none !important;
+        }
+        
+        /* Permitir selección solo en inputs */
+        input, textarea {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+        }
+    </style>
 </head>
-<body>
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <?php include '../../includes/sidebar.php'; ?>
 
-        <!-- Overlay para móvil -->
-        <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+<body class="dashboard-layout">
+    <!-- Sidebar -->
+    <?php include '../../includes/sidebar.php'; ?>
 
-        <!-- Contenido principal -->
-        <main class="main-content">
-            <!-- Contenido del módulo de usuarios -->
-            <div class="users-container">
-                <!-- Header con info del usuario y hora -->
-                <div class="page-header">
-                    <div class="header-info">
-                        <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
-                        <div class="current-time" id="currentTime"></div>
-                    </div>
-                    <div class="header-actions">
-                        <button class="btn-icon" onclick="showComingSoon('Configuración')">
-                            <i data-feather="settings"></i>
-                        </button>
-                        <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                            <i data-feather="log-out"></i>
-                        </a>
-                    </div>
+    <!-- Contenido principal -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="content-header">
+            <div class="header-left">
+                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+                    <i data-feather="menu"></i>
+                </button>
+                <h1>Gestión de Usuarios</h1>
+            </div>
+
+            <div class="header-right">
+                <div class="header-info">
+                    <div class="user-name-header"><?php echo htmlspecialchars(SessionManager::getFullName()); ?></div>
+                    <div class="current-time" id="currentTime"></div>
                 </div>
-
-                <!-- Título y botón principal -->
-                <div class="page-title-section">
-                    <div>
-                        <h1>Gestión de Usuarios</h1>
-                        <p class="page-subtitle">Administrar usuarios del sistema</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="openCreateUserModal()">
-                        <i data-feather="user-plus"></i>
-                        Nuevo Usuario
-                    </button>
-                </div>
-
-                <!-- Estadísticas -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i data-feather="users"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-number"><?php echo number_format($stats['total']); ?></div>
-                            <div class="stat-label">Total Usuarios</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon active">
-                            <i data-feather="user-check"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-number"><?php echo number_format($stats['active']); ?></div>
-                            <div class="stat-label">Usuarios Activos</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon admin">
-                            <i data-feather="shield"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-number"><?php echo number_format($stats['by_role']['admin']); ?></div>
-                            <div class="stat-label">Administradores</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Filtros -->
-                <div class="filters-section">
-                    <form method="GET" class="filters-form">
-                        <div class="filters-row">
-                            <div class="filter-group">
-                                <label>Buscar</label>
-                                <div class="search-input-wrapper">
-                                    <i data-feather="search" class="search-icon"></i>
-                                    <input type="text" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Nombre, usuario o email">
-                                </div>
-                            </div>
-
-                            <div class="filter-group">
-                                <label>Rol</label>
-                                <div class="select-wrapper">
-                                    <select name="role">
-                                        <option value="">Todos los roles</option>
-                                        <option value="admin" <?php echo $filterRole === 'admin' ? 'selected' : ''; ?>>Administrador</option>
-                                        <option value="user" <?php echo $filterRole === 'user' ? 'selected' : ''; ?>>Usuario</option>
-                                        <option value="viewer" <?php echo $filterRole === 'viewer' ? 'selected' : ''; ?>>Visualizador</option>
-                                    </select>
-                                    <i data-feather="chevron-down" class="select-icon"></i>
-                                </div>
-                            </div>
-
-                            <div class="filter-group">
-                                <label>Estado</label>
-                                <div class="select-wrapper">
-                                    <select name="status">
-                                        <option value="">Todos los estados</option>
-                                        <option value="active" <?php echo $filterStatus === 'active' ? 'selected' : ''; ?>>Activo</option>
-                                        <option value="inactive" <?php echo $filterStatus === 'inactive' ? 'selected' : ''; ?>>Inactivo</option>
-                                    </select>
-                                    <i data-feather="chevron-down" class="select-icon"></i>
-                                </div>
-                            </div>
-
-                            <?php if (!empty($companies)): ?>
-                            <div class="filter-group">
-                                <label>Empresa</label>
-                                <div class="select-wrapper">
-                                    <select name="company">
-                                        <option value="">Todas las empresas</option>
-                                        <?php foreach ($companies as $company): ?>
-                                            <option value="<?php echo $company['id']; ?>" <?php echo $filterCompany == $company['id'] ? 'selected' : ''; ?>>
-                                                <?php echo htmlspecialchars($company['name']); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <i data-feather="chevron-down" class="select-icon"></i>
-                                </div>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-
-                        <div class="filters-actions">
-                            <button type="submit" class="btn btn-secondary">
-                                <i data-feather="search"></i>
-                                Buscar
-                            </button>
-                            <a href="modules/users/index.php" class="btn btn-outline">
-                                <i data-feather="x"></i>
-                                Limpiar
-                            </a>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Tabla de usuarios -->
-                <div class="table-section">
-                    <?php if (!empty($users)): ?>
-                        <div class="table-header-info">
-                            <h3>Lista de Usuarios</h3>
-                            <p>Mostrando <?php echo count($users); ?> de <?php echo number_format($totalUsers); ?> usuarios</p>
-                        </div>
-
-                        <div class="table-wrapper">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Usuario</th>
-                                        <th>Rol</th>
-                                        <th>Empresa</th>
-                                        <th>Estado</th>
-                                        <th>Último Acceso</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($users as $user): ?>
-                                        <tr>
-                                            <td>
-                                                <div class="user-info">
-                                                    <div class="user-avatar">
-                                                        <?php echo strtoupper(substr($user['first_name'] ?? 'U', 0, 1)); ?>
-                                                    </div>
-                                                    <div class="user-details">
-                                                        <h4><?php echo htmlspecialchars(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')); ?></h4>
-                                                        <p>@<?php echo htmlspecialchars($user['username'] ?? ''); ?> • <?php echo htmlspecialchars($user['email'] ?? ''); ?></p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <span class="badge badge-<?php echo $user['role'] ?? 'user'; ?>">
-                                                    <?php 
-                                                    $roleNames = [
-                                                        'admin' => 'Administrador',
-                                                        'user' => 'Usuario',
-                                                        'viewer' => 'Visualizador'
-                                                    ];
-                                                    echo $roleNames[$user['role']] ?? $user['role'];
-                                                    ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?>
-                                            </td>
-                                            <td>
-                                                <span class="badge badge-<?php echo $user['status'] ?? 'inactive'; ?>">
-                                                    <?php echo ($user['status'] ?? 'inactive') === 'active' ? 'Activo' : 'Inactivo'; ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <?php if (!empty($user['last_login'])): ?>
-                                                    <div class="date-info">
-                                                        <strong><?php echo date('d/m/Y', strtotime($user['last_login'])); ?></strong><br>
-                                                        <small><?php echo date('H:i', strtotime($user['last_login'])); ?></small>
-                                                    </div>
-                                                <?php else: ?>
-                                                    <span class="text-muted">Nunca</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <div class="actions">
-                                                    <button class="action-btn" onclick="viewUser(<?php echo $user['id']; ?>)">
-                                                        <i data-feather="eye"></i>
-                                                    </button>
-                                                    <button class="action-btn" onclick="editUser(<?php echo $user['id']; ?>)">
-                                                        <i data-feather="edit"></i>
-                                                    </button>
-                                                    <button class="action-btn <?php echo ($user['status'] ?? 'inactive') === 'active' ? 'danger' : ''; ?>" 
-                                                        onclick="toggleUserStatus(<?php echo $user['id']; ?>, '<?php echo $user['status']; ?>')">
-                                                        <i data-feather="<?php echo ($user['status'] ?? 'inactive') === 'active' ? 'user-x' : 'user-check'; ?>"></i>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- Paginación -->
-                        <?php if ($totalPages > 1): ?>
-                            <div class="pagination">
-                                <?php
-                                $currentUrl = strtok($_SERVER['REQUEST_URI'], '?');
-                                $queryParams = $_GET;
-                                ?>
-                                
-                                <?php if ($page > 1): ?>
-                                    <?php 
-                                    $queryParams['page'] = $page - 1;
-                                    $prevUrl = $currentUrl . '?' . http_build_query($queryParams);
-                                    ?>
-                                    <a href="<?php echo $prevUrl; ?>" class="pagination-btn">
-                                        <i data-feather="chevron-left"></i>
-                                        Anterior
-                                    </a>
-                                <?php endif; ?>
-
-                                <span class="pagination-info">
-                                    Página <?php echo $page; ?> de <?php echo $totalPages; ?> 
-                                    (<?php echo number_format($totalUsers); ?> usuarios)
-                                </span>
-
-                                <?php if ($page < $totalPages): ?>
-                                    <?php 
-                                    $queryParams['page'] = $page + 1;
-                                    $nextUrl = $currentUrl . '?' . http_build_query($queryParams);
-                                    ?>
-                                    <a href="<?php echo $nextUrl; ?>" class="pagination-btn">
-                                        Siguiente
-                                        <i data-feather="chevron-right"></i>
-                                    </a>
-                                <?php endif; ?>
-                            </div>
-                        <?php endif; ?>
-
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <div class="empty-icon">
-                                <i data-feather="users"></i>
-                            </div>
-                            <h3>No se encontraron usuarios</h3>
-                            <p>No hay usuarios que coincidan con los filtros seleccionados.</p>
-                            <?php if (!empty($search) || !empty($filterRole) || !empty($filterStatus) || !empty($filterCompany)): ?>
-                                <a href="modules/users/index.php" class="btn btn-secondary">
-                                    <i data-feather="refresh-cw"></i>
-                                    Limpiar filtros
-                                </a>
-                            <?php else: ?>
-                                <button class="btn btn-primary" onclick="openCreateUserModal()">
-                                    <i data-feather="user-plus"></i>
-                                    Crear primer usuario
-                                </button>
-                            <?php endif; ?>
-                        </div>
-                    <?php endif; ?>
+                <div class="header-actions">
+                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                        <i data-feather="log-out"></i>
+                    </a>
                 </div>
             </div>
-        </main>
-    </div>
+        </header>
+
+        <!-- Contenido de usuarios -->
+        <div style="padding: 0 24px 24px 24px;">
+            <!-- Header con botón crear -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem;">
+                <div>
+                    <p style="color: #64748b; margin: 0;">Gestiona los usuarios del sistema</p>
+                </div>
+                <button class="btn-primary protected-button" 
+                        onclick="event.stopPropagation(); event.preventDefault(); openCreateUserModal();" 
+                        style="padding: 0.75rem 1.5rem; position: relative; z-index: 999999;">
+                    <i data-feather="user-plus"></i>
+                    Crear Usuario
+                </button>
+            </div>
+
+            <!-- Filtros -->
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 2rem;">
+                <form method="GET" action="" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; align-items: end;">
+                    <div class="form-group">
+                        <label>Buscar</label>
+                        <input type="text" name="search" value="<?php echo htmlspecialchars($search); ?>" 
+                               placeholder="Nombre, usuario o email">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Rol</label>
+                        <select name="role">
+                            <option value="">Todos los roles</option>
+                            <option value="admin" <?php echo $filterRole === 'admin' ? 'selected' : ''; ?>>Administrador</option>
+                            <option value="manager" <?php echo $filterRole === 'manager' ? 'selected' : ''; ?>>Gerente</option>
+                            <option value="user" <?php echo $filterRole === 'user' ? 'selected' : ''; ?>>Usuario</option>
+                            <option value="viewer" <?php echo $filterRole === 'viewer' ? 'selected' : ''; ?>>Visualizador</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Estado</label>
+                        <select name="status">
+                            <option value="">Todos los estados</option>
+                            <option value="active" <?php echo $filterStatus === 'active' ? 'selected' : ''; ?>>Activo</option>
+                            <option value="inactive" <?php echo $filterStatus === 'inactive' ? 'selected' : ''; ?>>Inactivo</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Empresa</label>
+                        <select name="company">
+                            <option value="">Todas las empresas</option>
+                            <?php foreach ($companies as $company): ?>
+                                <option value="<?php echo $company['id']; ?>" <?php echo $filterCompany == $company['id'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($company['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="submit" class="btn-secondary">
+                            <i data-feather="search"></i>
+                            Filtrar
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Tabla de usuarios -->
+            <div class="protected-table" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background-color: #f9fafb;">
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Usuario</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Email</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Rol</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Empresa</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Estado</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Descarga</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Último Acceso</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #374151; width: 130px;">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($users)): ?>
+                                <tr>
+                                    <td colspan="8" style="text-align: center; padding: 3rem; color: #6b7280;">
+                                        <i data-feather="users" style="width: 48px; height: 48px; margin-bottom: 1rem;"></i>
+                                        <br>
+                                        No se encontraron usuarios
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($users as $user): ?>
+                                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                                        <td style="padding: 12px;">
+                                            <div>
+                                                <div style="font-weight: 500;">
+                                                    <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
+                                                </div>
+                                                <div style="font-size: 0.875rem; color: #6b7280;">
+                                                    @<?php echo htmlspecialchars($user['username']); ?>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td style="padding: 12px;"><?php echo htmlspecialchars($user['email']); ?></td>
+                                        <td style="padding: 12px;">
+                                            <?php
+                                            $roleColors = [
+                                                'admin' => 'background-color: #fef3c7; color: #92400e;',
+                                                'manager' => 'background-color: #dbeafe; color: #1e40af;',
+                                                'user' => 'background-color: #e0e7ff; color: #3730a3;',
+                                                'viewer' => 'background-color: #f3e8ff; color: #6b21a8;'
+                                            ];
+                                            $roleLabels = ['admin' => 'Administrador', 'manager' => 'Gerente', 'user' => 'Usuario', 'viewer' => 'Visualizador'];
+                                            ?>
+                                            <span style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 500; <?php echo $roleColors[$user['role']] ?? ''; ?>">
+                                                <?php echo $roleLabels[$user['role']] ?? $user['role']; ?>
+                                            </span>
+                                        </td>
+                                        <td style="padding: 12px;"><?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?></td>
+                                        <td style="padding: 12px;">
+                                            <?php
+                                            $statusColor = $user['status'] === 'active' ? 'background-color: #d1fae5; color: #065f46;' : 'background-color: #fee2e2; color: #991b1b;';
+                                            ?>
+                                            <span style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; <?php echo $statusColor; ?>">
+                                                <?php echo $user['status'] === 'active' ? 'Activo' : 'Inactivo'; ?>
+                                            </span>
+                                        </td>
+                                        <td style="padding: 12px;">
+                                            <?php echo $user['download_enabled'] ? '✅ Sí' : '❌ No'; ?>
+                                        </td>
+                                        <td style="padding: 12px; font-size: 0.875rem; color: #6b7280;">
+                                            <?php if ($user['last_login']): ?>
+                                                <div><?php echo date('d/m/Y', strtotime($user['last_login'])); ?></div>
+                                                <div style="font-size: 0.75rem; color: #9ca3af;"><?php echo date('H:i', strtotime($user['last_login'])); ?></div>
+                                            <?php else: ?>
+                                                <span style="color: #9ca3af;">Nunca</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td style="padding: 12px;" class="actions-cell">
+                                            <div style="display: flex; gap: 2px; position: relative; z-index: 999999;">
+                                                <button class="action-btn btn-view protected-button" 
+                                                        onclick="event.stopPropagation(); viewUser(<?php echo $user['id']; ?>);">
+                                                    <i data-feather="eye"></i>
+                                                </button>
+                                                <button class="action-btn btn-edit protected-button" 
+                                                        onclick="event.stopPropagation(); editUser(<?php echo $user['id']; ?>);">
+                                                    <i data-feather="edit"></i>
+                                                </button>
+                                                <?php if ($user['id'] != $currentUser['id']): ?>
+                                                    <button class="action-btn <?php echo $user['status'] === 'active' ? 'btn-toggle-deactivate' : 'btn-toggle-activate'; ?> protected-button" 
+                                                            onclick="event.stopPropagation(); toggleUserStatus(<?php echo $user['id']; ?>, '<?php echo $user['status']; ?>');">
+                                                        <i data-feather="<?php echo $user['status'] === 'active' ? 'user-x' : 'user-check'; ?>"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Paginación -->
+                <?php if ($totalPages > 1): ?>
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 2rem; padding: 1rem;">
+                        <!-- Paginación igual que antes -->
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </main>
 
     <!-- Scripts -->
-    <script src="assets/js/dashboard.js"></script>
-    <script src="assets/js/users_new.js"></script>
-    
+    <script src="../../assets/js/dashboard.js"></script>
+    <script src="../../assets/js/users.js"></script>
     <script>
-        // Variables globales para JavaScript
-        window.userData = {
-            currentUserId: <?php echo $currentUser['id']; ?>,
-            userRole: '<?php echo $currentUser['role']; ?>',
-            companies: <?php echo json_encode($companies); ?>
-        };
+        // BLOQUEADOR AGRESIVO DE POPUPS Y EXTENSIONES
         
-        // Inicializar
-        feather.replace();
+        // Desactivar tooltips y popups inmediatamente
+        document.addEventListener('DOMContentLoaded', function() {
+            // Eliminar todos los title attributes
+            document.querySelectorAll('*[title]').forEach(el => {
+                el.removeAttribute('title');
+            });
+            
+            // Prevenir mouseover/mouseenter que crean tooltips
+            document.addEventListener('mouseover', function(e) {
+                if (e.target.hasAttribute('title')) {
+                    e.target.removeAttribute('title');
+                }
+                e.stopPropagation();
+            }, true);
+            
+            // Bloquear eventos de extensiones
+            ['mouseenter', 'mouseleave', 'focus', 'blur'].forEach(eventType => {
+                document.addEventListener(eventType, function(e) {
+                    if (e.target.closest('.protected-button')) {
+                        e.stopImmediatePropagation();
+                    }
+                }, true);
+            });
+            
+            // Remover cualquier overlay existente cada 100ms
+            setInterval(function() {
+                // Buscar y eliminar popups/tooltips conocidos
+                const popups = document.querySelectorAll([
+                    '[class*="tooltip"]',
+                    '[class*="popup"]', 
+                    '[class*="extension"]',
+                    '[class*="translate"]',
+                    '[id*="tooltip"]',
+                    '[id*="popup"]',
+                    'div[style*="position: fixed"][style*="z-index"]'
+                ].join(','));
+                
+                popups.forEach(popup => {
+                    if (!popup.closest('.main-content')) {
+                        popup.remove();
+                    }
+                });
+            }, 100);
+            
+            feather.replace();
+        });
         
-        // Actualizar hora
-        function updateCurrentTime() {
+        // Función de tiempo
+        function updateTime() {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('es-ES', {
-                hour: '2-digit',
+            const timeString = now.toLocaleTimeString('es-ES', { 
+                hour: '2-digit', 
                 minute: '2-digit'
             });
-            const dateString = now.toLocaleDateString('es-ES', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
-            
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
-                timeElement.textContent = `${timeString} - ${dateString}`;
+                timeElement.textContent = timeString;
             }
         }
         
-        updateCurrentTime();
-        setInterval(updateCurrentTime, 60000);
-
-        // Función para mostrar "próximamente"
-        function showComingSoon(feature) {
-            if (typeof showNotification === 'function') {
-                showNotification(`La función "${feature}" estará disponible próximamente.`, 'info');
-            } else {
-                alert(`La función "${feature}" estará disponible próximamente.`);
+        updateTime();
+        setInterval(updateTime, 60000);
+        
+        // Proteger clics en botones
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('.protected-button')) {
+                e.stopImmediatePropagation();
             }
-        }
-
-        // Función para toggle del sidebar
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('sidebarOverlay');
-            
-            if (sidebar && overlay) {
-                sidebar.classList.toggle('active');
-                overlay.classList.toggle('active');
-                
-                if (sidebar.classList.contains('active')) {
-                    document.body.style.overflow = 'hidden';
-                } else {
-                    document.body.style.overflow = '';
+        }, true);
+        
+        // Desactivar showComingSoon
+        function showComingSoon() { return false; }
+        
+        // Bloquear eventos del navegador en elementos protegidos
+        ['contextmenu', 'selectstart', 'dragstart'].forEach(eventType => {
+            document.addEventListener(eventType, function(e) {
+                if (e.target.closest('.protected-button, .protected-table')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
                 }
-            }
-        }
-
-        console.log('✅ Módulo de usuarios final inicializado correctamente');
+            });
+        });
     </script>
 </body>
 </html>

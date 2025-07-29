@@ -1,65 +1,50 @@
 <?php
 // modules/users/actions/create_user.php
-// Crear usuario - VERSIÓN CORREGIDA
+// Crear nuevo usuario
 
 header('Content-Type: application/json');
+require_once '../../../config/session.php';
 require_once '../../../config/database.php';
-require_once '../../../includes/functions.php';
 
 try {
-    // Verificar autenticación
-    session_start();
-    if (!isset($_SESSION['user_id'])) {
-        throw new Exception('Usuario no autenticado');
-    }
+    SessionManager::requireLogin();
+    SessionManager::requireRole('admin');
     
-    // Obtener usuario actual con consulta directa
-    $currentUser = fetchOne("SELECT * FROM users WHERE id = ? AND status = 'active'", [$_SESSION['user_id']]);
-    if (!$currentUser) {
-        throw new Exception('Usuario no válido');
-    }
+    $currentUser = SessionManager::getCurrentUser();
     
-    // Verificar permisos (solo admin puede crear usuarios)
-    if ($currentUser['role'] !== 'admin') {
-        throw new Exception('No tienes permisos para realizar esta acción');
-    }
-    
-    // Verificar método POST
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         throw new Exception('Método no permitido');
     }
     
-    // Obtener y validar datos del formulario
+    // Obtener y validar datos
     $firstName = trim($_POST['first_name'] ?? '');
     $lastName = trim($_POST['last_name'] ?? '');
     $username = trim($_POST['username'] ?? '');
     $email = trim($_POST['email'] ?? '');
-    $role = trim($_POST['role'] ?? '');
-    $companyId = intval($_POST['company_id'] ?? 0);
     $password = $_POST['password'] ?? '';
     $confirmPassword = $_POST['confirm_password'] ?? '';
-    
-    // Manejar checkbox correctamente
+    $role = trim($_POST['role'] ?? '');
+    $companyId = intval($_POST['company_id'] ?? 0);
     $downloadEnabled = isset($_POST['download_enabled']) ? 1 : 0;
     
-    // Validaciones básicas
-    if (strlen($firstName) < 2) {
-        throw new Exception('El nombre debe tener al menos 2 caracteres');
+    // Validaciones
+    if (empty($firstName) || empty($lastName) || empty($username) || empty($email) || empty($password)) {
+        throw new Exception('Todos los campos obligatorios deben ser completados');
     }
     
-    if (strlen($lastName) < 2) {
-        throw new Exception('El apellido debe tener al menos 2 caracteres');
+    if ($password !== $confirmPassword) {
+        throw new Exception('Las contraseñas no coinciden');
     }
     
-    if (strlen($username) < 3) {
-        throw new Exception('El nombre de usuario debe tener al menos 3 caracteres');
+    if (strlen($password) < 6) {
+        throw new Exception('La contraseña debe tener al menos 6 caracteres');
     }
     
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new Exception('El email no es válido');
+        throw new Exception('El email no tiene un formato válido');
     }
     
-    if (!in_array($role, ['admin', 'user', 'viewer'])) {
+    if (!in_array($role, ['admin', 'manager', 'user', 'viewer'])) {
         throw new Exception('Rol no válido');
     }
     
@@ -67,46 +52,20 @@ try {
         throw new Exception('Debe seleccionar una empresa válida');
     }
     
-    if (empty($password)) {
-        throw new Exception('La contraseña es requerida');
+    // Verificar que no exista el username o email
+    $existingUser = fetchOne("SELECT id FROM users WHERE username = ? OR email = ?", [$username, $email]);
+    if ($existingUser) {
+        throw new Exception('El usuario o email ya existe');
     }
     
-    if (strlen($password) < 6) {
-        throw new Exception('La contraseña debe tener al menos 6 caracteres');
-    }
-    
-    if ($password !== $confirmPassword) {
-        throw new Exception('Las contraseñas no coinciden');
-    }
-    
-    // Verificar que no exista el username
-    $checkUsername = fetchOne("SELECT id FROM users WHERE username = ?", [$username]);
-    if ($checkUsername) {
-        throw new Exception('El nombre de usuario ya existe');
-    }
-    
-    // Verificar que no exista el email
-    $checkEmail = fetchOne("SELECT id FROM users WHERE email = ?", [$email]);
-    if ($checkEmail) {
-        throw new Exception('El email ya está registrado');
-    }
-    
-    // Verificar que la empresa existe
-    $checkCompany = fetchOne("SELECT id FROM companies WHERE id = ? AND status = 'active'", [$companyId]);
-    if (!$checkCompany) {
-        throw new Exception('La empresa seleccionada no es válida');
-    }
-    
-    // Encriptar contraseña
+    // Hashear contraseña
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
     
-    // SQL simplificado para insertar usuario
-    $sql = "INSERT INTO users (first_name, last_name, username, email, password, role, company_id, download_enabled, status, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW())";
+    // Insertar usuario
+    $sql = "INSERT INTO users (first_name, last_name, username, email, password, role, status, company_id, download_enabled, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NOW())";
     
-    // Ejecutar la inserción
-    $stmt = $pdo->prepare($sql);
-    $result = $stmt->execute([
+    $stmt = executeQuery($sql, [
         $firstName,
         $lastName,
         $username,
@@ -117,54 +76,35 @@ try {
         $downloadEnabled
     ]);
     
-    if ($result) {
-        $newUserId = $pdo->lastInsertId();
+    if ($stmt) {
+        // Obtener el ID del usuario recién creado usando la conexión PDO
+        $conn = getDbConnection();
+        $newUserId = $conn->lastInsertId();
         
-        // Intentar registrar actividad (sin fallar si no funciona)
-        try {
-            $activityDescription = "Creó el usuario: {$firstName} {$lastName} (@{$username})";
-            $logSql = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
-            $logStmt = $pdo->prepare($logSql);
-            $logStmt->execute([
-                $currentUser['id'],
-                'create_user',
-                'users',
-                $newUserId,
-                $activityDescription,
-                $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-                $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
-            ]);
-        } catch (Exception $logError) {
-            error_log("Error logging activity: " . $logError->getMessage());
-        }
+        // Registrar actividad
+        logActivity($currentUser['id'], 'create_user', 'users', $newUserId, 
+                   "Usuario creado: {$firstName} {$lastName} (@{$username})");
         
-        // Respuesta exitosa
         echo json_encode([
             'success' => true,
             'message' => 'Usuario creado exitosamente',
             'data' => [
                 'user_id' => $newUserId,
                 'username' => $username,
-                'email' => $email,
-                'role' => $role
+                'email' => $email
             ]
         ]);
-        
     } else {
-        throw new Exception('Error al crear el usuario en la base de datos');
+        throw new Exception('Error al crear el usuario');
     }
     
 } catch (Exception $e) {
-    // Log del error
     error_log("Error creating user: " . $e->getMessage());
     
-    // Respuesta de error
     http_response_code(400);
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => 'CREATE_USER_ERROR'
+        'message' => $e->getMessage()
     ]);
 }
 ?>
