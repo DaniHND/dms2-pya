@@ -1,5 +1,5 @@
 <?php
-// modules/users/index.php - Módulo de gestión de usuarios FINAL
+// modules/users/users_new.php - Módulo de gestión de usuarios NUEVO
 require_once '../../config/database.php';
 require_once '../../includes/functions.php';
 
@@ -166,13 +166,17 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
 
         <!-- Contenido principal -->
         <main class="main-content">
-            <!-- Contenido del módulo de usuarios -->
-            <div class="users-container">
-                <!-- Header con info del usuario y hora -->
-                <div class="page-header">
-                    <div class="header-info">
-                        <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
-                        <div class="current-time" id="currentTime"></div>
+            <!-- Header principal -->
+            <header class="main-header">
+                <div class="header-content">
+                    <div class="header-left">
+                        <button class="sidebar-toggle" onclick="toggleSidebar()">
+                            <i data-feather="menu"></i>
+                        </button>
+                        <div class="user-info">
+                            <div class="current-user"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
+                            <div class="current-time" id="currentTime"></div>
+                        </div>
                     </div>
                     <div class="header-actions">
                         <button class="btn-icon" onclick="showComingSoon('Configuración')">
@@ -183,17 +187,22 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
                         </a>
                     </div>
                 </div>
+            </header>
 
+            <!-- Contenido del módulo de usuarios -->
+            <div class="users-container">
                 <!-- Título y botón principal -->
-                <div class="page-title-section">
-                    <div>
-                        <h1>Gestión de Usuarios</h1>
-                        <p class="page-subtitle">Administrar usuarios del sistema</p>
+                <div class="page-header">
+                    <div class="page-title-section">
+                        <div>
+                            <h1>Gestión de Usuarios</h1>
+                            <p class="page-subtitle">Administrar usuarios del sistema</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openCreateUserModal()">
+                            <i data-feather="user-plus"></i>
+                            Nuevo Usuario
+                        </button>
                     </div>
-                    <button class="btn btn-primary" onclick="openCreateUserModal()">
-                        <i data-feather="user-plus"></i>
-                        Nuevo Usuario
-                    </button>
                 </div>
 
                 <!-- Estadísticas -->
@@ -287,7 +296,7 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
                                 <i data-feather="search"></i>
                                 Buscar
                             </button>
-                            <a href="modules/users/index.php" class="btn btn-outline">
+                            <a href="modules/users/users_new.php" class="btn btn-outline">
                                 <i data-feather="x"></i>
                                 Limpiar
                             </a>
@@ -424,7 +433,7 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
                             <h3>No se encontraron usuarios</h3>
                             <p>No hay usuarios que coincidan con los filtros seleccionados.</p>
                             <?php if (!empty($search) || !empty($filterRole) || !empty($filterStatus) || !empty($filterCompany)): ?>
-                                <a href="modules/users/index.php" class="btn btn-secondary">
+                                <a href="modules/users/users_new.php" class="btn btn-secondary">
                                     <i data-feather="refresh-cw"></i>
                                     Limpiar filtros
                                 </a>
@@ -481,11 +490,7 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
 
         // Función para mostrar "próximamente"
         function showComingSoon(feature) {
-            if (typeof showNotification === 'function') {
-                showNotification(`La función "${feature}" estará disponible próximamente.`, 'info');
-            } else {
-                alert(`La función "${feature}" estará disponible próximamente.`);
-            }
+            alert(`La función "${feature}" estará disponible próximamente.`);
         }
 
         // Función para toggle del sidebar
@@ -505,7 +510,7 @@ $totalPages = $totalUsers > 0 ? ceil($totalUsers / $limit) : 1;
             }
         }
 
-        console.log('✅ Módulo de usuarios final inicializado correctamente');
+        console.log('✅ Módulo de usuarios nuevo inicializado correctamente');
     </script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 <?php
-// modules/users/actions/toggle_user_status.php
-// Cambiar estado de usuario - VERSIÓN CORREGIDA
+// modules/users/actions/toggle_status_new.php
+// Acción para cambiar estado de usuario - con seguridad completa
 
 header('Content-Type: application/json');
 require_once '../../../config/database.php';
@@ -13,7 +13,7 @@ try {
         throw new Exception('Usuario no autenticado');
     }
     
-    // Obtener usuario actual con consulta directa
+    // Obtener usuario actual
     $currentUser = fetchOne("SELECT * FROM users WHERE id = ? AND status = 'active'", [$_SESSION['user_id']]);
     if (!$currentUser) {
         throw new Exception('Usuario no válido');
@@ -52,7 +52,7 @@ try {
         throw new Exception('No puedes cambiar tu propio estado');
     }
     
-    // Verificar que no es el último admin activo
+    // Verificar que es el último admin activo (si se va a desactivar un admin)
     if ($targetUser['role'] === 'admin' && $currentStatus === 'active') {
         $activeAdmins = fetchOne("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active'");
         if ($activeAdmins && $activeAdmins['count'] <= 1) {
@@ -63,17 +63,18 @@ try {
     // Determinar nuevo estado
     $newStatus = $currentStatus === 'active' ? 'inactive' : 'active';
     
-    // Actualizar estado del usuario
+    // Actualizar estado del usuario (sin updated_at si no existe la columna)
     $updateSql = "UPDATE users SET status = ? WHERE id = ?";
     $stmt = $pdo->prepare($updateSql);
     $result = $stmt->execute([$newStatus, $userId]);
     
     if ($result) {
+        // Registrar actividad en el log
+        $action = $newStatus === 'active' ? 'activated' : 'deactivated';
+        $activityDescription = "Usuario {$action}: {$targetUser['first_name']} {$targetUser['last_name']} (@{$targetUser['username']})";
+        
         // Intentar registrar actividad
         try {
-            $action = $newStatus === 'active' ? 'activated' : 'deactivated';
-            $activityDescription = "Usuario {$action}: {$targetUser['first_name']} {$targetUser['last_name']} (@{$targetUser['username']})";
-            
             $logSql = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
                        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
             $logStmt = $pdo->prepare($logSql);
@@ -88,6 +89,19 @@ try {
             ]);
         } catch (Exception $logError) {
             error_log("Error logging activity: " . $logError->getMessage());
+        }
+        
+        // Si se desactivó un usuario, también cerrar sus sesiones activas (opcional)
+        if ($newStatus === 'inactive') {
+            try {
+                // Si tienes una tabla de sesiones, eliminar las sesiones del usuario
+                $sessionSql = "DELETE FROM user_sessions WHERE user_id = ?";
+                $sessionStmt = $pdo->prepare($sessionSql);
+                $sessionStmt->execute([$userId]);
+            } catch (Exception $sessionError) {
+                // No es crítico si esto falla
+                error_log("Error removing user sessions: " . $sessionError->getMessage());
+            }
         }
         
         // Respuesta exitosa
@@ -107,8 +121,8 @@ try {
     }
     
 } catch (Exception $e) {
-    // Log del error
-    error_log("Error toggling user status: " . $e->getMessage());
+    // Log del error para debugging
+    error_log("Error toggling user status: " . $e->getMessage() . " | File: " . __FILE__ . " | Line: " . __LINE__);
     
     // Respuesta de error
     http_response_code(400);

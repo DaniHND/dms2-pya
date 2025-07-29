@@ -1,6 +1,6 @@
 <?php
-// modules/users/actions/create_user.php
-// Crear usuario - VERSIÓN CORREGIDA
+// modules/users/actions/create_user_new.php
+// Acción para crear usuario nuevo - con seguridad completa
 
 header('Content-Type: application/json');
 require_once '../../../config/database.php';
@@ -13,7 +13,7 @@ try {
         throw new Exception('Usuario no autenticado');
     }
     
-    // Obtener usuario actual con consulta directa
+    // Obtener usuario actual
     $currentUser = fetchOne("SELECT * FROM users WHERE id = ? AND status = 'active'", [$_SESSION['user_id']]);
     if (!$currentUser) {
         throw new Exception('Usuario no válido');
@@ -55,6 +55,11 @@ try {
         throw new Exception('El nombre de usuario debe tener al menos 3 caracteres');
     }
     
+    // Validar que el username solo contenga caracteres permitidos
+    if (!preg_match('/^[a-zA-Z0-9_.-]+$/', $username)) {
+        throw new Exception('El nombre de usuario solo puede contener letras, números, guiones y puntos');
+    }
+    
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         throw new Exception('El email no es válido');
     }
@@ -91,7 +96,7 @@ try {
         throw new Exception('El email ya está registrado');
     }
     
-    // Verificar que la empresa existe
+    // Verificar que la empresa existe y está activa
     $checkCompany = fetchOne("SELECT id FROM companies WHERE id = ? AND status = 'active'", [$companyId]);
     if (!$checkCompany) {
         throw new Exception('La empresa seleccionada no es válida');
@@ -100,13 +105,8 @@ try {
     // Encriptar contraseña
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
     
-    // SQL simplificado para insertar usuario
-    $sql = "INSERT INTO users (first_name, last_name, username, email, password, role, company_id, download_enabled, status, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW())";
-    
-    // Ejecutar la inserción
-    $stmt = $pdo->prepare($sql);
-    $result = $stmt->execute([
+    // Preparar datos para insertar (sin created_by si no existe la columna)
+    $insertData = [
         $firstName,
         $lastName,
         $username,
@@ -114,15 +114,37 @@ try {
         $hashedPassword,
         $role,
         $companyId,
-        $downloadEnabled
-    ]);
+        $downloadEnabled,
+        'active', // status
+        date('Y-m-d H:i:s') // created_at
+    ];
+    
+    // SQL para insertar usuario (sin created_by y updated_at)
+    $sql = "INSERT INTO users (
+        first_name, 
+        last_name, 
+        username, 
+        email, 
+        password, 
+        role, 
+        company_id, 
+        download_enabled, 
+        status, 
+        created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    
+    // Ejecutar la inserción
+    $stmt = $pdo->prepare($sql);
+    $result = $stmt->execute($insertData);
     
     if ($result) {
         $newUserId = $pdo->lastInsertId();
         
-        // Intentar registrar actividad (sin fallar si no funciona)
+        // Registrar actividad en el log
+        $activityDescription = "Creó el usuario: {$firstName} {$lastName} (@{$username}) - Rol: {$role}";
+        
+        // Intentar registrar actividad (no fallar si no funciona)
         try {
-            $activityDescription = "Creó el usuario: {$firstName} {$lastName} (@{$username})";
             $logSql = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
                        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
             $logStmt = $pdo->prepare($logSql);
@@ -137,6 +159,7 @@ try {
             ]);
         } catch (Exception $logError) {
             error_log("Error logging activity: " . $logError->getMessage());
+            // No fallar por esto, solo logear el error
         }
         
         // Respuesta exitosa
@@ -147,7 +170,9 @@ try {
                 'user_id' => $newUserId,
                 'username' => $username,
                 'email' => $email,
-                'role' => $role
+                'role' => $role,
+                'company_id' => $companyId,
+                'download_enabled' => $downloadEnabled
             ]
         ]);
         
@@ -156,8 +181,8 @@ try {
     }
     
 } catch (Exception $e) {
-    // Log del error
-    error_log("Error creating user: " . $e->getMessage());
+    // Log del error para debugging
+    error_log("Error creating user: " . $e->getMessage() . " | File: " . __FILE__ . " | Line: " . __LINE__);
     
     // Respuesta de error
     http_response_code(400);
