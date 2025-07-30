@@ -1,14 +1,32 @@
 <?php
 // modules/departments/actions/get_department_details.php
-// Acción para obtener detalles de un departamento específico - DMS2 (VERSIÓN ROBUSTA)
+// Acción para obtener detalles de un departamento específico - DMS2 (VERSIÓN CORREGIDA)
 
 // Evitar cualquier output antes del JSON
 ob_start();
 
 try {
-    require_once '../../../config/session.php';
-    require_once '../../../config/database.php';
-    require_once '../../../includes/functions.php';
+    // Corregir rutas relativas - desde modules/departments/actions/ necesitamos ir 3 niveles atrás
+    $configPath = dirname(__FILE__) . '/../../../config/session.php';
+    $databasePath = dirname(__FILE__) . '/../../../config/database.php';
+    $functionsPath = dirname(__FILE__) . '/../../../includes/functions.php';
+    
+    // Verificar que los archivos existen antes de incluirlos
+    if (!file_exists($configPath)) {
+        throw new Exception("No se encontró config/session.php en la ruta: " . $configPath);
+    }
+    
+    if (!file_exists($databasePath)) {
+        throw new Exception("No se encontró config/database.php en la ruta: " . $databasePath);
+    }
+    
+    if (!file_exists($functionsPath)) {
+        throw new Exception("No se encontró includes/functions.php en la ruta: " . $functionsPath);
+    }
+    
+    require_once $configPath;
+    require_once $databasePath;
+    require_once $functionsPath;
 
     // Limpiar cualquier output previo
     ob_clean();
@@ -40,7 +58,7 @@ try {
     }
 
     // Obtener detalles del departamento
-    $departmentQuery = "SELECT d.id, d.name, d.description, d.company_id, d.manager_id, d.status, d.created_at, d.updated_at,
+    $departmentQuery = "SELECT d.id, d.name, d.description, d.company_id, d.manager_id, d.parent_id, d.status, d.created_at, d.updated_at,
                                c.name as company_name,
                                u.first_name as manager_first_name,
                                u.last_name as manager_last_name,
@@ -79,75 +97,70 @@ try {
     $inactiveUsers = intval($userStats['inactive_users'] ?? 0);
 
     // Obtener lista de usuarios del departamento
-    $usersQuery = "SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.created_at
-                   FROM users u 
-                   WHERE u.department_id = :department_id 
-                   ORDER BY u.first_name, u.last_name";
+    $usersQuery = "SELECT id, first_name, last_name, email, role, status, created_at
+                   FROM users 
+                   WHERE department_id = :department_id 
+                   ORDER BY status DESC, last_name ASC, first_name ASC";
 
-    $usersResult = fetchAll($usersQuery, ['department_id' => $departmentId]);
-    $users = is_array($usersResult) ? $usersResult : [];
+    $users = fetchAll($usersQuery, ['department_id' => $departmentId]);
 
-    // Formatear usuarios
-    $formattedUsers = [];
-    foreach ($users as $user) {
-        $formattedUsers[] = [
-            'id' => intval($user['id']),
-            'name' => trim($user['first_name'] . ' ' . $user['last_name']),
-            'email' => $user['email'],
-            'role' => $user['role'],
-            'department_role' => ($user['id'] == $department['manager_id']) ? 'Manager' : $user['role'],
-            'status' => $user['status'],
-            'created_at' => $user['created_at'],
-            'formatted_date' => date('d/m/Y', strtotime($user['created_at']))
+    // Formatear usuarios para la respuesta
+    $formattedUsers = array_map(function($user) {
+        return [
+            'id' => $user['id'],
+            'name' => trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')),
+            'email' => $user['email'] ?? '',
+            'role' => $user['role'] ?? '',
+            'status' => $user['status'] ?? '',
+            'created_at' => $user['created_at'] ?? '',
+            'formatted_date' => !empty($user['created_at']) ? date('d/m/Y', strtotime($user['created_at'])) : ''
         ];
-    }
+    }, $users);
 
     // Preparar respuesta
     $response = [
-        'id' => intval($department['id']),
-        'name' => $department['name'],
-        'description' => $department['description'] ?? '',
-        'company_id' => intval($department['company_id'] ?? 0),
-        'company_name' => $department['company_name'] ?? 'Sin empresa',
-        'manager_id' => $department['manager_id'] ? intval($department['manager_id']) : null,
-        'manager_name' => $managerName,
-        'manager_email' => $department['manager_email'] ?? '',
-        'status' => $department['status'],
-        'created_at' => $department['created_at'],
-        'updated_at' => $department['updated_at'],
-        'formatted_created' => date('d/m/Y H:i', strtotime($department['created_at'])),
-        'formatted_updated' => $department['updated_at'] ? date('d/m/Y H:i', strtotime($department['updated_at'])) : '',
-        'users' => $formattedUsers,
-        'stats' => [
+        'success' => true,
+        'department' => [
+            'id' => $department['id'],
+            'name' => $department['name'] ?? '',
+            'description' => $department['description'] ?? '',
+            'company_id' => $department['company_id'] ?? null,
+            'company_name' => $department['company_name'] ?? '',
+            'manager_id' => $department['manager_id'] ?? null,
+            'manager_name' => $managerName,
+            'manager_email' => $department['manager_email'] ?? '',
+            'parent_id' => $department['parent_id'] ?? null,
+            'status' => $department['status'] ?? 'active',
+            'created_at' => $department['created_at'] ?? '',
+            'updated_at' => $department['updated_at'] ?? '',
+            'formatted_created_date' => !empty($department['created_at']) ? date('d/m/Y H:i', strtotime($department['created_at'])) : '',
+            'formatted_updated_date' => !empty($department['updated_at']) ? date('d/m/Y H:i', strtotime($department['updated_at'])) : ''
+        ],
+        'statistics' => [
             'total_users' => $totalUsers,
             'active_users' => $activeUsers,
-            'inactive_users' => $inactiveUsers,
-            'has_manager' => !empty($department['manager_id'])
-        ]
+            'inactive_users' => $inactiveUsers
+        ],
+        'users' => $formattedUsers
     ];
 
     // Enviar respuesta JSON
     header('Content-Type: application/json');
-    echo json_encode([
-        'success' => true,
-        'department' => $response
-    ]);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
 
 } catch (Exception $e) {
-    // Limpiar cualquier output
+    // Limpiar output buffer en caso de error
     ob_clean();
     
-    // Log del error
     error_log("Error en get_department_details.php: " . $e->getMessage());
     
-    // Respuesta de error
     header('Content-Type: application/json');
     echo json_encode([
         'success' => false,
-        'message' => 'Error interno del servidor'
-    ]);
+        'message' => 'Error interno del servidor',
+        'debug' => $e->getMessage() // Solo para desarrollo, remover en producción
+    ], JSON_UNESCAPED_UNICODE);
+} finally {
+    ob_end_flush();
 }
-
-// Terminar el buffer y enviar
-ob_end_flush();
 ?>

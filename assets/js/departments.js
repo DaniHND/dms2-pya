@@ -1,61 +1,33 @@
-// assets/js/departments.js - VERSIÓN CORREGIDA CON RUTAS
-// JavaScript para el módulo de departamentos - DMS2 (RUTAS CORREGIDAS)
+// assets/js/departments.js
+// JavaScript para el módulo de departamentos - DMS2 - VERSIÓN CORREGIDA
 
 // Variables globales
 let currentModal = null;
 let currentDepartmentId = null;
 
-// Inicialización
+// ==========================================
+// INICIALIZACIÓN
+// ==========================================
+
 document.addEventListener('DOMContentLoaded', function() {
-    initializeDepartments();
+    console.log('🏢 Módulo de departamentos cargado');
+    initializeDepartmentsModule();
 });
 
-function initializeDepartments() {
+function initializeDepartmentsModule() {
     setupEventListeners();
-    setupFormValidation();
-    
-    if (typeof feather !== 'undefined') {
-        feather.replace();
-    }
+    loadManagers(); // Cargar managers para los selects
 }
 
 function setupEventListeners() {
-    // Formulario de departamento
-    const departmentForm = document.getElementById('departmentForm');
-    if (departmentForm) {
-        departmentForm.addEventListener('submit', handleDepartmentSubmit);
-    }
-
-    // Select de empresa
-    const companySelect = document.getElementById('departmentCompany');
-    if (companySelect) {
-        companySelect.addEventListener('change', handleCompanyChange);
-    }
-
-    // Filtros automáticos
-    const searchInput = document.getElementById('search');
-    if (searchInput) {
-        searchInput.addEventListener('input', function() {
-            setTimeout(() => {
-                this.form.submit();
-            }, 500);
-        });
-    }
-
-    const statusSelect = document.getElementById('status');
-    if (statusSelect) {
-        statusSelect.addEventListener('change', function() {
-            this.form.submit();
-        });
-    }
-
-    // Cerrar modales
+    // Cerrar modal con Escape
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && currentModal) {
             closeCurrentModal();
         }
     });
 
+    // Cerrar modal al hacer clic fuera
     document.addEventListener('click', function(e) {
         if (e.target.classList.contains('modal')) {
             closeCurrentModal();
@@ -63,22 +35,8 @@ function setupEventListeners() {
     });
 }
 
-function setupFormValidation() {
-    const inputs = document.querySelectorAll('#departmentForm input, #departmentForm select, #departmentForm textarea');
-    
-    inputs.forEach(input => {
-        input.addEventListener('blur', function() {
-            validateField(this);
-        });
-        
-        input.addEventListener('input', function() {
-            clearFieldError(this);
-        });
-    });
-}
-
 // ==========================================
-// FUNCIONES PRINCIPALES DEL MÓDULO
+// FUNCIONES DE MODAL
 // ==========================================
 
 function openCreateDepartmentModal() {
@@ -86,602 +44,743 @@ function openCreateDepartmentModal() {
     
     currentDepartmentId = null;
     
-    // Configurar modal
-    const modalTitle = document.getElementById('departmentModalTitle');
-    if (modalTitle) {
-        modalTitle.textContent = 'Nuevo Departamento';
+    const modalHTML = `
+        <div class="modal active" id="createDepartmentModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Nuevo Departamento</h3>
+                    <button type="button" class="modal-close" onclick="closeCreateDepartmentModal()">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="createDepartmentForm" class="modal-form" onsubmit="handleCreateDepartment(event)">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="name">Nombre del Departamento *</label>
+                                <input type="text" id="name" name="name" class="form-input" required 
+                                       placeholder="Ej: Recursos Humanos">
+                            </div>
+                            <div class="form-group">
+                                <label for="company_id">Empresa *</label>
+                                <select id="company_id" name="company_id" class="form-input" required>
+                                    <option value="">Seleccionar empresa</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row single">
+                            <div class="form-group">
+                                <label for="description">Descripción</label>
+                                <textarea id="description" name="description" class="form-input" rows="3"
+                                          placeholder="Describe las funciones y responsabilidades del departamento..."></textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="manager_id">Manager/Jefe</label>
+                                <select id="manager_id" name="manager_id" class="form-input">
+                                    <option value="">Sin asignar</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="status">Estado</label>
+                                <select id="status" name="status" class="form-input">
+                                    <option value="active">Activo</option>
+                                    <option value="inactive">Inactivo</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" onclick="closeCreateDepartmentModal()">
+                                Cancelar
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i data-feather="plus"></i>
+                                Crear Departamento
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Insertar modal en el DOM
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    currentModal = document.getElementById('createDepartmentModal');
+    
+    // Cargar datos para los selects
+    loadCompaniesForModal();
+    loadManagersForModal();
+    
+    // Inicializar iconos de Feather
+    if (typeof feather !== 'undefined') {
+        feather.replace();
     }
     
-    const saveBtn = document.getElementById('saveDepartmentBtn');
-    if (saveBtn && saveBtn.querySelector('.btn-text')) {
-        saveBtn.querySelector('.btn-text').textContent = 'Crear Departamento';
+    console.log('✅ Modal de crear departamento abierto');
+}
+
+function closeCreateDepartmentModal() {
+    console.log('❌ Cerrando modal de crear departamento...');
+    const modal = document.getElementById('createDepartmentModal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.remove();
+            currentModal = null;
+        }, 300);
     }
-    
-    // Limpiar formulario
-    const form = document.getElementById('departmentForm');
-    if (form) {
-        form.reset();
-        clearFormErrors();
-    }
-    
-    // Limpiar select de managers
-    const managerSelect = document.getElementById('departmentManager');
-    if (managerSelect) {
-        managerSelect.innerHTML = '<option value="">Sin asignar</option>';
-    }
-    
-    showModal('departmentModal');
 }
 
 function editDepartment(departmentId) {
     console.log('✏️ Editando departamento:', departmentId);
     
-    if (!departmentId) {
-        alert('ID de departamento inválido');
-        return;
-    }
-    
     currentDepartmentId = departmentId;
     
-    // Configurar modal
-    const modalTitle = document.getElementById('departmentModalTitle');
-    if (modalTitle) {
-        modalTitle.textContent = 'Editar Departamento';
-    }
+    // Crear modal de edición
+    const modalHTML = `
+        <div class="modal active" id="editDepartmentModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Editar Departamento</h3>
+                    <button type="button" class="modal-close" onclick="closeEditDepartmentModal()">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="loading-state">
+                        <i data-feather="loader"></i>
+                        <p>Cargando datos del departamento...</p>
+                    </div>
+                    <form id="editDepartmentForm" class="modal-form" onsubmit="handleUpdateDepartment(event)" style="display: none;">
+                        <input type="hidden" id="edit_department_id" name="department_id" value="${departmentId}">
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit_name">Nombre del Departamento *</label>
+                                <input type="text" id="edit_name" name="name" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_company_id">Empresa *</label>
+                                <select id="edit_company_id" name="company_id" class="form-input" required>
+                                    <option value="">Seleccionar empresa</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row single">
+                            <div class="form-group">
+                                <label for="edit_description">Descripción</label>
+                                <textarea id="edit_description" name="description" class="form-input" rows="3"></textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit_manager_id">Manager/Jefe</label>
+                                <select id="edit_manager_id" name="manager_id" class="form-input">
+                                    <option value="">Sin asignar</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_status">Estado</label>
+                                <select id="edit_status" name="status" class="form-input">
+                                    <option value="active">Activo</option>
+                                    <option value="inactive">Inactivo</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" onclick="closeEditDepartmentModal()">
+                                Cancelar
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i data-feather="save"></i>
+                                Guardar Cambios
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    `;
     
-    const saveBtn = document.getElementById('saveDepartmentBtn');
-    if (saveBtn && saveBtn.querySelector('.btn-text')) {
-        saveBtn.querySelector('.btn-text').textContent = 'Actualizar Departamento';
-    }
+    // Insertar modal en el DOM
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    currentModal = document.getElementById('editDepartmentModal');
     
-    // Cargar datos y mostrar modal
+    // Cargar datos del departamento
     loadDepartmentData(departmentId);
-    showModal('departmentModal');
+    
+    // Inicializar iconos de Feather
+    if (typeof feather !== 'undefined') {
+        feather.replace();
+    }
+}
+
+function closeEditDepartmentModal() {
+    console.log('❌ Cerrando modal de editar departamento...');
+    const modal = document.getElementById('editDepartmentModal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.remove();
+            currentModal = null;
+            currentDepartmentId = null;
+        }, 300);
+    }
 }
 
 function viewDepartmentDetails(departmentId) {
-    console.log('👁️ Ver detalles departamento:', departmentId);
+    console.log('👁️ Viendo detalles del departamento:', departmentId);
     
-    if (!departmentId) {
-        alert('ID de departamento inválido');
-        return;
-    }
+    const modalHTML = `
+        <div class="modal active" id="viewDepartmentModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Detalles del Departamento</h3>
+                    <button type="button" class="modal-close" onclick="closeViewDepartmentModal()">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="loading-state">
+                        <i data-feather="loader"></i>
+                        <p>Cargando detalles del departamento...</p>
+                    </div>
+                    <div id="departmentDetailsContent" style="display: none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeViewDepartmentModal()">
+                        Cerrar
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="editDepartmentFromView(${departmentId})">
+                        <i data-feather="edit"></i>
+                        Editar
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
     
+    // Insertar modal en el DOM
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    currentModal = document.getElementById('viewDepartmentModal');
+    
+    // Cargar detalles del departamento
     loadDepartmentDetails(departmentId);
-    showModal('viewDepartmentModal');
+    
+    // Inicializar iconos de Feather
+    if (typeof feather !== 'undefined') {
+        feather.replace();
+    }
+}
+
+function closeViewDepartmentModal() {
+    console.log('❌ Cerrando modal de ver departamento...');
+    const modal = document.getElementById('viewDepartmentModal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.remove();
+            currentModal = null;
+        }, 300);
+    }
+}
+
+function editDepartmentFromView(departmentId) {
+    closeViewDepartmentModal();
+    setTimeout(() => {
+        editDepartment(departmentId);
+    }, 300);
+}
+
+function closeCurrentModal() {
+    if (currentModal) {
+        currentModal.classList.remove('active');
+        setTimeout(() => {
+            if (currentModal && currentModal.parentNode) {
+                currentModal.remove();
+                currentModal = null;
+                currentDepartmentId = null;
+            }
+        }, 300);
+    }
+}
+
+// ==========================================
+// FUNCIONES DE DATOS
+// ==========================================
+
+function loadCompaniesForModal() {
+    console.log('📋 Cargando empresas para modal...');
+    
+    fetch('actions/get_companies.php')
+        .then(response => {
+            console.log('🔍 Status de respuesta (empresas):', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text(); // Primero obtener como texto para debug
+        })
+        .then(text => {
+            console.log('📄 Respuesta completa del servidor (empresas):');
+            console.log(text);
+            console.log('📄 Fin de respuesta');
+            
+            // Intentar extraer solo la parte JSON si hay HTML mezclado
+            let jsonText = text;
+            
+            // Si hay HTML antes del JSON, intentar extraer solo el JSON
+            const jsonStart = text.indexOf('{');
+            const jsonEnd = text.lastIndexOf('}');
+            
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonStart < jsonEnd) {
+                jsonText = text.substring(jsonStart, jsonEnd + 1);
+                console.log('🔧 JSON extraído:', jsonText);
+            }
+            
+            try {
+                const data = JSON.parse(jsonText);
+                if (data.success) {
+                    const companySelects = document.querySelectorAll('#company_id, #edit_company_id');
+                    companySelects.forEach(select => {
+                        // Limpiar opciones existentes excepto la primera
+                        const firstOption = select.firstElementChild;
+                        select.innerHTML = '';
+                        select.appendChild(firstOption);
+                        
+                        // Agregar empresas
+                        data.companies.forEach(company => {
+                            const option = document.createElement('option');
+                            option.value = company.id;
+                            option.textContent = company.name;
+                            select.appendChild(option);
+                        });
+                    });
+                    console.log('✅ Empresas cargadas correctamente:', data.companies.length);
+                } else {
+                    showNotification(data.message || 'Error al cargar empresas', 'error');
+                }
+            } catch (jsonError) {
+                console.error('❌ Error parsing JSON:', jsonError);
+                console.error('📄 Texto que intentamos parsear:', jsonText);
+                showNotification('Error: Respuesta inválida del servidor (empresas)', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error cargando empresas:', error);
+            showNotification('Error de conexión al cargar empresas', 'error');
+        });
+}
+
+function loadManagersForModal() {
+    console.log('👥 Cargando managers para modal...');
+    
+    fetch('actions/get_managers.php')
+        .then(response => {
+            console.log('🔍 Status de respuesta (managers):', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text(); // Primero obtener como texto para debug
+        })
+        .then(text => {
+            console.log('📄 Respuesta completa del servidor (managers):');
+            console.log(text);
+            console.log('📄 Fin de respuesta');
+            
+            // Intentar extraer solo la parte JSON si hay HTML mezclado
+            let jsonText = text;
+            
+            // Si hay HTML antes del JSON, intentar extraer solo el JSON
+            const jsonStart = text.indexOf('{');
+            const jsonEnd = text.lastIndexOf('}');
+            
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonStart < jsonEnd) {
+                jsonText = text.substring(jsonStart, jsonEnd + 1);
+                console.log('🔧 JSON extraído:', jsonText);
+            }
+            
+            try {
+                const data = JSON.parse(jsonText);
+                if (data.success) {
+                    const managerSelects = document.querySelectorAll('#manager_id, #edit_manager_id');
+                    managerSelects.forEach(select => {
+                        // Limpiar opciones existentes excepto la primera
+                        const firstOption = select.firstElementChild;
+                        select.innerHTML = '';
+                        select.appendChild(firstOption);
+                        
+                        // Agregar managers
+                        data.managers.forEach(manager => {
+                            const option = document.createElement('option');
+                            option.value = manager.id;
+                            option.textContent = manager.name;
+                            select.appendChild(option);
+                        });
+                    });
+                    console.log('✅ Managers cargados correctamente:', data.managers.length);
+                } else {
+                    showNotification(data.message || 'Error al cargar managers', 'error');
+                }
+            } catch (jsonError) {
+                console.error('❌ Error parsing JSON:', jsonError);
+                console.error('📄 Texto que intentamos parsear:', jsonText);
+                showNotification('Error: Respuesta inválida del servidor (managers)', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error cargando managers:', error);
+            showNotification('Error de conexión al cargar managers', 'error');
+        });
+}
+
+function loadDepartmentData(departmentId) {
+    console.log('📝 Cargando datos del departamento:', departmentId);
+    
+    fetch(`actions/get_department_details.php?id=${departmentId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Cargar datos en el formulario
+                const form = document.getElementById('editDepartmentForm');
+                const loadingState = document.querySelector('#editDepartmentModal .loading-state');
+                
+                // Llenar formulario
+                document.getElementById('edit_name').value = data.department.name || '';
+                document.getElementById('edit_description').value = data.department.description || '';
+                document.getElementById('edit_status').value = data.department.status || 'active';
+                
+                // Cargar selects primero, luego establecer valores
+                loadCompaniesForModal();
+                loadManagersForModal();
+                
+                // Establecer valores después de un pequeño delay para que se carguen los selects
+                setTimeout(() => {
+                    if (data.department.company_id) {
+                        document.getElementById('edit_company_id').value = data.department.company_id;
+                    }
+                    if (data.department.manager_id) {
+                        document.getElementById('edit_manager_id').value = data.department.manager_id;
+                    }
+                }, 500);
+                
+                // Mostrar formulario y ocultar loading
+                loadingState.style.display = 'none';
+                form.style.display = 'block';
+                
+                // Reinicializar iconos
+                if (typeof feather !== 'undefined') {
+                    feather.replace();
+                }
+                
+            } else {
+                showNotification(data.message || 'Error al cargar datos del departamento', 'error');
+                closeEditDepartmentModal();
+            }
+        })
+        .catch(error => {
+            console.error('Error cargando datos del departamento:', error);
+            showNotification('Error de conexión', 'error');
+            closeEditDepartmentModal();
+        });
+}
+
+function loadDepartmentDetails(departmentId) {
+    console.log('📋 Cargando detalles del departamento:', departmentId);
+    
+    fetch(`actions/get_department_details.php?id=${departmentId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const loadingState = document.querySelector('#viewDepartmentModal .loading-state');
+                const contentDiv = document.getElementById('departmentDetailsContent');
+                
+                // Crear HTML con los detalles
+                const detailsHTML = `
+                    <div class="department-details">
+                        <div class="detail-section">
+                            <h4>Información General</h4>
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <label>Nombre:</label>
+                                    <span>${data.department.name || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Empresa:</label>
+                                    <span>${data.department.company_name || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Manager:</label>
+                                    <span>${data.department.manager_name || 'Sin asignar'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Estado:</label>
+                                    <span class="status-badge ${data.department.status === 'active' ? 'status-active' : 'status-inactive'}">
+                                        ${data.department.status === 'active' ? 'Activo' : 'Inactivo'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${data.department.description ? `
+                        <div class="detail-section">
+                            <h4>Descripción</h4>
+                            <p>${data.department.description}</p>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="detail-section">
+                            <h4>Estadísticas</h4>
+                            <div class="stats-mini-grid">
+                                <div class="stat-mini">
+                                    <div class="stat-number">${data.statistics.total_users}</div>
+                                    <div class="stat-label">Total Usuarios</div>
+                                </div>
+                                <div class="stat-mini">
+                                    <div class="stat-number">${data.statistics.active_users}</div>
+                                    <div class="stat-label">Activos</div>
+                                </div>
+                                <div class="stat-mini">
+                                    <div class="stat-number">${data.statistics.inactive_users}</div>
+                                    <div class="stat-label">Inactivos</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${data.users && data.users.length > 0 ? `
+                        <div class="detail-section">
+                            <h4>Usuarios Asignados</h4>
+                            <div class="users-list">
+                                ${data.users.map(user => `
+                                    <div class="user-item">
+                                        <div class="user-info">
+                                            <span class="user-name">${user.name}</span>
+                                            <span class="user-email">${user.email}</span>
+                                        </div>
+                                        <span class="user-role">${user.role}</span>
+                                        <span class="status-badge ${user.status === 'active' ? 'status-active' : 'status-inactive'}">
+                                            ${user.status}
+                                        </span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="detail-section">
+                            <h4>Fechas</h4>
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <label>Creado:</label>
+                                    <span>${data.department.formatted_created_date || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Actualizado:</label>
+                                    <span>${data.department.formatted_updated_date || 'N/A'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                contentDiv.innerHTML = detailsHTML;
+                
+                // Mostrar contenido y ocultar loading
+                loadingState.style.display = 'none';
+                contentDiv.style.display = 'block';
+                
+            } else {
+                showNotification(data.message || 'Error al cargar detalles del departamento', 'error');
+                closeViewDepartmentModal();
+            }
+        })
+        .catch(error => {
+            console.error('Error cargando detalles del departamento:', error);
+            showNotification('Error de conexión', 'error');
+            closeViewDepartmentModal();
+        });
+}
+
+// ==========================================
+// FUNCIONES DE ACCIONES
+// ==========================================
+
+function handleCreateDepartment(event) {
+    event.preventDefault();
+    console.log('💾 Creando nuevo departamento...');
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
+    
+    // Deshabilitar botón
+    submitBtn.disabled = true;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i data-feather="loader"></i> Creando...';
+    
+    fetch('actions/create_department.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Departamento creado correctamente', 'success');
+            closeCreateDepartmentModal();
+            // Recargar página para mostrar el nuevo departamento
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showNotification(data.message || 'Error al crear departamento', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error creando departamento:', error);
+        showNotification('Error de conexión', 'error');
+    })
+    .finally(() => {
+        // Rehabilitar botón
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+    });
+}
+
+function handleUpdateDepartment(event) {
+    event.preventDefault();
+    console.log('💾 Actualizando departamento...');
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
+    
+    // Deshabilitar botón
+    submitBtn.disabled = true;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i data-feather="loader"></i> Guardando...';
+    
+    fetch('actions/update_department.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Departamento actualizado correctamente', 'success');
+            closeEditDepartmentModal();
+            // Recargar página para mostrar los cambios
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showNotification(data.message || 'Error al actualizar departamento', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error actualizando departamento:', error);
+        showNotification('Error de conexión', 'error');
+    })
+    .finally(() => {
+        // Rehabilitar botón
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+    });
 }
 
 function toggleDepartmentStatus(departmentId, currentStatus) {
-    console.log('🔄 Toggle estado departamento:', departmentId, currentStatus);
-    
-    if (!departmentId || !currentStatus) {
-        alert('Parámetros inválidos');
-        return;
-    }
-    
     const action = currentStatus === 'active' ? 'desactivar' : 'activar';
+    const confirmMessage = `¿Está seguro que desea ${action} este departamento?`;
     
-    if (!confirm(`¿Está seguro que desea ${action} este departamento?`)) {
+    if (!confirm(confirmMessage)) {
         return;
     }
     
-    // Usar AJAX en lugar de formulario para mejor UX
+    console.log(`🔄 Cambiando estado del departamento ${departmentId} de ${currentStatus}`);
+    
     const formData = new FormData();
-    formData.append('department_id', departmentId.toString());
+    formData.append('department_id', departmentId);
     formData.append('current_status', currentStatus);
     
     fetch('actions/toggle_department_status.php', {
         method: 'POST',
         body: formData
     })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
-        console.log('📊 Respuesta toggle:', data);
-        
         if (data.success) {
-            // Mostrar mensaje de éxito elegante
-            if (typeof showNotification === 'function') {
-                showNotification(data.message || 'Estado cambiado exitosamente', 'success');
-            } else {
-                alert(data.message || 'Estado cambiado exitosamente');
-            }
-            
-            // Recargar la página para mostrar los cambios
+            showNotification(`Departamento ${action}do correctamente`, 'success');
+            // Recargar página para mostrar los cambios
             setTimeout(() => {
                 window.location.reload();
-            }, 1500);
+            }, 1000);
         } else {
-            alert(data.message || 'Error al cambiar el estado');
+            showNotification(data.message || `Error al ${action} departamento`, 'error');
         }
     })
     .catch(error => {
-        console.error('❌ Error toggle:', error);
-        alert(`Error de conexión: ${error.message}`);
+        console.error('Error cambiando estado del departamento:', error);
+        showNotification('Error de conexión', 'error');
     });
 }
 
 // ==========================================
-// CARGA DE DATOS
+// FUNCIONES AUXILIARES
 // ==========================================
 
-async function loadDepartmentData(departmentId) {
-    console.log('📡 Cargando datos departamento:', departmentId);
+function showNotification(message, type = 'info') {
+    console.log(`📢 Notificación [${type}]: ${message}`);
     
-    try {
-        showButtonLoading('saveDepartmentBtn');
-        
-        // Usar ruta relativa correcta
-        const url = `actions/get_department_details.php?id=${departmentId}`;
-        console.log('🌐 URL:', url);
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('❌ Respuesta no es JSON:', text);
-            throw new Error('Respuesta del servidor no es JSON válido');
-        }
-        
-        const data = await response.json();
-        console.log('📊 Datos recibidos:', data);
-        
-        if (data.success) {
-            const dept = data.department;
-            
-            // Llenar formulario con validación
-            const fields = [
-                { id: 'departmentId', value: dept.id },
-                { id: 'departmentName', value: dept.name },
-                { id: 'departmentDescription', value: dept.description || '' },
-                { id: 'departmentCompany', value: dept.company_id },
-                { id: 'departmentStatus', value: dept.status }
-            ];
-            
-            fields.forEach(field => {
-                const element = document.getElementById(field.id);
-                if (element) {
-                    element.value = field.value;
-                } else {
-                    console.warn(`⚠️ Campo ${field.id} no encontrado`);
-                }
-            });
-            
-            // Cargar managers para la empresa seleccionada
-            if (dept.company_id) {
-                await loadManagersForCompany(dept.company_id);
-                
-                // Seleccionar manager actual
-                if (dept.manager_id) {
-                    const managerSelect = document.getElementById('departmentManager');
-                    if (managerSelect) {
-                        managerSelect.value = dept.manager_id;
-                    }
-                }
-            }
-            
-            console.log('✅ Datos cargados correctamente');
-        } else {
-            throw new Error(data.message || 'Error al cargar datos del departamento');
-        }
-    } catch (error) {
-        console.error('❌ Error cargando datos:', error);
-        alert(`Error al cargar datos: ${error.message}`);
-    } finally {
-        hideButtonLoading('saveDepartmentBtn');
-    }
-}
-
-async function loadDepartmentDetails(departmentId) {
-    console.log('📋 Cargando detalles departamento:', departmentId);
-    
-    try {
-        const url = `actions/get_department_details.php?id=${departmentId}`;
-        console.log('🌐 URL detalles:', url);
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('📊 Detalles recibidos:', data);
-        
-        if (data.success) {
-            renderDepartmentDetails(data.department);
-            currentDepartmentId = departmentId;
-        } else {
-            throw new Error(data.message || 'Error al cargar detalles');
-        }
-    } catch (error) {
-        console.error('❌ Error cargando detalles:', error);
-        alert(`Error al cargar detalles: ${error.message}`);
-    }
-}
-
-async function handleCompanyChange(e) {
-    const companyId = e.target.value;
-    console.log('🏢 Cambio de empresa:', companyId);
-    await loadManagersForCompany(companyId);
-}
-
-async function loadManagersForCompany(companyId) {
-    console.log('👥 Cargando managers para empresa:', companyId);
-    
-    const managerSelect = document.getElementById('departmentManager');
-    if (!managerSelect) {
-        console.warn('⚠️ Select de manager no encontrado');
-        return;
-    }
-    
-    // Limpiar opciones
-    managerSelect.innerHTML = '<option value="">Sin asignar</option>';
-    
-    if (!companyId) {
-        console.log('ℹ️ No hay empresa seleccionada');
-        return;
-    }
-    
-    try {
-        // Ruta correcta a users
-        const url = `../users/actions/get_users.php?company_id=${companyId}&status=active`;
-        console.log('🌐 URL managers:', url);
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('👥 Managers recibidos:', data);
-        
-        if (data.success && data.users && Array.isArray(data.users)) {
-            data.users.forEach(user => {
-                const option = document.createElement('option');
-                option.value = user.id;
-                option.textContent = `${user.first_name} ${user.last_name} (${user.email})`;
-                managerSelect.appendChild(option);
-            });
-            console.log(`✅ ${data.users.length} managers cargados`);
-        } else {
-            console.log('ℹ️ No hay managers disponibles');
-        }
-    } catch (error) {
-        console.error('❌ Error cargando managers:', error);
-        // No mostrar alert aquí, solo log del error
-    }
-}
-
-// ==========================================
-// MANEJO DE FORMULARIOS
-// ==========================================
-
-async function handleDepartmentSubmit(e) {
-    e.preventDefault();
-    console.log('📤 Enviando formulario departamento...');
-    
-    if (!validateForm()) {
-        alert('Por favor corrige los errores en el formulario');
-        return;
-    }
-    
-    const formData = new FormData(e.target);
-    const isEdit = currentDepartmentId !== null;
-    
-    if (isEdit) {
-        formData.append('department_id', currentDepartmentId);
-    }
-    
-    // Log de datos del formulario
-    console.log('📋 Datos del formulario:');
-    for (let [key, value] of formData.entries()) {
-        console.log(`  ${key}: ${value}`);
-    }
-    
-    try {
-        showButtonLoading('saveDepartmentBtn');
-        
-        const endpoint = isEdit ? 'actions/update_department.php' : 'actions/create_department.php';
-        console.log('🌐 Endpoint:', endpoint);
-        
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('📊 Respuesta servidor:', data);
-        
-        if (data.success) {
-            const action = isEdit ? 'actualizado' : 'creado';
-            
-            // Mostrar notificación elegante si está disponible
-            if (typeof showNotification === 'function') {
-                showNotification(`Departamento ${action} exitosamente`, 'success');
-            } else {
-                alert(`Departamento ${action} exitosamente`);
-            }
-            
-            closeDepartmentModal();
-            
-            // Recargar página
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
-        } else {
-            if (data.errors && Array.isArray(data.errors)) {
-                data.errors.forEach(error => alert(error));
-            } else {
-                alert(data.message || 'Error al procesar la solicitud');
-            }
-        }
-    } catch (error) {
-        console.error('❌ Error enviando formulario:', error);
-        alert(`Error de conexión: ${error.message}`);
-    } finally {
-        hideButtonLoading('saveDepartmentBtn');
-    }
-}
-
-// ==========================================
-// VALIDACIÓN
-// ==========================================
-
-function validateField(field) {
-    const value = field.value.trim();
-    let isValid = true;
-    let message = '';
-
-    clearFieldError(field);
-
-    switch (field.name) {
-        case 'name':
-            if (!value) {
-                isValid = false;
-                message = 'El nombre es requerido';
-            } else if (value.length < 2) {
-                isValid = false;
-                message = 'El nombre debe tener al menos 2 caracteres';
-            } else if (value.length > 100) {
-                isValid = false;
-                message = 'El nombre no puede exceder 100 caracteres';
-            }
-            break;
-
-        case 'company_id':
-            if (!value) {
-                isValid = false;
-                message = 'Debe seleccionar una empresa';
-            }
-            break;
-
-        case 'description':
-            if (value && value.length > 500) {
-                isValid = false;
-                message = 'La descripción no puede exceder 500 caracteres';
-            }
-            break;
-    }
-
-    if (!isValid) {
-        showFieldError(field, message);
-    }
-
-    return isValid;
-}
-
-function validateForm() {
-    const form = document.getElementById('departmentForm');
-    if (!form) {
-        console.error('❌ Formulario no encontrado');
-        return false;
-    }
-    
-    const inputs = form.querySelectorAll('input[required], select[required]');
-    let isValid = true;
-    
-    inputs.forEach(input => {
-        if (!validateField(input)) {
-            isValid = false;
-        }
-    });
-    
-    return isValid;
-}
-
-function showFieldError(field, message) {
-    field.classList.add('is-invalid');
-    
-    const feedback = field.parentNode.querySelector('.invalid-feedback');
-    if (feedback) {
-        feedback.textContent = message;
-        feedback.style.display = 'block';
-    }
-}
-
-function clearFieldError(field) {
-    field.classList.remove('is-invalid');
-    
-    const feedback = field.parentNode.querySelector('.invalid-feedback');
-    if (feedback) {
-        feedback.textContent = '';
-        feedback.style.display = 'none';
-    }
-}
-
-function clearFormErrors() {
-    const form = document.getElementById('departmentForm');
-    if (!form) return;
-    
-    const invalidFields = form.querySelectorAll('.is-invalid');
-    invalidFields.forEach(field => {
-        clearFieldError(field);
-    });
-}
-
-// ==========================================
-// MODALES
-// ==========================================
-
-function showModal(modalId) {
-    console.log('📱 Abriendo modal:', modalId);
-    
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.style.display = 'block';
-        modal.classList.add('show');
-        currentModal = modalId;
-        
-        const firstInput = modal.querySelector('input, select, textarea');
-        if (firstInput) {
-            setTimeout(() => firstInput.focus(), 100);
-        }
-    } else {
-        console.error('❌ Modal no encontrado:', modalId);
-    }
-}
-
-function hideModal(modalId) {
-    console.log('❌ Cerrando modal:', modalId);
-    
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.style.display = 'none';
-        modal.classList.remove('show');
-        
-        if (currentModal === modalId) {
-            currentModal = null;
-        }
-    }
-}
-
-function closeCurrentModal() {
-    if (currentModal) {
-        hideModal(currentModal);
-    }
-}
-
-function closeDepartmentModal() {
-    hideModal('departmentModal');
-    clearFormErrors();
-}
-
-function closeViewDepartmentModal() {
-    hideModal('viewDepartmentModal');
-    currentDepartmentId = null;
-}
-
-function editDepartmentFromView() {
-    closeViewDepartmentModal();
-    editDepartment(currentDepartmentId);
-}
-
-// ==========================================
-// FUNCIONES DE APOYO
-// ==========================================
-
-function showButtonLoading(buttonId) {
-    const button = document.getElementById(buttonId);
-    if (button) {
-        button.disabled = true;
-        const textSpan = button.querySelector('.btn-text');
-        const spinnerSpan = button.querySelector('.btn-spinner');
-        if (textSpan) textSpan.style.display = 'none';
-        if (spinnerSpan) spinnerSpan.style.display = 'inline-block';
-    }
-}
-
-function hideButtonLoading(buttonId) {
-    const button = document.getElementById(buttonId);
-    if (button) {
-        button.disabled = false;
-        const textSpan = button.querySelector('.btn-text');
-        const spinnerSpan = button.querySelector('.btn-spinner');
-        if (textSpan) textSpan.style.display = 'inline-block';
-        if (spinnerSpan) spinnerSpan.style.display = 'none';
-    }
-}
-
-function renderDepartmentDetails(dept) {
-    const detailsContainer = document.getElementById('departmentDetails');
-    if (!detailsContainer) {
-        console.error('❌ Contenedor de detalles no encontrado');
-        return;
-    }
-    
-    const html = `
-        <div class="department-details">
-            <div class="detail-header">
-                <h3>${escapeHtml(dept.name)}</h3>
-                <span class="status-badge ${dept.status === 'active' ? 'active' : 'inactive'}">
-                    ${dept.status === 'active' ? 'ACTIVO' : 'INACTIVO'}
-                </span>
-            </div>
-            
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <label>Empresa:</label>
-                    <span>${escapeHtml(dept.company_name || 'Sin empresa')}</span>
-                </div>
-                
-                <div class="detail-item">
-                    <label>Manager:</label>
-                    <span>${escapeHtml(dept.manager_name || 'Sin asignar')}</span>
-                </div>
-                
-                <div class="detail-item">
-                    <label>Descripción:</label>
-                    <span>${escapeHtml(dept.description || 'Sin descripción')}</span>
-                </div>
-                
-                <div class="detail-item">
-                    <label>Usuarios:</label>
-                    <span>${dept.stats ? dept.stats.total_users : 0}</span>
-                </div>
-                
-                <div class="detail-item">
-                    <label>Fecha Creación:</label>
-                    <span>${dept.formatted_created || 'No disponible'}</span>
-                </div>
-            </div>
+    // Crear elemento de notificación
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <div class="notification-content">
+            <i data-feather="${type === 'success' ? 'check-circle' : type === 'error' ? 'x-circle' : 'info'}"></i>
+            <span>${message}</span>
         </div>
     `;
     
-    detailsContainer.innerHTML = html;
+    // Agregar al DOM
+    document.body.appendChild(notification);
+    
+    // Inicializar iconos
+    if (typeof feather !== 'undefined') {
+        feather.replace();
+    }
+    
+    // Mostrar notificación
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 100);
+    
+    // Ocultar después de 5 segundos
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 300);
+    }, 5000);
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// Función de compatibilidad para funciones externas
+function loadManagers() {
+    // Esta función puede ser llamada desde el exterior si es necesario
+    loadManagersForModal();
 }
 
-// ==========================================
-// EXPORTAR FUNCIONES GLOBALES
-// ==========================================
-
-window.openCreateDepartmentModal = openCreateDepartmentModal;
-window.editDepartment = editDepartment;
-window.viewDepartmentDetails = viewDepartmentDetails;
-window.editDepartmentFromView = editDepartmentFromView;
-window.toggleDepartmentStatus = toggleDepartmentStatus;
-window.closeDepartmentModal = closeDepartmentModal;
-window.closeViewDepartmentModal = closeViewDepartmentModal;
-
-console.log('✅ Módulo de departamentos cargado correctamente');
+console.log('✅ Módulo de departamentos JavaScript cargado correctamente');

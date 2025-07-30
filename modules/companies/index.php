@@ -388,8 +388,8 @@ function formatDate($dateString) {
         <div class="companies-container">
             <!-- Título y botón principal -->
             <div class="page-header">
-                <div class="page-title-section">
 
+                <div class="page-title-section">
                     <button class="btn btn-primary btn-create-company" onclick="openCreateCompanyModal()">
                         <i data-feather="briefcase"></i>
                         <span>Crear Empresa</span>
