@@ -1,37 +1,47 @@
 <?php
 // modules/users/actions/create_user.php
-// Crear nuevo usuario
+// Crear nuevo usuario - DMS2
 
-header('Content-Type: application/json');
 require_once '../../../config/session.php';
 require_once '../../../config/database.php';
 
+header('Content-Type: application/json');
+
+// Verificar sesión y permisos
 try {
     SessionManager::requireLogin();
     SessionManager::requireRole('admin');
-    
-    $currentUser = SessionManager::getCurrentUser();
-    
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Método no permitido');
+} catch (Exception $e) {
+    echo json_encode(['success' => false, 'message' => 'Acceso denegado']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Método no permitido']);
+    exit;
+}
+
+try {
+    // Validar datos requeridos
+    $requiredFields = ['first_name', 'last_name', 'username', 'email', 'role', 'password', 'confirm_password'];
+    foreach ($requiredFields as $field) {
+        if (empty($_POST[$field])) {
+            throw new Exception("El campo {$field} es requerido");
+        }
     }
     
-    // Obtener y validar datos
-    $firstName = trim($_POST['first_name'] ?? '');
-    $lastName = trim($_POST['last_name'] ?? '');
-    $username = trim($_POST['username'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $confirmPassword = $_POST['confirm_password'] ?? '';
-    $role = trim($_POST['role'] ?? '');
-    $companyId = intval($_POST['company_id'] ?? 0);
+    $firstName = trim($_POST['first_name']);
+    $lastName = trim($_POST['last_name']);
+    $username = trim($_POST['username']);
+    $email = trim($_POST['email']);
+    $role = $_POST['role'];
+    $password = $_POST['password'];
+    $confirmPassword = $_POST['confirm_password'];
+    $companyId = !empty($_POST['company_id']) ? intval($_POST['company_id']) : null;
     $downloadEnabled = isset($_POST['download_enabled']) ? 1 : 0;
     
     // Validaciones
-    if (empty($firstName) || empty($lastName) || empty($username) || empty($email) || empty($password)) {
-        throw new Exception('Todos los campos obligatorios deben ser completados');
-    }
-    
     if ($password !== $confirmPassword) {
         throw new Exception('Las contraseñas no coinciden');
     }
@@ -41,33 +51,48 @@ try {
     }
     
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new Exception('El email no tiene un formato válido');
+        throw new Exception('El email no es válido');
     }
     
-    if (!in_array($role, ['admin', 'manager', 'user', 'viewer'])) {
-        throw new Exception('Rol no válido');
+    if (!in_array($role, ['admin', 'user', 'viewer'])) {
+        throw new Exception('Rol inválido');
     }
     
-    if ($companyId <= 0) {
-        throw new Exception('Debe seleccionar una empresa válida');
+    // Verificar conexión a la base de datos
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    if (!$pdo) {
+        throw new Exception('Error de conexión a la base de datos');
     }
     
-    // Verificar que no exista el username o email
-    $existingUser = fetchOne("SELECT id FROM users WHERE username = ? OR email = ?", [$username, $email]);
-    if ($existingUser) {
-        throw new Exception('El usuario o email ya existe');
+    // Verificar que el username no exista
+    $checkUsernameQuery = "SELECT id FROM users WHERE username = ? AND status != 'deleted'";
+    $stmt = $pdo->prepare($checkUsernameQuery);
+    $stmt->execute([$username]);
+    if ($stmt->fetch()) {
+        throw new Exception('El nombre de usuario ya existe');
     }
     
-    // Hashear contraseña
+    // Verificar que el email no exista
+    $checkEmailQuery = "SELECT id FROM users WHERE email = ? AND status != 'deleted'";
+    $stmt = $pdo->prepare($checkEmailQuery);
+    $stmt->execute([$email]);
+    if ($stmt->fetch()) {
+        throw new Exception('El email ya está registrado');
+    }
+    
+    // Encriptar contraseña
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
     
     // Insertar usuario
-    $sql = "INSERT INTO users (first_name, last_name, username, email, password, role, status, company_id, download_enabled, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NOW())";
+    $insertQuery = "INSERT INTO users (first_name, last_name, username, email, password, role, company_id, download_enabled, status, created_at) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW())";
     
-    $stmt = executeQuery($sql, [
+    $stmt = $pdo->prepare($insertQuery);
+    $success = $stmt->execute([
         $firstName,
-        $lastName,
+        $lastName, 
         $username,
         $email,
         $hashedPassword,
@@ -76,23 +101,23 @@ try {
         $downloadEnabled
     ]);
     
-    if ($stmt) {
-        // Obtener el ID del usuario recién creado usando la conexión PDO
-        $conn = getDbConnection();
-        $newUserId = $conn->lastInsertId();
+    if ($success) {
+        $newUserId = $pdo->lastInsertId();
         
         // Registrar actividad
-        logActivity($currentUser['id'], 'create_user', 'users', $newUserId, 
-                   "Usuario creado: {$firstName} {$lastName} (@{$username})");
+        $currentUser = SessionManager::getCurrentUser();
+        logActivity(
+            $currentUser['id'], 
+            'user_created', 
+            'users', 
+            $newUserId, 
+            "Usuario {$firstName} {$lastName} ({$username}) creado con rol {$role}"
+        );
         
         echo json_encode([
             'success' => true,
             'message' => 'Usuario creado exitosamente',
-            'data' => [
-                'user_id' => $newUserId,
-                'username' => $username,
-                'email' => $email
-            ]
+            'user_id' => $newUserId
         ]);
     } else {
         throw new Exception('Error al crear el usuario');
@@ -100,8 +125,6 @@ try {
     
 } catch (Exception $e) {
     error_log("Error creating user: " . $e->getMessage());
-    
-    http_response_code(400);
     echo json_encode([
         'success' => false,
         'message' => $e->getMessage()

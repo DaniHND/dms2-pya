@@ -1,73 +1,82 @@
 <?php
 // modules/users/actions/toggle_user_status.php
-// Cambiar estado de un usuario (activo/inactivo)
+// Cambiar estado de usuario - DMS2
 
-header('Content-Type: application/json');
 require_once '../../../config/session.php';
 require_once '../../../config/database.php';
 
+header('Content-Type: application/json');
+
+// Verificar sesión y permisos
 try {
     SessionManager::requireLogin();
     SessionManager::requireRole('admin');
-    
-    $currentUser = SessionManager::getCurrentUser();
-    
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Método no permitido');
-    }
-    
-    // Obtener datos
+} catch (Exception $e) {
+    echo json_encode(['success' => false, 'message' => 'Acceso denegado']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Método no permitido']);
+    exit;
+}
+
+try {
     $userId = intval($_POST['user_id'] ?? 0);
-    $currentStatus = trim($_POST['current_status'] ?? '');
+    $newStatus = $_POST['new_status'] ?? '';
     
     if ($userId <= 0) {
-        throw new Exception('ID de usuario no válido');
+        throw new Exception('ID de usuario inválido');
     }
     
-    if (!in_array($currentStatus, ['active', 'inactive'])) {
-        throw new Exception('Estado actual no válido');
+    if (!in_array($newStatus, ['active', 'inactive', 'suspended'])) {
+        throw new Exception('Estado inválido');
+    }
+    
+    // Verificar conexión a la base de datos
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    if (!$pdo) {
+        throw new Exception('Error de conexión a la base de datos');
     }
     
     // Verificar que el usuario existe
-    $targetUser = fetchOne("SELECT * FROM users WHERE id = ?", [$userId]);
-    if (!$targetUser) {
+    $checkQuery = "SELECT id, first_name, last_name, status FROM users WHERE id = ? AND status != 'deleted'";
+    $stmt = $pdo->prepare($checkQuery);
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$user) {
         throw new Exception('Usuario no encontrado');
     }
     
-    // No permitir que un admin se desactive a sí mismo
-    if ($userId == $currentUser['id']) {
+    // No permitir que se desactive a sí mismo
+    $currentUser = SessionManager::getCurrentUser();
+    if ($userId == $currentUser['id'] && $newStatus !== 'active') {
         throw new Exception('No puedes cambiar tu propio estado');
     }
     
-    // Verificar que no es el último admin activo
-    if ($targetUser['role'] === 'admin' && $currentStatus === 'active') {
-        $activeAdmins = fetchOne("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active'");
-        if ($activeAdmins && $activeAdmins['count'] <= 1) {
-            throw new Exception('No puedes desactivar el último administrador del sistema');
-        }
-    }
-    
-    // Determinar nuevo estado
-    $newStatus = $currentStatus === 'active' ? 'inactive' : 'active';
-    
     // Actualizar estado
-    $stmt = executeQuery("UPDATE users SET status = ? WHERE id = ?", [$newStatus, $userId]);
+    $updateQuery = "UPDATE users SET status = ?, updated_at = NOW() WHERE id = ?";
+    $stmt = $pdo->prepare($updateQuery);
+    $success = $stmt->execute([$newStatus, $userId]);
     
-    if ($stmt) {
+    if ($success) {
         // Registrar actividad
-        $action = $newStatus === 'active' ? 'activated' : 'deactivated';
-        logActivity($currentUser['id'], 'toggle_user_status', 'users', $userId, 
-                   "Usuario {$action}: {$targetUser['first_name']} {$targetUser['last_name']} (@{$targetUser['username']})");
+        logActivity(
+            $currentUser['id'], 
+            'user_status_changed', 
+            'users', 
+            $userId, 
+            "Estado del usuario {$user['first_name']} {$user['last_name']} cambiado de {$user['status']} a {$newStatus}"
+        );
         
         echo json_encode([
             'success' => true,
-            'message' => $newStatus === 'active' ? 'Usuario activado exitosamente' : 'Usuario desactivado exitosamente',
-            'data' => [
-                'user_id' => $userId,
-                'old_status' => $currentStatus,
-                'new_status' => $newStatus,
-                'username' => $targetUser['username']
-            ]
+            'message' => 'Estado del usuario actualizado correctamente',
+            'new_status' => $newStatus
         ]);
     } else {
         throw new Exception('Error al actualizar el estado del usuario');
@@ -75,8 +84,6 @@ try {
     
 } catch (Exception $e) {
     error_log("Error toggling user status: " . $e->getMessage());
-    
-    http_response_code(400);
     echo json_encode([
         'success' => false,
         'message' => $e->getMessage()
