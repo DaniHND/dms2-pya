@@ -1,6 +1,6 @@
 <?php
 // includes/sidebar.php
-// Componente Sidebar reutilizable - DMS2 (Actualizado con módulo de usuarios Y DEPARTAMENTOS)
+// Componente Sidebar reutilizable - DMS2 (Actualizado con tipos de documentos)
 
 // Asegurar que el usuario esté definido
 if (!isset($currentUser)) {
@@ -114,11 +114,19 @@ function isActive($page, $module = null)
                     </a>
                 </li>
 
-                <!-- DEPARTAMENTOS - NUEVA LÍNEA AGREGADA -->
+                <!-- DEPARTAMENTOS -->
                 <li class="nav-item <?php echo isActive('index.php', 'departments') ? 'active' : ''; ?>">
                     <a href="<?php echo getRelativePath('modules/departments/index.php'); ?>" class="nav-link">
                         <i data-feather="layers"></i>
                         <span>Departamentos</span>
+                    </a>
+                </li>
+
+                <!-- TIPOS DE DOCUMENTOS - NUEVO MÓDULO AGREGADO -->
+                <li class="nav-item <?php echo isActive('index.php', 'document-types') ? 'active' : ''; ?>">
+                    <a href="<?php echo getRelativePath('modules/document-types/index.php'); ?>" class="nav-link">
+                        <i data-feather="file-text"></i>
+                        <span>Tipos de Documentos</span>
                     </a>
                 </li>
 

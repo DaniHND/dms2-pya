@@ -1,0 +1,431 @@
+/* ============================================================================
+   DOCUMENT-TYPES.CSS - CSS PARA MÓDULO DE TIPOS DE DOCUMENTOS
+   Estilos consistentes con el resto del sistema DMS2
+   ============================================================================ */
+
+/* Variables CSS del sistema */
+:root {
+    --dms-primary: #8B4513;
+    --dms-primary-hover: #654321;
+    --dms-bg: #f8fafc;
+    --dms-card-bg: #ffffff;
+    --dms-border: #e2e8f0;
+    --dms-text: #1e293b;
+    --dms-text-muted: #64748b;
+    --dms-success: #10b981;
+    --dms-warning: #f59e0b;
+    --dms-danger: #ef4444;
+    --dms-info: #3b82f6;
+    --dms-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --dms-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --dms-radius: 12px;
+    --dms-transition: all 0.2s ease;
+}
+
+/* ============================================================================
+   LAYOUT PRINCIPAL
+   ============================================================================ */
+
+.container {
+    padding: 24px;
+    background: var(--dms-bg);
+    min-height: calc(100vh - 80px);
+}
+
+/* ============================================================================
+   HEADER DE PÁGINA - EXACTAMENTE IGUAL QUE OTROS MÓDULOS
+   ============================================================================ */
+
+.page-header {
+    margin-bottom: 32px;
+}
+
+.page-title-section {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    margin-bottom: 0;
+}
+
+/* Botón crear tipo de documento más destacado - MISMO ESTILO QUE OTROS MÓDULOS */
+.btn-create-company {
+    background: linear-gradient(135deg, var(--dms-primary) 0%, var(--dms-primary-hover) 100%);
+    border: none;
+    box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+    padding: 14px 28px;
+    font-weight: 600;
+    font-size: 15px;
+    text-transform: none;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-create-company:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
+    background: linear-gradient(135deg, var(--dms-primary-hover) 0%, #4a2c0a 100%);
+    color: white;
+    text-decoration: none;
+}
+
+.btn-create-company span {
+    margin-left: 2px;
+}
+
+.btn-create-company i {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+/* ============================================================================
+   FILTROS DE BÚSQUEDA
+   ============================================================================ */
+
+.filters-card {
+    background: var(--dms-card-bg);
+    border-radius: var(--dms-radius);
+    padding: 24px;
+    margin-bottom: 32px;
+    border: 1px solid var(--dms-border);
+    box-shadow: var(--dms-shadow);
+}
+
+.filters-card h3 {
+    margin: 0 0 20px 0;
+    color: var(--dms-text);
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.filters-form {
+    margin: 0;
+}
+
+.filters-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* Solo 2 columnas para tipos de documentos */
+    gap: 20px;
+    align-items: end;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.filter-group label {
+    font-weight: 600;
+    color: var(--dms-text);
+    font-size: 0.9rem;
+}
+
+.filter-group input,
+.filter-group select {
+    padding: 10px 12px;
+    border: 1px solid var(--dms-border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    transition: var(--dms-transition);
+    background: white;
+}
+
+.filter-group input:focus,
+.filter-group select:focus {
+    outline: none;
+    border-color: var(--dms-primary);
+    box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+}
+
+/* ============================================================================
+   TABLA DE TIPOS DE DOCUMENTOS
+   ============================================================================ */
+
+.table-section {
+    background: var(--dms-card-bg);
+    border-radius: var(--dms-radius);
+    border: 1px solid var(--dms-border);
+    box-shadow: var(--dms-shadow);
+    overflow: hidden;
+}
+
+.table-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--dms-border);
+    background: #f8fafc;
+}
+
+.table-header h3 {
+    margin: 0;
+    color: var(--dms-text);
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.table-container {
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    background: #f8fafc;
+    padding: 16px 20px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--dms-text);
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--dms-border);
+}
+
+.data-table td {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--dms-border);
+    vertical-align: top;
+}
+
+.data-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.cell-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.primary-text {
+    color: var(--dms-text);
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.secondary-text {
+    color: var(--dms-text-muted);
+    font-size: 0.8rem;
+}
+
+/* Estados y badges */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.status-active {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--dms-success);
+}
+
+.status-inactive {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--dms-danger);
+}
+
+/* Acciones de tabla */
+.actions-cell {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.actions-header {
+    text-align: center;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.btn-action {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: var(--dms-transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}
+
+.btn-action i {
+    width: 16px;
+    height: 16px;
+}
+
+.btn-action.view {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--dms-info);
+}
+
+.btn-action.view:hover {
+    background: rgba(59, 130, 246, 0.2);
+}
+
+.btn-action.edit {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--dms-warning);
+}
+
+.btn-action.edit:hover {
+    background: rgba(245, 158, 11, 0.2);
+}
+
+.btn-action.delete {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--dms-danger);
+}
+
+.btn-action.delete:hover {
+    background: rgba(239, 68, 68, 0.2);
+}
+
+/* Estado sin datos */
+.no-data {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--dms-text-muted);
+}
+
+.no-data i {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.no-data p {
+    margin: 0 0 20px 0;
+    font-size: 1.1rem;
+}
+
+/* ============================================================================
+   PAGINACIÓN
+   ============================================================================ */
+
+.pagination-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-top: 1px solid var(--dms-border);
+    background: #f8fafc;
+}
+
+.pagination-info {
+    color: var(--dms-text-muted);
+    font-size: 0.9rem;
+}
+
+.pagination {
+    display: flex;
+    gap: 4px;
+}
+
+.pagination-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--dms-border);
+    border-radius: 4px;
+    color: var(--dms-text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: var(--dms-transition);
+    background: white;
+}
+
+.pagination-btn:hover {
+    background: var(--dms-primary);
+    color: white;
+    border-color: var(--dms-primary);
+    text-decoration: none;
+}
+
+.pagination-btn.active {
+    background: var(--dms-primary);
+    color: white;
+    border-color: var(--dms-primary);
+}
+
+.pagination-btn i {
+    width: 14px;
+    height: 14px;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .container {
+        padding: 16px;
+    }
+    
+    .filters-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    
+    .table-header {
+        padding: 16px 20px;
+    }
+    
+    .pagination-section {
+        flex-direction: column;
+        gap: 16px;
+        text-align: center;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+        gap: 4px;
+    }
+}
+
+/* ============================================================================
+   ALERTAS Y MENSAJES
+   ============================================================================ */
+
+.alert {
+    padding: 16px 20px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.alert-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--dms-danger);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.alert i {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
