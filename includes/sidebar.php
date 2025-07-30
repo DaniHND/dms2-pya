@@ -1,6 +1,6 @@
 <?php
 // includes/sidebar.php
-// Componente Sidebar reutilizable - DMS2 (Actualizado con módulo de usuarios)
+// Componente Sidebar actualizado con enlace a empresas - DMS2
 
 // Asegurar que el usuario esté definido
 if (!isset($currentUser)) {
@@ -66,21 +66,21 @@ function isActive($page, $module = null)
     <nav class="sidebar-nav">
         <ul class="nav-list">
             <li class="nav-item <?php echo isActive('dashboard.php') ? 'active' : ''; ?>">
-                <a href="<?php echo getRelativePath('dashboard.php'); ?>" class="nav-link">
+                <a href="<?php echo getRelativePath('dashboard.php'); ?>" class="nav-link" data-tooltip="Dashboard">
                     <i data-feather="home"></i>
                     <span>Dashboard</span>
                 </a>
             </li>
 
             <li class="nav-item <?php echo isActive('upload.php', '') ? 'active' : ''; ?>">
-                <a href="<?php echo getRelativePath('modules/documents/upload.php'); ?>" class="nav-link">
+                <a href="<?php echo getRelativePath('modules/documents/upload.php'); ?>" class="nav-link" data-tooltip="Subir Documentos">
                     <i data-feather="upload"></i>
                     <span>Subir Documentos</span>
                 </a>
             </li>
 
             <li class="nav-item <?php echo isActive('inbox.php', '') ? 'active' : ''; ?>">
-                <a href="<?php echo getRelativePath('modules/documents/inbox.php'); ?>" class="nav-link">
+                <a href="<?php echo getRelativePath('modules/documents/inbox.php'); ?>" class="nav-link" data-tooltip="Archivos">
                     <i data-feather="inbox"></i>
                     <span>Archivos</span>
                 </a>
@@ -89,7 +89,7 @@ function isActive($page, $module = null)
             <li class="nav-divider"></li>
 
             <li class="nav-item <?php echo isActive('index.php', 'reports') ? 'active' : ''; ?>">
-                <a href="<?php echo getRelativePath('modules/reports/index.php'); ?>" class="nav-link">
+                <a href="<?php echo getRelativePath('modules/reports/index.php'); ?>" class="nav-link" data-tooltip="Reportes">
                     <i data-feather="bar-chart-2"></i>
                     <span>Reportes</span>
                 </a>
@@ -101,35 +101,35 @@ function isActive($page, $module = null)
                 </li>
 
                 <li class="nav-item <?php echo isActive('index.php', 'users') ? 'active' : ''; ?>">
-                    <a href="<?php echo getRelativePath('modules/users/index.php'); ?>" class="nav-link">
+                    <a href="<?php echo getRelativePath('modules/users/index.php'); ?>" class="nav-link" data-tooltip="Usuarios">
                         <i data-feather="users"></i>
                         <span>Usuarios</span>
                     </a>
                 </li>
 
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Empresas')">
+                <li class="nav-item <?php echo isActive('index.php', 'companies') ? 'active' : ''; ?>">
+                    <a href="<?php echo getRelativePath('modules/companies/index.php'); ?>" class="nav-link" data-tooltip="Empresas">
                         <i data-feather="briefcase"></i>
                         <span>Empresas</span>
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Departamentos')">
+                    <a href="#" class="nav-link" onclick="showComingSoon('Gestión de Departamentos')" data-tooltip="Departamentos">
                         <i data-feather="layers"></i>
                         <span>Departamentos</span>
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Grupos de Seguridad')">
+                    <a href="#" class="nav-link" onclick="showComingSoon('Grupos de Seguridad')" data-tooltip="Grupos">
                         <i data-feather="shield"></i>
                         <span>Grupos</span>
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Configuración del Sistema')">
+                    <a href="#" class="nav-link" onclick="showComingSoon('Configuración del Sistema')" data-tooltip="Documentos">
                         <i data-feather="file-text"></i>
                         <span>Documentos</span>
                     </a>
@@ -145,5 +145,29 @@ function isActive($page, $module = null)
 <script>
     function showComingSoon(feature) {
         alert(feature + ' - Próximamente disponible');
+    }
+    
+    // Función para inicializar iconos de Feather
+    function initializeFeatherIcons() {
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+            console.log('✅ Iconos de Feather inicializados en sidebar');
+        } else {
+            console.warn('⚠️ Feather Icons no está disponible');
+            // Reintentar después de un momento
+            setTimeout(initializeFeatherIcons, 100);
+        }
+    }
+    
+    // Inicializar cuando el DOM esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeFeatherIcons();
+    });
+    
+    // También inicializar inmediatamente si el script se carga después
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeFeatherIcons);
+    } else {
+        initializeFeatherIcons();
     }
 </script>

@@ -1,8 +1,8 @@
 <?php
 /*
- * modules/users/index.php
- * Módulo de Gestión de Usuarios - DMS2
- * Versión corregida con conexión de base de datos arreglada
+ * modules/companies/index.php
+ * Módulo de Gestión de Empresas - DMS2
+ * Estructura basada en el módulo de usuarios exitoso
  */
 
 require_once '../../config/session.php';
@@ -21,7 +21,7 @@ try {
         throw new Exception("No se pudo establecer conexión con la base de datos");
     }
 } catch (Exception $e) {
-    error_log("Error de conexión a base de datos en users/index.php: " . $e->getMessage());
+    error_log("Error de conexión a base de datos en companies/index.php: " . $e->getMessage());
     die("Error de conexión a la base de datos. Por favor, contacte al administrador.");
 }
 
@@ -33,34 +33,22 @@ $offset = ($currentPage - 1) * $itemsPerPage;
 // Filtros
 $filters = [
     'search' => $_GET['search'] ?? '',
-    'role' => $_GET['role'] ?? '',
-    'status' => $_GET['status'] ?? '',
-    'company_id' => $_GET['company_id'] ?? ''
+    'status' => $_GET['status'] ?? ''
 ];
 
 // Construir consulta base
-$whereConditions = ["u.status != 'deleted'"];
+$whereConditions = ["c.status != 'deleted'"];
 $params = [];
 
 if (!empty($filters['search'])) {
-    $whereConditions[] = "(u.first_name LIKE ? OR u.last_name LIKE ? OR u.username LIKE ? OR u.email LIKE ?)";
+    $whereConditions[] = "(c.name LIKE ? OR c.description LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)";
     $searchTerm = '%' . $filters['search'] . '%';
     $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm, $searchTerm]);
 }
 
-if (!empty($filters['role'])) {
-    $whereConditions[] = "u.role = ?";
-    $params[] = $filters['role'];
-}
-
 if (!empty($filters['status'])) {
-    $whereConditions[] = "u.status = ?";
+    $whereConditions[] = "c.status = ?";
     $params[] = $filters['status'];
-}
-
-if (!empty($filters['company_id'])) {
-    $whereConditions[] = "u.company_id = ?";
-    $params[] = $filters['company_id'];
 }
 
 $whereClause = implode(' AND ', $whereConditions);
@@ -69,69 +57,50 @@ $whereClause = implode(' AND ', $whereConditions);
 try {
     $statsQuery = "SELECT 
                     COUNT(*) as total,
-                    SUM(CASE WHEN u.status = 'active' THEN 1 ELSE 0 END) as active,
-                    SUM(CASE WHEN u.status = 'inactive' THEN 1 ELSE 0 END) as inactive,
-                    SUM(CASE WHEN u.role = 'admin' THEN 1 ELSE 0 END) as admin_count,
-                    SUM(CASE WHEN u.role = 'manager' THEN 1 ELSE 0 END) as manager_count,
-                    SUM(CASE WHEN u.role = 'user' THEN 1 ELSE 0 END) as user_count
-                   FROM users u 
+                    SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN c.status = 'inactive' THEN 1 ELSE 0 END) as inactive
+                   FROM companies c 
                    WHERE " . $whereClause;
     
     $stmt = $pdo->prepare($statsQuery);
     $stmt->execute($params);
     $stats = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    $stats['by_role'] = [
-        'admin' => $stats['admin_count'],
-        'manager' => $stats['manager_count'],
-        'user' => $stats['user_count']
-    ];
 } catch (Exception $e) {
-    error_log("Error obteniendo estadísticas de usuarios: " . $e->getMessage());
+    error_log("Error obteniendo estadísticas de empresas: " . $e->getMessage());
     $stats = [
         'total' => 0,
         'active' => 0,
-        'inactive' => 0,
-        'by_role' => ['admin' => 0, 'manager' => 0, 'user' => 0]
+        'inactive' => 0
     ];
 }
 
-// Obtener usuarios con paginación
+// Obtener empresas con paginación
 try {
-    $usersQuery = "SELECT u.*, c.name as company_name,
-                   COALESCE(u.download_enabled, 1) as download_enabled
-                   FROM users u
-                   LEFT JOIN companies c ON u.company_id = c.id
-                   WHERE " . $whereClause . "
-                   ORDER BY u.created_at DESC
-                   LIMIT ? OFFSET ?";
+    $companiesQuery = "SELECT c.*,
+                       (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.status != 'deleted') as user_count,
+                       (SELECT COUNT(*) FROM documents d JOIN users u ON d.user_id = u.id WHERE u.company_id = c.id) as document_count
+                       FROM companies c
+                       WHERE " . $whereClause . "
+                       ORDER BY c.created_at DESC
+                       LIMIT ? OFFSET ?";
     
-    $stmt = $pdo->prepare($usersQuery);
+    $stmt = $pdo->prepare($companiesQuery);
     $stmt->execute(array_merge($params, [$itemsPerPage, $offset]));
-    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     // Contar total de páginas
-    $countQuery = "SELECT COUNT(*) FROM users u WHERE " . $whereClause;
+    $countQuery = "SELECT COUNT(*) FROM companies c WHERE " . $whereClause;
     $stmt = $pdo->prepare($countQuery);
     $stmt->execute($params);
-    $totalUsers = $stmt->fetchColumn();
-    $totalPages = ceil($totalUsers / $itemsPerPage);
+    $totalCompanies = $stmt->fetchColumn();
+    $totalPages = ceil($totalCompanies / $itemsPerPage);
     
-} catch (Exception $e) {
-    error_log("Error obteniendo usuarios: " . $e->getMessage());
-    $users = [];
-    $totalUsers = 0;
-    $totalPages = 1;
-}
-
-// Obtener empresas para filtros y selects
-try {
-    $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
-    $stmt = $pdo->query($companiesQuery);
-    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
     error_log("Error obteniendo empresas: " . $e->getMessage());
     $companies = [];
+    $totalCompanies = 0;
+    $totalPages = 1;
 }
 
 // Función para obtener clase de badge de estado
@@ -139,18 +108,7 @@ function getStatusBadgeClass($status) {
     switch ($status) {
         case 'active': return 'status-active';
         case 'inactive': return 'status-inactive';
-        case 'suspended': return 'status-suspended';
         default: return 'status-inactive';
-    }
-}
-
-// Función para obtener clase de badge de rol
-function getRoleBadgeClass($role) {
-    switch ($role) {
-        case 'admin': return 'role-admin';
-        case 'manager': return 'role-manager';
-        case 'user': return 'role-user';
-        default: return 'role-user';
     }
 }
 
@@ -166,24 +124,24 @@ function formatDate($dateString) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Usuarios - DMS2</title>
+    <title>Gestión de Empresas - DMS2</title>
     
     <!-- CSS Principal -->
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/sidebar.css">
     
-    <!-- CSS del Módulo de Usuarios - ARCHIVO ÚNICO -->
-    <link rel="stylesheet" href="../../assets/css/users.css">
+    <!-- CSS del Módulo de Empresas -->
+    <link rel="stylesheet" href="../../assets/css/companies.css">
     
     <!-- Feather Icons -->
     <script src="https://unpkg.com/feather-icons"></script>
     
     <style>
-        /* Estilos adicionales específicos para esta página */
+        /* Estilos adicionales específicos para empresas */
         
-        /* Botón crear usuario más destacado */
-        .btn-create-user {
+        /* Botón crear empresa más destacado */
+        .btn-create-company {
             background: linear-gradient(135deg, var(--dms-primary) 0%, var(--dms-primary-hover) 100%);
             border: none;
             box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
@@ -195,13 +153,13 @@ function formatDate($dateString) {
             transition: all 0.3s ease;
         }
         
-        .btn-create-user:hover {
+        .btn-create-company:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
             background: linear-gradient(135deg, var(--dms-primary-hover) 0%, #4a2c0a 100%);
         }
         
-        .btn-create-user span {
+        .btn-create-company span {
             margin-left: 2px;
         }
         
@@ -319,16 +277,18 @@ function formatDate($dateString) {
             transform: translateY(-1px);
             box-shadow: 0 3px 8px rgba(16, 185, 129, 0.3);
         }
-        .user-info {
+        
+        /* Información de empresa */
+        .company-info {
             display: flex;
             align-items: center;
             gap: 12px;
         }
         
-        .user-avatar {
+        .company-avatar {
             width: 40px;
             height: 40px;
-            border-radius: 50%;
+            border-radius: 8px;
             background: var(--dms-primary);
             color: white;
             display: flex;
@@ -339,12 +299,12 @@ function formatDate($dateString) {
             flex-shrink: 0;
         }
         
-        .user-details {
+        .company-details {
             min-width: 0;
             flex: 1;
         }
         
-        .user-name {
+        .company-name {
             font-weight: 600;
             color: var(--dms-text);
             margin: 0;
@@ -354,7 +314,7 @@ function formatDate($dateString) {
             text-overflow: ellipsis;
         }
         
-        .user-email {
+        .company-description {
             color: var(--dms-text-muted);
             font-size: 13px;
             margin: 2px 0 0 0;
@@ -363,7 +323,7 @@ function formatDate($dateString) {
             text-overflow: ellipsis;
         }
         
-        .user-details-grid {
+        .company-details-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 16px;
@@ -388,23 +348,8 @@ function formatDate($dateString) {
             font-size: 14px;
         }
         
-        .loading-spinner {
-            width: 32px;
-            height: 32px;
-            border: 3px solid var(--dms-border);
-            border-top: 3px solid var(--dms-primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
         @media (max-width: 768px) {
-            .user-details-grid {
+            .company-details-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -420,7 +365,7 @@ function formatDate($dateString) {
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Gestión de Usuarios</h1>
+                <h1>Gestión de Empresas</h1>
             </div>
 
             <div class="header-right">
@@ -439,15 +384,15 @@ function formatDate($dateString) {
             </div>
         </header>
 
-        <!-- Contenido del módulo de usuarios -->
-        <div class="users-container">
+        <!-- Contenido del módulo de empresas -->
+        <div class="companies-container">
             <!-- Título y botón principal -->
             <div class="page-header">
                 <div class="page-title-section">
 
-                    <button class="btn btn-primary btn-create-user" onclick="openCreateUserModal()">
-                        <i data-feather="user-plus"></i>
-                        <span>Crear Usuario</span>
+                    <button class="btn btn-primary btn-create-company" onclick="openCreateCompanyModal()">
+                        <i data-feather="briefcase"></i>
+                        <span>Crear Empresa</span>
                     </button>
                 </div>
             </div>
@@ -458,23 +403,13 @@ function formatDate($dateString) {
                 <form class="filters-form" method="GET">
                     <div class="filters-row">
                         <div class="filter-group">
-                            <label for="search">Buscar Usuario</label>
+                            <label for="search">Buscar Empresa</label>
                             <input type="text" 
                                    id="search" 
                                    name="search" 
                                    class="form-input"
-                                   placeholder="Nombre, usuario o email..." 
+                                   placeholder="Nombre, descripción, email..." 
                                    value="<?php echo htmlspecialchars($filters['search']); ?>">
-                        </div>
-                        
-                        <div class="filter-group">
-                            <label for="role">Rol</label>
-                            <select id="role" name="role" class="form-input">
-                                <option value="">Todos los roles</option>
-                                <option value="admin" <?php echo $filters['role'] === 'admin' ? 'selected' : ''; ?>>Administrador</option>
-                                <option value="user" <?php echo $filters['role'] === 'user' ? 'selected' : ''; ?>>Usuario</option>
-                                <option value="viewer" <?php echo $filters['role'] === 'viewer' ? 'selected' : ''; ?>>Visualizador</option>
-                            </select>
                         </div>
                         
                         <div class="filter-group">
@@ -483,111 +418,101 @@ function formatDate($dateString) {
                                 <option value="">Todos los estados</option>
                                 <option value="active" <?php echo $filters['status'] === 'active' ? 'selected' : ''; ?>>Activo</option>
                                 <option value="inactive" <?php echo $filters['status'] === 'inactive' ? 'selected' : ''; ?>>Inactivo</option>
-                                <option value="suspended" <?php echo $filters['status'] === 'suspended' ? 'selected' : ''; ?>>Suspendido</option>
                             </select>
                         </div>
                         
-                        <div class="filter-group">
-                            <label for="company_id">Empresa</label>
-                            <select id="company_id" name="company_id" class="form-input">
-                                <option value="">Todas las empresas</option>
-                                <?php foreach ($companies as $company): ?>
-                                    <option value="<?php echo $company['id']; ?>" 
-                                            <?php echo $filters['company_id'] == $company['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($company['name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                       
+                      
                     </div>
                 </form>
             </div>
 
-            <!-- Tabla de usuarios -->
+            <!-- Tabla de empresas -->
             <div class="table-section">
                 <div class="table-header-info">
                     <div>
-                        <h3>Lista de Usuarios</h3>
-                        <p>Mostrando <?php echo count($users); ?> de <?php echo $totalUsers; ?> usuarios</p>
+                        <h3>Lista de Empresas</h3>
+                        <p>Mostrando <?php echo count($companies); ?> de <?php echo $totalCompanies; ?> empresas</p>
                     </div>
                 </div>
                 
                 <div class="table-wrapper">
-                    <?php if (empty($users)): ?>
+                    <?php if (empty($companies)): ?>
                         <div class="table-empty">
-                            <i data-feather="users"></i>
-                            <h4>No se encontraron usuarios</h4>
-                            <p>No hay usuarios que coincidan con los filtros aplicados.</p>
+                            <i data-feather="briefcase"></i>
+                            <h4>No se encontraron empresas</h4>
+                            <p>No hay empresas que coincidan con los filtros aplicados.</p>
                         </div>
                     <?php else: ?>
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>Usuario</th>
-                                    <th>Rol</th>
-                                    <th>Estado</th>
                                     <th>Empresa</th>
+                                    <th>Contacto</th>
+                                    <th>Estado</th>
+                                    <th>Usuarios</th>
+                                    <th>Documentos</th>
                                     <th>Fecha Registro</th>
-                                    <th>Descarga</th>
                                     <th class="actions-cell">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($users as $user): ?>
+                                <?php foreach ($companies as $company): ?>
                                     <tr>
                                         <td>
-                                            <div class="user-info">
-                                                <div class="user-avatar">
-                                                    <?php echo strtoupper(substr($user['first_name'], 0, 1) . substr($user['last_name'], 0, 1)); ?>
+                                            <div class="company-info">
+                                                <div class="company-avatar">
+                                                    <?php echo strtoupper(substr($company['name'], 0, 2)); ?>
                                                 </div>
-                                                <div class="user-details">
-                                                    <div class="user-name">
-                                                        <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
+                                                <div class="company-details">
+                                                    <div class="company-name">
+                                                        <?php echo htmlspecialchars($company['name']); ?>
                                                     </div>
-                                                    <div class="user-email">
-                                                        <?php echo htmlspecialchars($user['email']); ?>
+                                                    <div class="company-description">
+                                                        <?php echo htmlspecialchars($company['description'] ?? 'Sin descripción'); ?>
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
                                         <td>
-                                            <span class="role-badge <?php echo getRoleBadgeClass($user['role']); ?>">
-                                                <?php echo htmlspecialchars($user['role']); ?>
+                                            <div>
+                                                <?php if (!empty($company['email'])): ?>
+                                                    <div style="font-size: 13px;"><?php echo htmlspecialchars($company['email']); ?></div>
+                                                <?php endif; ?>
+                                                <?php if (!empty($company['phone'])): ?>
+                                                    <div style="font-size: 12px; color: #6b7280;"><?php echo htmlspecialchars($company['phone']); ?></div>
+                                                <?php endif; ?>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="status-badge <?php echo getStatusBadgeClass($company['status']); ?>">
+                                                <?php echo htmlspecialchars($company['status']); ?>
                                             </span>
                                         </td>
                                         <td>
-                                            <span class="status-badge <?php echo getStatusBadgeClass($user['status']); ?>">
-                                                <?php echo htmlspecialchars($user['status']); ?>
-                                            </span>
+                                            <span class="badge-count"><?php echo number_format($company['user_count']); ?></span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?></td>
-                                        <td><?php echo formatDate($user['created_at']); ?></td>
                                         <td>
-                                            <?php if ($user['download_enabled']): ?>
-                                                <span class="status-badge status-active">Sí</span>
-                                            <?php else: ?>
-                                                <span class="status-badge status-inactive">No</span>
-                                            <?php endif; ?>
+                                            <span class="badge-count"><?php echo number_format($company['document_count']); ?></span>
                                         </td>
+                                        <td><?php echo formatDate($company['created_at']); ?></td>
                                         <td class="actions-cell">
                                             <div class="action-buttons">
                                                 <button class="btn-action btn-view" 
-                                                        onclick="showUserDetails(<?php echo $user['id']; ?>)"
+                                                        onclick="showCompanyDetails(<?php echo $company['id']; ?>)"
                                                         title="Ver detalles">
                                                     <i data-feather="eye"></i>
                                                 </button>
                                                 
                                                 <button class="btn-action btn-edit" 
-                                                        onclick="editUser(<?php echo $user['id']; ?>)"
-                                                        title="Editar usuario">
+                                                        onclick="editCompany(<?php echo $company['id']; ?>)"
+                                                        title="Editar empresa">
                                                     <i data-feather="edit-2"></i>
                                                 </button>
                                                 
                                                 <button class="btn-action btn-toggle" 
-                                                        onclick="toggleUserStatus(<?php echo $user['id']; ?>, '<?php echo $user['status']; ?>')"
-                                                        title="<?php echo $user['status'] === 'active' ? 'Desactivar' : 'Activar'; ?> usuario">
-                                                    <i data-feather="<?php echo $user['status'] === 'active' ? 'user-x' : 'user-check'; ?>"></i>
+                                                        onclick="toggleCompanyStatus(<?php echo $company['id']; ?>, '<?php echo $company['status']; ?>')"
+                                                        title="<?php echo $company['status'] === 'active' ? 'Desactivar' : 'Activar'; ?> empresa">
+                                                    <i data-feather="<?php echo $company['status'] === 'active' ? 'pause-circle' : 'play-circle'; ?>"></i>
                                                 </button>
                                             </div>
                                         </td>
@@ -648,13 +573,11 @@ function formatDate($dateString) {
     </div>
 
     <!-- JavaScript -->
-    <script src="../../assets/js/main.js"></script>
-    <script src="../../assets/js/users.js"></script>
+    <script src="../../assets/js/companies.js"></script>
     
     <script>
         // Datos globales para JavaScript
-        window.userData = {
-            companies: <?php echo json_encode($companies); ?>,
+        window.companyData = {
             currentUser: <?php echo json_encode($currentUser); ?>
         };
         
@@ -701,20 +624,14 @@ function formatDate($dateString) {
             }
         }
         
-        console.log('✅ Módulo de usuarios cargado correctamente');
+        console.log('✅ Módulo de empresas cargado correctamente');
         
         // Debug para verificar que las funciones están disponibles
         console.log('Funciones disponibles:');
-        console.log('- openCreateUserModal:', typeof window.openCreateUserModal);
-        console.log('- showUserDetails:', typeof window.showUserDetails);
-        console.log('- editUser:', typeof window.editUser);
-        console.log('- toggleUserStatus:', typeof window.toggleUserStatus);
-        console.log('- deleteUser:', typeof window.deleteUser);
-        
-        // Verificar que todos los datos están disponibles
-        console.log('Datos disponibles:');
-        console.log('- Empresas:', window.userData.companies.length);
-        console.log('- Usuario actual:', window.userData.currentUser.username);
+        console.log('- openCreateCompanyModal:', typeof window.openCreateCompanyModal);
+        console.log('- showCompanyDetails:', typeof window.showCompanyDetails);
+        console.log('- editCompany:', typeof window.editCompany);
+        console.log('- toggleCompanyStatus:', typeof window.toggleCompanyStatus);
     </script>
 </body>
 </html>
