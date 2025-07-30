@@ -1,184 +1,118 @@
-/* ============================================================================
-   MAIN.JS - JAVASCRIPT PRINCIPAL BÁSICO
-   Funciones comunes para todo el sistema DMS2
-   ============================================================================ */
+// assets/js/main.js
+// Funciones principales para DMS2 (VERSIÓN LIMPIA)
 
-// Variables globales
-window.DMS = window.DMS || {};
-
-// Función para inicializar iconos de Feather
-function initializeFeatherIcons() {
-    if (typeof feather !== 'undefined') {
-        feather.replace();
-        console.log('✅ Iconos de Feather inicializados');
-        return true;
-    } else {
-        console.warn('⚠️ Feather Icons no está disponible');
-        return false;
-    }
-}
-
-// Función para toggle del sidebar
-function toggleSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const mainContent = document.querySelector('.main-content');
-    const overlay = document.querySelector('.sidebar-overlay');
-    
-    if (sidebar) {
-        sidebar.classList.toggle('collapsed');
-        
-        if (mainContent) {
-            mainContent.classList.toggle('sidebar-collapsed');
-        }
-        
-        if (overlay) {
-            overlay.classList.toggle('active');
-        }
-    }
-}
-
-// Función para mostrar "próximamente"
-function showComingSoon(feature) {
-    alert(`${feature} estará disponible próximamente.`);
-}
-
-// Función para formatear fechas
-function formatDate(dateString, format = 'dd/mm/yyyy') {
-    if (!dateString) return 'N/A';
-    
-    const date = new Date(dateString);
-    
-    if (format === 'relative') {
-        const now = new Date();
-        const diff = now - date;
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        
-        if (days === 0) return 'Hoy';
-        if (days === 1) return 'Ayer';
-        if (days < 7) return `Hace ${days} días`;
-        if (days < 30) return `Hace ${Math.floor(days / 7)} semanas`;
-        if (days < 365) return `Hace ${Math.floor(days / 30)} meses`;
-        return `Hace ${Math.floor(days / 365)} años`;
-    }
-    
-    return date.toLocaleDateString('es-ES', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-    });
-}
-
-// Función para actualizar el tiempo actual
-function updateCurrentTime() {
-    const timeElements = document.querySelectorAll('.current-time, #currentTime');
+// Función para actualizar el tiempo
+function updateTime() {
     const now = new Date();
-    const timeString = now.toLocaleString('es-ES', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
+    const timeString = now.toLocaleTimeString('es-ES', {
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        second: '2-digit'
     });
     
-    timeElements.forEach(element => {
-        element.textContent = timeString;
-    });
+    const timeElement = document.getElementById('currentTime');
+    if (timeElement) {
+        timeElement.textContent = timeString;
+    }
 }
 
-// Función para mostrar notificaciones
-function showNotification(message, type = 'info', duration = 3000) {
+// Función para toggle del sidebar en móvil
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const body = document.body;
+
+    if (window.innerWidth <= 768) {
+        sidebar.classList.toggle('show');
+        if (overlay) overlay.classList.toggle('show');
+        body.classList.toggle('sidebar-open');
+    }
+}
+
+// Función para cerrar sidebar
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const body = document.body;
+
+    sidebar.classList.remove('show');
+    if (overlay) overlay.classList.remove('show');
+    body.classList.remove('sidebar-open');
+}
+
+// Función para mostrar "Coming Soon"
+function showComingSoon(feature) {
+    alert(`${feature} - Próximamente disponible`);
+}
+
+// Función básica de notificaciones
+function showNotification(message, type = 'info', duration = 5000) {
     const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
+    
+    let backgroundColor = '#3b82f6'; // azul por defecto
+    if (type === 'success') backgroundColor = '#10b981';
+    if (type === 'error') backgroundColor = '#ef4444';
+    if (type === 'warning') backgroundColor = '#f59e0b';
+    
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${backgroundColor};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        z-index: 9999;
+        font-weight: 600;
+        max-width: 300px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+    `;
     notification.textContent = message;
     
     document.body.appendChild(notification);
     
-    // Mostrar notificación
     setTimeout(() => {
-        notification.classList.add('show');
-    }, 100);
-    
-    // Ocultar notificación
-    setTimeout(() => {
-        notification.classList.remove('show');
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 300);
+        if (notification.parentElement) {
+            notification.remove();
+        }
     }, duration);
 }
 
-// Función para validar formularios
-function validateForm(form) {
-    const requiredFields = form.querySelectorAll('[required]');
-    let isValid = true;
-    
-    requiredFields.forEach(field => {
-        if (!field.value.trim()) {
-            field.classList.add('error');
-            isValid = false;
-        } else {
-            field.classList.remove('error');
-        }
-    });
-    
-    return isValid;
-}
+// Manejo responsive del sidebar
+function handleSidebarResize() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const body = document.body;
 
-// Función para hacer peticiones AJAX
-async function makeRequest(url, options = {}) {
-    const defaultOptions = {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    };
-    
-    const config = { ...defaultOptions, ...options };
-    
-    try {
-        const response = await fetch(url, config);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        return data;
-    } catch (error) {
-        console.error('Error in request:', error);
-        throw error;
+    if (window.innerWidth > 768) {
+        sidebar.classList.remove('show');
+        if (overlay) overlay.classList.remove('show');
+        body.classList.remove('sidebar-open');
     }
 }
 
-// Inicialización cuando el DOM esté listo
+// Inicialización básica
 document.addEventListener('DOMContentLoaded', function() {
-    // Inicializar iconos
-    initializeFeatherIcons();
+    // Inicializar iconos si están disponibles
+    if (typeof feather !== 'undefined') {
+        feather.replace();
+    }
     
-    // Actualizar tiempo cada minuto
-    updateCurrentTime();
-    setInterval(updateCurrentTime, 60000);
+    // Configurar responsive
+    window.addEventListener('resize', handleSidebarResize);
     
-    // Configurar formularios
-    const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-        form.addEventListener('submit', function(e) {
-            if (!validateForm(this)) {
-                e.preventDefault();
-                showNotification('Por favor, complete todos los campos requeridos', 'error');
-            }
-        });
-    });
-    
-    console.log('✅ Main.js inicializado correctamente');
+    // Inicializar tiempo si hay elemento
+    if (document.getElementById('currentTime')) {
+        updateTime();
+        setInterval(updateTime, 1000);
+    }
 });
 
-// Exportar funciones globales
+// Exportar funciones globalmente
+window.updateTime = updateTime;
 window.toggleSidebar = toggleSidebar;
+window.closeSidebar = closeSidebar;
 window.showComingSoon = showComingSoon;
-window.formatDate = formatDate;
 window.showNotification = showNotification;
-window.makeRequest = makeRequest;
-window.initializeFeatherIcons = initializeFeatherIcons;
