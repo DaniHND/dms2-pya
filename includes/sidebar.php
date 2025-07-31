@@ -130,9 +130,9 @@ function isActive($page, $module = null)
                     </a>
                 </li>
 
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Grupos de Seguridad')">
-                        <i data-feather="shield"></i>
+                <li class="nav-item <?php echo isActive('index.php', 'groups') ? 'active' : ''; ?>">
+                    <a href="<?php echo getRelativePath('modules/groups/index.php'); ?>" class="nav-link">
+                        <i data-feather="users"></i>
                         <span>Grupos</span>
                     </a>
                 </li>
