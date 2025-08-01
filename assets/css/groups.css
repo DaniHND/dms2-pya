@@ -411,162 +411,52 @@
 }
 
 /* ============================================================================
-   BOTÓN CREAR - ESTILO EXACTO DEL SISTEMA
-   ============================================================================ */
-
-.create-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 24px;
-    background: #8B4513 !important; /* Marrón exacto del sistema */
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    font-size: 14px !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    text-decoration: none !important;
-}
-
-.create-btn:hover {
-    background: #654321 !important; /* Marrón más oscuro al hover */
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3) !important;
-}
-
-.create-btn i,
-.create-btn svg {
-    width: 16px !important;
-    height: 16px !important;
-    color: white !important;
-}
-
-/* ============================================================================
-   ACCIONES DE TABLA - ESTILO EXACTO DEL SISTEMA (COMO TIPOS DE DOCUMENTOS)
+   ACCIONES DE TABLA - COLORES CONSISTENTES CON EL SISTEMA
    ============================================================================ */
 
 .table-actions-cell {
     display: flex;
-    gap: 6px; /* Espaciado igual al sistema */
+    gap: 4px;
     justify-content: center;
 }
 
-/* USAR ESTILOS EXACTOS DE TU SISTEMA */
 .btn-action {
-    width: 32px !important; /* Tamaño exacto del sistema */
-    height: 32px !important;
-    padding: 0 !important;
-    border: none !important;
-    border-radius: 6px !important; /* Bordes más cuadrados como el sistema */
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid #d1d5db;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: #6b7280;
 }
 
-/* COLORES EXACTOS DE TU SISTEMA */
-
-/* Botón Ver (azul como en tu sistema) */
-.btn-action.btn-view {
-    background: rgba(59, 130, 246, 0.1) !important; /* Azul claro */
-    color: #3b82f6 !important; /* Azul */
+.btn-action:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-color: #8B4513;
+    color: #8B4513;
 }
 
-.btn-action.btn-view:hover {
-    background: #3b82f6 !important;
-    color: white !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
+.btn-action i {
+    width: 14px;
+    height: 14px;
 }
 
-/* Botón Editar (amarillo como en tu sistema) */
-.btn-action.btn-edit {
-    background: rgba(245, 158, 11, 0.1) !important; /* Amarillo claro */
-    color: #f59e0b !important; /* Amarillo */
+/* Remover estilos específicos de colores - usar color uniforme del sistema */
+.btn-view:hover,
+.btn-users:hover,
+.btn-edit:hover {
+    border-color: #8B4513;
+    color: #8B4513;
 }
 
-.btn-action.btn-edit:hover {
-    background: #f59e0b !important;
-    color: white !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3) !important;
-}
-
-/* Botón Gestionar Usuarios (verde como en tu sistema) */
-.btn-action.btn-users {
-    background: rgba(16, 185, 129, 0.1) !important; /* Verde claro */
-    color: #10b981 !important; /* Verde */
-}
-
-.btn-action.btn-users:hover {
-    background: #10b981 !important;
-    color: white !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3) !important;
-}
-
-/* Botón Toggle/Eliminar (rojo como en tu sistema) */
-.btn-action.btn-toggle {
-    background: rgba(239, 68, 68, 0.1) !important; /* Rojo claro */
-    color: #ef4444 !important; /* Rojo */
-}
-
-.btn-action.btn-toggle:hover {
-    background: #ef4444 !important;
-    color: white !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3) !important;
-}
-
-/* Iconos dentro de los botones */
-.btn-action i,
-.btn-action svg {
-    width: 14px !important;
-    height: 14px !important;
-    color: inherit !important;
-}
-
-/* Forzar estilos específicos para sobrescribir cualquier CSS existente */
-.data-table .table-actions-cell .btn-action,
-.table-container .btn-action,
-tr .btn-action {
-    width: 32px !important;
-    height: 32px !important;
-    border-radius: 6px !important;
-    transition: all 0.2s ease !important;
-}
-
-/* Sobrescribir hover states específicos */
-.data-table .table-actions-cell .btn-action.btn-view:hover,
-.table-container .btn-action.btn-view:hover,
-tr .btn-action.btn-view:hover {
-    background: #3b82f6 !important;
-    color: white !important;
-}
-
-.data-table .table-actions-cell .btn-action.btn-edit:hover,
-.table-container .btn-action.btn-edit:hover,
-tr .btn-action.btn-edit:hover {
-    background: #f59e0b !important;
-    color: white !important;
-}
-
-.data-table .table-actions-cell .btn-action.btn-users:hover,
-.table-container .btn-action.btn-users:hover,
-tr .btn-action.btn-users:hover {
-    background: #10b981 !important;
-    color: white !important;
-}
-
-.data-table .table-actions-cell .btn-action.btn-toggle:hover,
-.table-container .btn-action.btn-toggle:hover,
-tr .btn-action.btn-toggle:hover {
-    background: #ef4444 !important;
-    color: white !important;
+.btn-toggle:hover {
+    border-color: #ef4444;
+    color: #ef4444;
 }
 
 /* ============================================================================

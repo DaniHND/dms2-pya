@@ -376,6 +376,5 @@ $currentUser = SessionManager::getCurrentUser();
             detectConflictingRules();
         });
     </script>
-    
 </body>
 </html>

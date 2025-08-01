@@ -202,7 +202,6 @@ logActivity($currentUser['id'], 'view_groups', 'groups', null, 'Usuario accedió
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
-
 <body class="dashboard-layout">
     <!-- Sidebar -->
     <?php include '../../includes/sidebar.php'; ?>
@@ -525,7 +524,5 @@ logActivity($currentUser['id'], 'view_groups', 'groups', null, 'Usuario accedió
             checkboxes.forEach(cb => cb.checked = this.checked);
         });
     </script>
-    
 </body>
-
 </html>
