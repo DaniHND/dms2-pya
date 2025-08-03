@@ -1,26 +1,74 @@
 <?php
 /*
  * modules/groups/actions/create_group.php
- * Acción para crear nuevos grupos con permisos y restricciones
+ * Acción para crear un nuevo grupo - VERSIÓN ULTRA LIMPIA
  */
 
-require_once '../../../config/session.php';
-require_once '../../../config/database.php';
+// Evitar cualquier output
+error_reporting(0);
+ini_set('display_errors', 0);
 
-// Configurar respuesta JSON
-header('Content-Type: application/json');
+// Limpiar cualquier buffer de salida
+while (ob_get_level()) {
+    ob_end_clean();
+}
+
+// Iniciar buffer limpio
+ob_start();
+
+// Usar rutas absolutas
+$projectRoot = dirname(dirname(dirname(__DIR__)));
+require_once $projectRoot . '/config/database.php';
+require_once $projectRoot . '/config/session.php';
+
+// Limpiar cualquier output de los includes
+ob_clean();
+
+// Configurar headers ANTES de cualquier output
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-cache, must-revalidate');
+header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+
+// Verificar autenticación y permisos
+if (!SessionManager::isLoggedIn()) {
+    echo json_encode(['success' => false, 'message' => 'No autorizado']);
+    exit;
+}
+
+$currentUser = SessionManager::getCurrentUser();
+if ($currentUser['role'] !== 'admin') {
+    echo json_encode(['success' => false, 'message' => 'Permisos insuficientes']);
+    exit;
+}
+
+// Verificar método POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['success' => false, 'message' => 'Método no permitido']);
+    exit;
+}
 
 try {
-    // Verificar sesión y permisos
-    SessionManager::requireRole('admin');
-    $currentUser = SessionManager::getCurrentUser();
+    // Obtener datos del formulario
+    $groupName = trim($_POST['group_name'] ?? '');
+    $groupDescription = trim($_POST['group_description'] ?? '');
+    $groupStatus = $_POST['group_status'] ?? 'active';
     
-    // Verificar método POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Método no permitido');
+    // Validaciones
+    if (empty($groupName)) {
+        echo json_encode(['success' => false, 'message' => 'El nombre del grupo es obligatorio']);
+        exit;
     }
     
-    // Obtener conexión a la base de datos
+    if (strlen($groupName) > 150) {
+        echo json_encode(['success' => false, 'message' => 'El nombre del grupo no puede exceder 150 caracteres']);
+        exit;
+    }
+    
+    if (!in_array($groupStatus, ['active', 'inactive'])) {
+        $groupStatus = 'active';
+    }
+    
+    // Conectar a la base de datos
     $database = new Database();
     $pdo = $database->getConnection();
     
@@ -28,208 +76,392 @@ try {
         throw new Exception('Error de conexión a la base de datos');
     }
     
-    // Validar datos recibidos
-    $name = trim($_POST['name'] ?? '');
-    $description = trim($_POST['description'] ?? '');
-    $status = $_POST['status'] ?? 'active';
-    $downloadLimit = !empty($_POST['download_limit_daily']) ? (int)$_POST['download_limit_daily'] : null;
-    $uploadLimit = !empty($_POST['upload_limit_daily']) ? (int)$_POST['upload_limit_daily'] : null;
+    // Verificar si ya existe un grupo con el mismo nombre
+    $checkQuery = "SELECT id FROM user_groups WHERE name = ?";
+    $checkStmt = $pdo->prepare($checkQuery);
+    $checkStmt->execute([$groupName]);
     
-    // Validar campos obligatorios
-    if (empty($name)) {
-        throw new Exception('El nombre del grupo es obligatorio');
+    if ($checkStmt->rowCount() > 0) {
+        echo json_encode(['success' => false, 'message' => 'Ya existe un grupo con este nombre']);
+        exit;
     }
     
-    if (strlen($name) > 150) {
-        throw new Exception('El nombre del grupo no puede exceder 150 caracteres');
-    }
-    
-    if (!in_array($status, ['active', 'inactive'])) {
-        throw new Exception('Estado inválido');
-    }
-    
-    // Verificar que el nombre no exista
-    $checkQuery = "SELECT id FROM user_groups WHERE name = ? AND id != ?";
-    $stmt = $pdo->prepare($checkQuery);
-    $stmt->execute([$name, 0]); // 0 porque es nuevo grupo
-    
-    if ($stmt->fetch()) {
-        throw new Exception('Ya existe un grupo con ese nombre');
-    }
-    
-    // Procesar permisos
-    $permissions = [];
-    if (!empty($_POST['permissions'])) {
-        $permissionsData = json_decode($_POST['permissions'], true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($permissionsData)) {
-            $permissions = $permissionsData;
-        }
-    }
-    
-    // Procesar restricciones
-    $restrictions = [];
-    if (!empty($_POST['restrictions'])) {
-        $restrictionsData = json_decode($_POST['restrictions'], true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($restrictionsData)) {
-            $restrictions = $restrictionsData;
-        }
-    }
-    
-    // Validar permisos (estructura básica)
-    $validModules = ['users', 'companies', 'departments', 'documents', 'groups', 'reports'];
-    $validActions = ['read', 'write', 'delete', 'download'];
-    
-    foreach ($permissions as $module => $actions) {
-        if (!in_array($module, $validModules)) {
-            throw new Exception("Módulo inválido: $module");
-        }
-        
-        foreach ($actions as $action => $allowed) {
-            if (!in_array($action, $validActions)) {
-                throw new Exception("Acción inválida: $action en módulo $module");
-            }
-            
-            if (!is_bool($allowed)) {
-                throw new Exception("Valor de permiso inválido para $action en $module");
-            }
-        }
-    }
-    
-    // Validar restricciones
-    if (isset($restrictions['companies'])) {
-        if (!in_array($restrictions['companies'], ['all', 'user_company']) && !is_array($restrictions['companies'])) {
-            throw new Exception('Restricción de empresas inválida');
-        }
-        
-        if (is_array($restrictions['companies'])) {
-            foreach ($restrictions['companies'] as $companyId) {
-                if (!is_int($companyId) || $companyId <= 0) {
-                    throw new Exception('ID de empresa inválido en restricciones');
-                }
-            }
-        }
-    }
-    
-    if (isset($restrictions['departments'])) {
-        if (!in_array($restrictions['departments'], ['all', 'user_department']) && !is_array($restrictions['departments'])) {
-            throw new Exception('Restricción de departamentos inválida');
-        }
-        
-        if (is_array($restrictions['departments'])) {
-            foreach ($restrictions['departments'] as $deptId) {
-                if (!is_int($deptId) || $deptId <= 0) {
-                    throw new Exception('ID de departamento inválido en restricciones');
-                }
-            }
-        }
-    }
-    
-    if (isset($restrictions['document_types'])) {
-        if ($restrictions['document_types'] !== 'all' && !is_array($restrictions['document_types'])) {
-            throw new Exception('Restricción de tipos de documentos inválida');
-        }
-        
-        if (is_array($restrictions['document_types'])) {
-            foreach ($restrictions['document_types'] as $typeId) {
-                if (!is_int($typeId) || $typeId <= 0) {
-                    throw new Exception('ID de tipo de documento inválido en restricciones');
-                }
-            }
-        }
-    }
-    
-    // Validar límites operacionales
-    if ($downloadLimit !== null && ($downloadLimit < 0 || $downloadLimit > 10000)) {
-        throw new Exception('Límite de descargas diarias inválido (debe estar entre 0 y 10000)');
-    }
-    
-    if ($uploadLimit !== null && ($uploadLimit < 0 || $uploadLimit > 1000)) {
-        throw new Exception('Límite de subidas diarias inválido (debe estar entre 0 y 1000)');
-    }
-    
-    // Iniciar transacción
-    $pdo->beginTransaction();
-    
-    try {
-        // Insertar el grupo
-        $insertQuery = "INSERT INTO user_groups (
+    // Insertar nuevo grupo
+    $insertQuery = "
+        INSERT INTO user_groups (
             name, 
             description, 
-            module_permissions, 
-            access_restrictions, 
-            download_limit_daily, 
-            upload_limit_daily, 
+            module_permissions,
+            access_restrictions,
             status, 
             is_system_group, 
-            created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        
-        $stmt = $pdo->prepare($insertQuery);
-        $success = $stmt->execute([
-            $name,
-            $description,
-            json_encode($permissions),
-            json_encode($restrictions),
-            $downloadLimit,
-            $uploadLimit,
-            $status,
-            false, // Grupos creados por admin no son de sistema
-            $currentUser['id']
-        ]);
-        
-        if (!$success) {
-            throw new Exception('Error al insertar el grupo en la base de datos');
-        }
-        
+            created_by, 
+            created_at,
+            updated_at
+        ) VALUES (
+            ?, 
+            ?, 
+            '{}',
+            '{}',
+            ?, 
+            0, 
+            ?, 
+            NOW(),
+            NOW()
+        )
+    ";
+    
+    $insertStmt = $pdo->prepare($insertQuery);
+    $result = $insertStmt->execute([
+        $groupName,
+        $groupDescription,
+        $groupStatus,
+        $currentUser['id']
+    ]);
+    
+    if ($result) {
         $groupId = $pdo->lastInsertId();
-        
-        // Registrar actividad
-        $logQuery = "INSERT INTO activity_logs (user_id, action, module, details, ip_address) 
-                     VALUES (?, ?, ?, ?, ?)";
-        $stmt = $pdo->prepare($logQuery);
-        $stmt->execute([
-            $currentUser['id'],
-            'group_created',
-            'groups',
-            "Grupo '$name' creado con ID $groupId",
-            $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-        ]);
-        
-        // Confirmar transacción
-        $pdo->commit();
-        
-        // Respuesta exitosa
         echo json_encode([
             'success' => true,
-            'message' => 'Grupo creado correctamente',
-            'group_id' => $groupId,
-            'data' => [
-                'id' => $groupId,
-                'name' => $name,
-                'description' => $description,
-                'status' => $status,
-                'permissions' => $permissions,
-                'restrictions' => $restrictions,
-                'download_limit_daily' => $downloadLimit,
-                'upload_limit_daily' => $uploadLimit
-            ]
+            'message' => 'Grupo creado exitosamente',
+            'group_id' => $groupId
         ]);
-        
-    } catch (Exception $e) {
-        // Revertir transacción en caso de error
-        $pdo->rollback();
-        throw $e;
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Error al crear el grupo']);
+    }
+    
+} catch (PDOException $e) {
+    if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
+        echo json_encode(['success' => false, 'message' => 'Ya existe un grupo con este nombre']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Error de base de datos']);
     }
     
 } catch (Exception $e) {
-    // Log del error
-    error_log("Error en create_group.php: " . $e->getMessage());
-    
-    // Respuesta de error
+    echo json_encode(['success' => false, 'message' => 'Error interno del servidor']);
+}
+
+// Limpiar y enviar
+ob_end_flush();
+exit;
+?>
+
+// Verificar autenticación y permisos
+if (!SessionManager::isLoggedIn()) {
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => 'GROUP_CREATE_ERROR'
+        'message' => 'No autorizado'
+    ]);
+    exit;
+}
+
+$currentUser = SessionManager::getCurrentUser();
+if ($currentUser['role'] !== 'admin') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Permisos insuficientes'
+    ]);
+    exit;
+}
+
+// Verificar método POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Método no permitido'
+    ]);
+    exit;
+}
+
+try {
+    // Obtener datos del formulario
+    $groupName = trim($_POST['group_name'] ?? '');
+    $groupDescription = trim($_POST['group_description'] ?? '');
+    $groupStatus = $_POST['group_status'] ?? 'active';
+    
+    // Validaciones
+    if (empty($groupName)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'El nombre del grupo es obligatorio'
+        ]);
+        exit;
+    }
+    
+    if (strlen($groupName) > 150) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'El nombre del grupo no puede exceder 150 caracteres'
+        ]);
+        exit;
+    }
+    
+    if (!in_array($groupStatus, ['active', 'inactive'])) {
+        $groupStatus = 'active';
+    }
+    
+    // Conectar a la base de datos
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    if (!$pdo) {
+        throw new Exception('Error de conexión a la base de datos');
+    }
+    
+    // Verificar si ya existe un grupo con el mismo nombre
+    $checkQuery = "SELECT id FROM user_groups WHERE name = :name";
+    $checkStmt = $pdo->prepare($checkQuery);
+    $checkStmt->bindParam(':name', $groupName);
+    $checkStmt->execute();
+    
+    if ($checkStmt->rowCount() > 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Ya existe un grupo con este nombre'
+        ]);
+        exit;
+    }
+    
+    // Insertar nuevo grupo
+    $insertQuery = "
+        INSERT INTO user_groups (
+            name, 
+            description, 
+            module_permissions,
+            access_restrictions,
+            status, 
+            is_system_group, 
+            created_by, 
+            created_at,
+            updated_at
+        ) VALUES (
+            :name, 
+            :description, 
+            '{}',
+            '{}',
+            :status, 
+            0, 
+            :created_by, 
+            NOW(),
+            NOW()
+        )
+    ";
+    
+    $insertStmt = $pdo->prepare($insertQuery);
+    $insertStmt->bindParam(':name', $groupName);
+    $insertStmt->bindParam(':description', $groupDescription);
+    $insertStmt->bindParam(':status', $groupStatus);
+    $insertStmt->bindParam(':created_by', $currentUser['id']);
+    
+    if ($insertStmt->execute()) {
+        $groupId = $pdo->lastInsertId();
+        
+        // Registrar actividad
+        if (function_exists('logActivity')) {
+            logActivity(
+                $currentUser['id'], 
+                'create_group', 
+                'groups', 
+                $groupId, 
+                "Usuario creó el grupo: {$groupName}"
+            );
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Grupo creado exitosamente',
+            'group_id' => $groupId
+        ]);
+        
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error al crear el grupo'
+        ]);
+    }
+    
+} catch (PDOException $e) {
+    error_log('Error PDO en create_group.php: ' . $e->getMessage());
+    
+    // Verificar si es error de duplicación
+    if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Ya existe un grupo con este nombre'
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error de base de datos al crear el grupo'
+        ]);
+    }
+    
+} catch (Exception $e) {
+    error_log('Error general en create_group.php: ' . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error interno del servidor'
+    ]);
+}
+?><?php
+/*
+ * modules/groups/actions/create_group.php
+ * Acción para crear un nuevo grupo
+ */
+
+require_once '../../../config/database.php';
+require_once '../../../config/session.php';
+require_once '../../../includes/functions.php';
+
+header('Content-Type: application/json');
+
+// Verificar autenticación y permisos
+if (!SessionManager::isLoggedIn()) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'No autorizado'
+    ]);
+    exit;
+}
+
+$currentUser = SessionManager::getCurrentUser();
+if ($currentUser['role'] !== 'admin') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Permisos insuficientes'
+    ]);
+    exit;
+}
+
+// Verificar método POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Método no permitido'
+    ]);
+    exit;
+}
+
+try {
+    // Obtener datos del formulario
+    $groupName = trim($_POST['group_name'] ?? '');
+    $groupDescription = trim($_POST['group_description'] ?? '');
+    $groupStatus = $_POST['group_status'] ?? 'active';
+    
+    // Validaciones
+    if (empty($groupName)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'El nombre del grupo es obligatorio'
+        ]);
+        exit;
+    }
+    
+    if (strlen($groupName) > 100) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'El nombre del grupo no puede exceder 100 caracteres'
+        ]);
+        exit;
+    }
+    
+    if (!in_array($groupStatus, ['active', 'inactive'])) {
+        $groupStatus = 'active';
+    }
+    
+    // Conectar a la base de datos
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    // Verificar si ya existe un grupo con el mismo nombre
+    $checkQuery = "SELECT id FROM user_groups WHERE name = :name AND deleted_at IS NULL";
+    $checkStmt = $pdo->prepare($checkQuery);
+    $checkStmt->bindParam(':name', $groupName);
+    $checkStmt->execute();
+    
+    if ($checkStmt->rowCount() > 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Ya existe un grupo con este nombre'
+        ]);
+        exit;
+    }
+    
+    // Insertar nuevo grupo
+    $insertQuery = "
+        INSERT INTO user_groups (
+            name, 
+            description, 
+            status, 
+            is_system_group, 
+            created_by, 
+            created_at,
+            updated_at
+        ) VALUES (
+            :name, 
+            :description, 
+            :status, 
+            0, 
+            :created_by, 
+            NOW(),
+            NOW()
+        )
+    ";
+    
+    $insertStmt = $pdo->prepare($insertQuery);
+    $insertStmt->bindParam(':name', $groupName);
+    $insertStmt->bindParam(':description', $groupDescription);
+    $insertStmt->bindParam(':status', $groupStatus);
+    $insertStmt->bindParam(':created_by', $currentUser['id']);
+    
+    if ($insertStmt->execute()) {
+        $groupId = $pdo->lastInsertId();
+        
+        // Registrar actividad
+        if (function_exists('logActivity')) {
+            logActivity(
+                $currentUser['id'], 
+                'create_group', 
+                'groups', 
+                $groupId, 
+                "Usuario creó el grupo: {$groupName}"
+            );
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Grupo creado exitosamente',
+            'group_id' => $groupId
+        ]);
+        
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error al crear el grupo'
+        ]);
+    }
+    
+} catch (PDOException $e) {
+    error_log('Error en create_group.php: ' . $e->getMessage());
+    
+    // Verificar si es error de duplicación
+    if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Ya existe un grupo con este nombre'
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error de base de datos al crear el grupo'
+        ]);
+    }
+    
+} catch (Exception $e) {
+    error_log('Error general en create_group.php: ' . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error interno del servidor'
     ]);
 }
 ?>

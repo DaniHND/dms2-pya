@@ -1,187 +1,164 @@
 <?php
 /*
  * modules/groups/actions/toggle_group_status.php
- * Cambiar estado de un grupo (activar/desactivar)
+ * Cambiar estado de un grupo (activo/inactivo) - VERSIÓN CON RUTAS ABSOLUTAS
  */
 
-require_once '../../../config/session.php';
-require_once '../../../config/database.php';
+// Usar rutas absolutas basadas en __DIR__
+$projectRoot = dirname(dirname(dirname(__DIR__)));
+require_once $projectRoot . '/config/database.php';
+require_once $projectRoot . '/config/session.php';
 
-// Configurar respuesta JSON
+// Cargar functions.php si existe
+if (file_exists($projectRoot . '/includes/functions.php')) {
+    require_once $projectRoot . '/includes/functions.php';
+}
+
 header('Content-Type: application/json');
 
+// Verificar autenticación y permisos
+if (!SessionManager::isLoggedIn()) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'No autorizado'
+    ]);
+    exit;
+}
+
+$currentUser = SessionManager::getCurrentUser();
+if ($currentUser['role'] !== 'admin') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Permisos insuficientes'
+    ]);
+    exit;
+}
+
+// Verificar método POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Método no permitido'
+    ]);
+    exit;
+}
+
 try {
-    // Verificar sesión y permisos
-    SessionManager::requireRole('admin');
-    $currentUser = SessionManager::getCurrentUser();
-    
-    // Verificar método POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Método no permitido');
-    }
-    
-    // Obtener parámetros
+    // Obtener datos del formulario
     $groupId = $_POST['group_id'] ?? null;
     $newStatus = $_POST['status'] ?? null;
     
-    // Validar parámetros
-    if (empty($groupId) || !is_numeric($groupId)) {
-        throw new Exception('ID de grupo inválido');
+    // Validaciones
+    if (!$groupId || !is_numeric($groupId)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'ID de grupo inválido'
+        ]);
+        exit;
     }
     
     if (!in_array($newStatus, ['active', 'inactive'])) {
-        throw new Exception('Estado inválido');
+        echo json_encode([
+            'success' => false,
+            'message' => 'Estado inválido'
+        ]);
+        exit;
     }
     
-    // Obtener conexión a la base de datos
+    // Conectar a la base de datos
     $database = new Database();
     $pdo = $database->getConnection();
     
-    if (!$pdo) {
-        throw new Exception('Error de conexión a la base de datos');
-    }
-    
     // Verificar que el grupo existe y obtener datos actuales
-    $groupQuery = "SELECT id, name, status, is_system_group FROM user_groups WHERE id = ?";
-    $stmt = $pdo->prepare($groupQuery);
-    $stmt->execute([$groupId]);
-    $group = $stmt->fetch(PDO::FETCH_ASSOC);
+    $checkQuery = "
+        SELECT id, name, status, is_system_group 
+        FROM user_groups 
+        WHERE id = :group_id AND deleted_at IS NULL
+    ";
+    
+    $checkStmt = $pdo->prepare($checkQuery);
+    $checkStmt->bindParam(':group_id', $groupId, PDO::PARAM_INT);
+    $checkStmt->execute();
+    
+    $group = $checkStmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$group) {
-        throw new Exception('Grupo no encontrado');
-    }
-    
-    // Verificar si ya tiene el estado solicitado
-    if ($group['status'] === $newStatus) {
-        throw new Exception("El grupo ya está $newStatus");
-    }
-    
-    // Validaciones especiales para grupos del sistema
-    if ($group['is_system_group'] && $newStatus === 'inactive') {
-        // Verificar si hay usuarios que dependan únicamente de este grupo
-        $dependentUsersQuery = "SELECT COUNT(DISTINCT u.id) as count
-                               FROM users u
-                               JOIN user_group_members ugm ON u.id = ugm.user_id
-                               WHERE ugm.group_id = ? 
-                               AND u.status = 'active'
-                               AND u.id NOT IN (
-                                   SELECT ugm2.user_id 
-                                   FROM user_group_members ugm2 
-                                   JOIN user_groups ug2 ON ugm2.group_id = ug2.id
-                                   WHERE ug2.id != ? AND ug2.status = 'active'
-                               )";
-        
-        $stmt = $pdo->prepare($dependentUsersQuery);
-        $stmt->execute([$groupId, $groupId]);
-        $dependentCount = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-        
-        if ($dependentCount > 0) {
-            throw new Exception("No se puede desactivar este grupo del sistema porque $dependentCount usuario(s) dependen únicamente de él para acceder al sistema");
-        }
-    }
-    
-    // Iniciar transacción
-    $pdo->beginTransaction();
-    
-    try {
-        // Actualizar estado del grupo
-        $updateQuery = "UPDATE user_groups SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
-        $stmt = $pdo->prepare($updateQuery);
-        $success = $stmt->execute([$newStatus, $groupId]);
-        
-        if (!$success) {
-            throw new Exception('Error al actualizar el estado del grupo');
-        }
-        
-        // Registrar actividad
-        $action = $newStatus === 'active' ? 'group_activated' : 'group_deactivated';
-        $actionText = $newStatus === 'active' ? 'activado' : 'desactivado';
-        
-        $logQuery = "INSERT INTO activity_logs (user_id, action, module, details, ip_address) 
-                     VALUES (?, ?, ?, ?, ?)";
-        $stmt = $pdo->prepare($logQuery);
-        $stmt->execute([
-            $currentUser['id'],
-            $action,
-            'groups',
-            "Grupo '{$group['name']}' $actionText",
-            $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+        echo json_encode([
+            'success' => false,
+            'message' => 'Grupo no encontrado'
         ]);
-        
-        // Si se desactiva el grupo, notificar a usuarios afectados (opcional)
-        if ($newStatus === 'inactive') {
-            // Obtener usuarios afectados
-            $affectedUsersQuery = "SELECT 
-                                    u.id, u.username, u.email, u.first_name, u.last_name
-                                   FROM users u
-                                   JOIN user_group_members ugm ON u.id = ugm.user_id
-                                   WHERE ugm.group_id = ? AND u.status = 'active'";
-            
-            $stmt = $pdo->prepare($affectedUsersQuery);
-            $stmt->execute([$groupId]);
-            $affectedUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Log adicional para usuarios afectados
-            if (!empty($affectedUsers)) {
-                $usernames = array_column($affectedUsers, 'username');
-                $logQuery = "INSERT INTO activity_logs (user_id, action, module, details, ip_address) 
-                             VALUES (?, ?, ?, ?, ?)";
-                $stmt = $pdo->prepare($logQuery);
-                $stmt->execute([
-                    $currentUser['id'],
-                    'group_users_affected',
-                    'groups',
-                    "Desactivación del grupo '{$group['name']}' afectó a " . count($affectedUsers) . " usuarios: " . implode(', ', $usernames),
-                    $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-                ]);
-            }
-        }
-        
-        // Confirmar transacción
-        $pdo->commit();
-        
-        // Obtener estadísticas actualizadas
-        $statsQuery = "SELECT 
-                        COUNT(DISTINCT ugm.user_id) as total_members,
-                        COUNT(DISTINCT CASE WHEN u.status = 'active' THEN ugm.user_id END) as active_members
-                       FROM user_group_members ugm
-                       LEFT JOIN users u ON ugm.user_id = u.id AND u.status != 'deleted'
-                       WHERE ugm.group_id = ?";
-        
-        $stmt = $pdo->prepare($statsQuery);
-        $stmt->execute([$groupId]);
-        $stats = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // Respuesta exitosa
+        exit;
+    }
+    
+    // Verificar si es un grupo del sistema
+    if ($group['is_system_group'] == 1) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'No se puede modificar el estado de un grupo del sistema'
+        ]);
+        exit;
+    }
+    
+    // Verificar si el estado ya es el mismo
+    if ($group['status'] === $newStatus) {
         echo json_encode([
             'success' => true,
-            'message' => "Grupo '{$group['name']}' $actionText correctamente",
-            'new_status' => $newStatus,
-            'stats' => $stats,
-            'data' => [
-                'group_id' => $groupId,
-                'group_name' => $group['name'],
-                'old_status' => $group['status'],
-                'new_status' => $newStatus,
-                'affected_users' => isset($affectedUsers) ? count($affectedUsers) : 0
-            ]
+            'message' => 'El grupo ya tiene este estado'
         ]);
-        
-    } catch (Exception $e) {
-        // Revertir transacción en caso de error
-        $pdo->rollback();
-        throw $e;
+        exit;
     }
     
-} catch (Exception $e) {
-    // Log del error
-    error_log("Error en toggle_group_status.php: " . $e->getMessage());
+    // Actualizar estado del grupo
+    $updateQuery = "
+        UPDATE user_groups 
+        SET status = :status, updated_at = NOW() 
+        WHERE id = :group_id
+    ";
     
-    // Respuesta de error
+    $updateStmt = $pdo->prepare($updateQuery);
+    $updateStmt->bindParam(':status', $newStatus);
+    $updateStmt->bindParam(':group_id', $groupId, PDO::PARAM_INT);
+    
+    if ($updateStmt->execute()) {
+        // Registrar actividad
+        if (function_exists('logActivity')) {
+            $action = $newStatus === 'active' ? 'activó' : 'desactivó';
+            logActivity(
+                $currentUser['id'], 
+                'toggle_group_status', 
+                'groups', 
+                $groupId, 
+                "Usuario {$action} el grupo: {$group['name']}"
+            );
+        }
+        
+        $statusText = $newStatus === 'active' ? 'activado' : 'desactivado';
+        
+        echo json_encode([
+            'success' => true,
+            'message' => "Grupo {$statusText} exitosamente",
+            'new_status' => $newStatus
+        ]);
+        
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error al cambiar el estado del grupo'
+        ]);
+    }
+    
+} catch (PDOException $e) {
+    error_log('Error en toggle_group_status.php: ' . $e->getMessage());
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => 'GROUP_STATUS_TOGGLE_ERROR'
+        'message' => 'Error de base de datos al cambiar el estado'
+    ]);
+    
+} catch (Exception $e) {
+    error_log('Error general en toggle_group_status.php: ' . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error interno del servidor'
     ]);
 }
 ?>
