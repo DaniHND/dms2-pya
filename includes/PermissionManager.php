@@ -1,147 +1,110 @@
 <?php
 /*
  * includes/PermissionManager.php
- * Sistema de gestión y verificación de permisos basado en grupos
+ * Sistema de verificación automática de permisos basado en grupos
  */
 
 class PermissionManager {
     private $pdo;
+    private $userId;
     private $userPermissions = null;
     private $userRestrictions = null;
-    private $currentUser = null;
+    private $dailyLimits = null;
     
-    public function __construct($pdo = null) {
-        if ($pdo) {
-            $this->pdo = $pdo;
-        } else {
-            $database = new Database();
-            $this->pdo = $database->getConnection();
+    public function __construct($userId = null) {
+        $this->userId = $userId ?: ($_SESSION['user_id'] ?? null);
+        
+        if (!$this->userId) {
+            throw new Exception('Usuario no especificado para PermissionManager');
         }
         
-        if (SessionManager::isLoggedIn()) {
-            $this->currentUser = SessionManager::getCurrentUser();
+        try {
+            $database = new Database();
+            $this->pdo = $database->getConnection();
             $this->loadUserPermissions();
+        } catch (Exception $e) {
+            error_log('Error inicializando PermissionManager: ' . $e->getMessage());
+            throw $e;
         }
     }
     
     /**
-     * Cargar permisos del usuario actual basados en sus grupos
+     * Cargar permisos del usuario basados en sus grupos
      */
     private function loadUserPermissions() {
-        if (!$this->currentUser) {
-            return;
-        }
-        
-        // Si es admin, tiene todos los permisos
-        if ($this->currentUser['role'] === 'admin') {
-            $this->userPermissions = [
-                'view' => true,
-                'view_reports' => true,
-                'download' => true,
-                'export' => true,
-                'create' => true,
-                'edit' => true,
-                'delete' => true,
-                'delete_permanent' => true,
-                'manage_users' => true,
-                'system_config' => true
-            ];
-            $this->userRestrictions = [
+        try {
+            $query = "
+                SELECT 
+                    ug.module_permissions,
+                    ug.access_restrictions,
+                    ug.download_limit_daily,
+                    ug.upload_limit_daily
+                FROM user_groups ug
+                INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+                WHERE ugm.user_id = ? AND ug.status = 'active'
+                ORDER BY ug.is_system_group ASC, ug.created_at ASC
+            ";
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute([$this->userId]);
+            $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Combinar permisos de todos los grupos (el más permisivo gana)
+            $combinedPermissions = [];
+            $combinedRestrictions = [
                 'companies' => [],
                 'departments' => [],
                 'document_types' => []
             ];
-            return;
-        }
-        
-        $query = "
-            SELECT 
-                ug.module_permissions,
-                ug.access_restrictions,
-                ug.download_limit_daily,
-                ug.upload_limit_daily
-            FROM user_group_members ugm
-            INNER JOIN user_groups ug ON ugm.group_id = ug.id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-        
-        $stmt = $this->pdo->prepare($query);
-        $stmt->execute([$this->currentUser['id']]);
-        $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Combinar permisos de todos los grupos (OR lógico)
-        $this->userPermissions = [
-            'view' => false,
-            'view_reports' => false,
-            'download' => false,
-            'export' => false,
-            'create' => false,
-            'edit' => false,
-            'delete' => false,
-            'delete_permanent' => false,
-            'manage_users' => false,
-            'system_config' => false,
-            'download_limit' => null,
-            'upload_limit' => null
-        ];
-        
-        $this->userRestrictions = [
-            'companies' => [],
-            'departments' => [],
-            'document_types' => []
-        ];
-        
-        foreach ($groups as $group) {
-            // Combinar permisos
-            if ($group['module_permissions']) {
-                $permissions = json_decode($group['module_permissions'], true);
-                if ($permissions) {
-                    foreach ($permissions as $key => $value) {
-                        if (isset($this->userPermissions[$key])) {
-                            $this->userPermissions[$key] = $this->userPermissions[$key] || $value;
-                        }
+            $minDownloadLimit = null;
+            $minUploadLimit = null;
+            
+            foreach ($groups as $group) {
+                // Combinar permisos (OR lógico - el más permisivo gana)
+                $groupPerms = json_decode($group['module_permissions'] ?: '{}', true);
+                foreach ($groupPerms as $perm => $value) {
+                    if ($value === true) {
+                        $combinedPermissions[$perm] = true;
                     }
                 }
-            }
-            
-            // Combinar restricciones (cualquier grupo sin restricciones = sin restricciones)
-            if ($group['access_restrictions']) {
-                $restrictions = json_decode($group['access_restrictions'], true);
-                if ($restrictions) {
-                    foreach (['companies', 'departments', 'document_types'] as $type) {
-                        if (empty($restrictions[$type])) {
-                            // Si un grupo no tiene restricciones, el usuario tampoco
-                            $this->userRestrictions[$type] = [];
-                        } else if (empty($this->userRestrictions[$type])) {
-                            // Si no hay restricciones previas, usar las de este grupo
-                            $this->userRestrictions[$type] = $restrictions[$type];
-                        } else {
-                            // Combinar restricciones (unión)
-                            $existing = array_column($this->userRestrictions[$type], 'id');
-                            foreach ($restrictions[$type] as $item) {
-                                if (!in_array($item['id'], $existing)) {
-                                    $this->userRestrictions[$type][] = $item;
-                                }
-                            }
-                        }
+                
+                // Combinar restricciones (Union de todas las restricciones)
+                $groupRestrictions = json_decode($group['access_restrictions'] ?: '{}', true);
+                foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
+                    if (!empty($groupRestrictions[$restrictionType])) {
+                        $combinedRestrictions[$restrictionType] = array_unique(
+                            array_merge(
+                                $combinedRestrictions[$restrictionType], 
+                                $groupRestrictions[$restrictionType]
+                            )
+                        );
                     }
                 }
-            }
-            
-            // Límites (usar el más permisivo)
-            if ($group['download_limit_daily']) {
-                $limit = (int)$group['download_limit_daily'];
-                if (!$this->userPermissions['download_limit'] || $limit > $this->userPermissions['download_limit']) {
-                    $this->userPermissions['download_limit'] = $limit;
+                
+                // Límites (el más restrictivo gana)
+                if ($group['download_limit_daily'] !== null) {
+                    $limit = (int)$group['download_limit_daily'];
+                    $minDownloadLimit = $minDownloadLimit === null ? $limit : min($minDownloadLimit, $limit);
+                }
+                
+                if ($group['upload_limit_daily'] !== null) {
+                    $limit = (int)$group['upload_limit_daily'];
+                    $minUploadLimit = $minUploadLimit === null ? $limit : min($minUploadLimit, $limit);
                 }
             }
             
-            if ($group['upload_limit_daily']) {
-                $limit = (int)$group['upload_limit_daily'];
-                if (!$this->userPermissions['upload_limit'] || $limit > $this->userPermissions['upload_limit']) {
-                    $this->userPermissions['upload_limit'] = $limit;
-                }
-            }
+            $this->userPermissions = $combinedPermissions;
+            $this->userRestrictions = $combinedRestrictions;
+            $this->dailyLimits = [
+                'download' => $minDownloadLimit,
+                'upload' => $minUploadLimit
+            ];
+            
+        } catch (Exception $e) {
+            error_log('Error cargando permisos de usuario: ' . $e->getMessage());
+            $this->userPermissions = [];
+            $this->userRestrictions = ['companies' => [], 'departments' => [], 'document_types' => []];
+            $this->dailyLimits = ['download' => null, 'upload' => null];
         }
     }
     
@@ -149,258 +112,343 @@ class PermissionManager {
      * Verificar si el usuario tiene un permiso específico
      */
     public function hasPermission($permission) {
-        if (!$this->userPermissions) {
+        return isset($this->userPermissions[$permission]) && $this->userPermissions[$permission] === true;
+    }
+    
+    /**
+     * Verificar múltiples permisos (AND lógico)
+     */
+    public function hasAllPermissions($permissions) {
+        foreach ($permissions as $permission) {
+            if (!$this->hasPermission($permission)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    /**
+     * Verificar si tiene al menos uno de los permisos (OR lógico)
+     */
+    public function hasAnyPermission($permissions) {
+        foreach ($permissions as $permission) {
+            if ($this->hasPermission($permission)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Verificar acceso a un documento específico
+     */
+    public function canAccessDocument($documentId) {
+        try {
+            $query = "
+                SELECT 
+                    d.id,
+                    d.company_id,
+                    d.department_id,
+                    d.document_type_id,
+                    d.status
+                FROM documents d
+                WHERE d.id = ?
+            ";
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute([$documentId]);
+            $document = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$document) {
+                return false;
+            }
+            
+            // Verificar estado del documento
+            if ($document['status'] === 'deleted' && !$this->hasPermission('delete_permanent')) {
+                return false;
+            }
+            
+            // Verificar restricciones de empresa
+            if (!empty($this->userRestrictions['companies'])) {
+                if (!in_array($document['company_id'], $this->userRestrictions['companies'])) {
+                    return false;
+                }
+            }
+            
+            // Verificar restricciones de departamento
+            if (!empty($this->userRestrictions['departments'])) {
+                if (!in_array($document['department_id'], $this->userRestrictions['departments'])) {
+                    return false;
+                }
+            }
+            
+            // Verificar restricciones de tipo de documento
+            if (!empty($this->userRestrictions['document_types'])) {
+                if (!in_array($document['document_type_id'], $this->userRestrictions['document_types'])) {
+                    return false;
+                }
+            }
+            
+            return true;
+            
+        } catch (Exception $e) {
+            error_log('Error verificando acceso a documento: ' . $e->getMessage());
             return false;
         }
+    }
+    
+    /**
+     * Obtener documentos accesibles para el usuario
+     */
+    public function getAccessibleDocuments($additionalFilters = []) {
+        try {
+            $whereConditions = ["d.status != 'deleted'"];
+            $params = [];
+            
+            // Aplicar restricciones de empresa
+            if (!empty($this->userRestrictions['companies'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['companies']) - 1) . '?';
+                $whereConditions[] = "d.company_id IN ($placeholders)";
+                $params = array_merge($params, $this->userRestrictions['companies']);
+            }
+            
+            // Aplicar restricciones de departamento
+            if (!empty($this->userRestrictions['departments'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['departments']) - 1) . '?';
+                $whereConditions[] = "d.department_id IN ($placeholders)";
+                $params = array_merge($params, $this->userRestrictions['departments']);
+            }
+            
+            // Aplicar restricciones de tipo de documento
+            if (!empty($this->userRestrictions['document_types'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['document_types']) - 1) . '?';
+                $whereConditions[] = "d.document_type_id IN ($placeholders)";
+                $params = array_merge($params, $this->userRestrictions['document_types']);
+            }
+            
+            // Aplicar filtros adicionales
+            foreach ($additionalFilters as $filter => $value) {
+                if ($value !== null && $value !== '') {
+                    switch ($filter) {
+                        case 'company_id':
+                            $whereConditions[] = "d.company_id = ?";
+                            $params[] = $value;
+                            break;
+                        case 'department_id':
+                            $whereConditions[] = "d.department_id = ?";
+                            $params[] = $value;
+                            break;
+                        case 'document_type_id':
+                            $whereConditions[] = "d.document_type_id = ?";
+                            $params[] = $value;
+                            break;
+                        case 'search':
+                            $whereConditions[] = "(d.name LIKE ? OR d.description LIKE ?)";
+                            $params[] = "%$value%";
+                            $params[] = "%$value%";
+                            break;
+                    }
+                }
+            }
+            
+            $whereClause = implode(' AND ', $whereConditions);
+            
+            $query = "
+                SELECT 
+                    d.*,
+                    c.name as company_name,
+                    dep.name as department_name,
+                    dt.name as document_type_name,
+                    dt.icon as document_type_icon,
+                    dt.color as document_type_color,
+                    CONCAT(u.first_name, ' ', u.last_name) as uploaded_by_name
+                FROM documents d
+                LEFT JOIN companies c ON d.company_id = c.id
+                LEFT JOIN departments dep ON d.department_id = dep.id
+                LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                LEFT JOIN users u ON d.user_id = u.id
+                WHERE $whereClause
+                ORDER BY d.created_at DESC
+            ";
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+        } catch (Exception $e) {
+            error_log('Error obteniendo documentos accesibles: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Verificar límites diarios
+     */
+    public function checkDownloadLimit() {
+        if ($this->dailyLimits['download'] === null) {
+            return true; // Sin límite
+        }
         
-        return $this->userPermissions[$permission] ?? false;
+        return $this->getCurrentUsage('download') < $this->dailyLimits['download'];
+    }
+    
+    public function checkUploadLimit() {
+        if ($this->dailyLimits['upload'] === null) {
+            return true; // Sin límite
+        }
+        
+        return $this->getCurrentUsage('upload') < $this->dailyLimits['upload'];
+    }
+    
+    /**
+     * Obtener uso actual del día
+     */
+    private function getCurrentUsage($type) {
+        try {
+            $today = date('Y-m-d');
+            
+            if ($type === 'download') {
+                $query = "
+                    SELECT COUNT(*) 
+                    FROM activity_logs 
+                    WHERE user_id = ? 
+                    AND action = 'download_document' 
+                    AND DATE(created_at) = ?
+                ";
+            } else {
+                $query = "
+                    SELECT COUNT(*) 
+                    FROM documents 
+                    WHERE user_id = ? 
+                    AND DATE(created_at) = ?
+                ";
+            }
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute([$this->userId, $today]);
+            
+            return (int)$stmt->fetchColumn();
+            
+        } catch (Exception $e) {
+            error_log("Error obteniendo uso actual ($type): " . $e->getMessage());
+            return 0;
+        }
+    }
+    
+    /**
+     * Obtener información de límites
+     */
+    public function getLimitsInfo() {
+        return [
+            'download' => [
+                'limit' => $this->dailyLimits['download'],
+                'used' => $this->getCurrentUsage('download'),
+                'remaining' => $this->dailyLimits['download'] ? 
+                    max(0, $this->dailyLimits['download'] - $this->getCurrentUsage('download')) : null
+            ],
+            'upload' => [
+                'limit' => $this->dailyLimits['upload'],
+                'used' => $this->getCurrentUsage('upload'),
+                'remaining' => $this->dailyLimits['upload'] ? 
+                    max(0, $this->dailyLimits['upload'] - $this->getCurrentUsage('upload')) : null
+            ]
+        ];
+    }
+    
+    /**
+     * Obtener todos los permisos del usuario
+     */
+    public function getAllPermissions() {
+        return $this->userPermissions;
+    }
+    
+    /**
+     * Obtener todas las restricciones del usuario
+     */
+    public function getAllRestrictions() {
+        return $this->userRestrictions;
     }
     
     /**
      * Verificar si el usuario puede acceder a una empresa específica
      */
     public function canAccessCompany($companyId) {
-        if (!$this->userRestrictions || empty($this->userRestrictions['companies'])) {
-            return true; // Sin restricciones = acceso total
+        if (empty($this->userRestrictions['companies'])) {
+            return true; // Sin restricciones = acceso a todas
         }
         
-        $allowedCompanies = array_column($this->userRestrictions['companies'], 'id');
-        return in_array($companyId, $allowedCompanies);
+        return in_array($companyId, $this->userRestrictions['companies']);
     }
     
     /**
      * Verificar si el usuario puede acceder a un departamento específico
      */
     public function canAccessDepartment($departmentId) {
-        if (!$this->userRestrictions || empty($this->userRestrictions['departments'])) {
-            return true; // Sin restricciones = acceso total
+        if (empty($this->userRestrictions['departments'])) {
+            return true; // Sin restricciones = acceso a todos
         }
         
-        $allowedDepartments = array_column($this->userRestrictions['departments'], 'id');
-        return in_array($departmentId, $allowedDepartments);
+        return in_array($departmentId, $this->userRestrictions['departments']);
     }
     
     /**
      * Verificar si el usuario puede acceder a un tipo de documento específico
      */
     public function canAccessDocumentType($documentTypeId) {
-        if (!$this->userRestrictions || empty($this->userRestrictions['document_types'])) {
-            return true; // Sin restricciones = acceso total
+        if (empty($this->userRestrictions['document_types'])) {
+            return true; // Sin restricciones = acceso a todos
         }
         
-        $allowedTypes = array_column($this->userRestrictions['document_types'], 'id');
-        return in_array($documentTypeId, $allowedTypes);
-    }
-    
-    /**
-     * Verificar si el usuario puede acceder a un documento específico
-     */
-    public function canAccessDocument($documentId) {
-        if (!$this->hasPermission('view')) {
-            return false;
-        }
-        
-        // Obtener información del documento
-        $query = "
-            SELECT 
-                d.id,
-                d.company_id,
-                d.department_id,
-                d.document_type_id,
-                dt.name as document_type_name
-            FROM documents d
-            LEFT JOIN document_types dt ON d.document_type_id = dt.id
-            WHERE d.id = ?
-        ";
-        
-        $stmt = $this->pdo->prepare($query);
-        $stmt->execute([$documentId]);
-        $document = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$document) {
-            return false;
-        }
-        
-        // Verificar restricciones
-        if ($document['company_id'] && !$this->canAccessCompany($document['company_id'])) {
-            return false;
-        }
-        
-        if ($document['department_id'] && !$this->canAccessDepartment($document['department_id'])) {
-            return false;
-        }
-        
-        if ($document['document_type_id'] && !$this->canAccessDocumentType($document['document_type_id'])) {
-            return false;
-        }
-        
-        return true;
-    }
-    
-    /**
-     * Verificar si el usuario puede descargar un documento
-     */
-    public function canDownloadDocument($documentId) {
-        if (!$this->hasPermission('download')) {
-            return false;
-        }
-        
-        return $this->canAccessDocument($documentId);
-    }
-    
-    /**
-     * Verificar límites de descarga diaria
-     */
-    public function checkDownloadLimit() {
-        if (!$this->userPermissions['download_limit']) {
-            return true; // Sin límite
-        }
-        
-        // Contar descargas de hoy
-        $query = "
-            SELECT COUNT(*) as downloads_today
-            FROM user_activity_logs
-            WHERE user_id = ? 
-            AND action = 'download_document'
-            AND DATE(created_at) = CURDATE()
-        ";
-        
-        $stmt = $this->pdo->prepare($query);
-        $stmt->execute([$this->currentUser['id']]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        $downloadsToday = $result['downloads_today'] ?? 0;
-        
-        return $downloadsToday < $this->userPermissions['download_limit'];
-    }
-    
-    /**
-     * Obtener consulta SQL con restricciones aplicadas para documentos
-     */
-    public function getDocumentQuery($baseQuery = "SELECT * FROM documents WHERE 1=1") {
-        $conditions = [];
-        $params = [];
-        
-        // Aplicar restricciones de empresa
-        if (!empty($this->userRestrictions['companies'])) {
-            $companyIds = array_column($this->userRestrictions['companies'], 'id');
-            $placeholders = str_repeat('?,', count($companyIds) - 1) . '?';
-            $conditions[] = "company_id IN ($placeholders)";
-            $params = array_merge($params, $companyIds);
-        }
-        
-        // Aplicar restricciones de departamento
-        if (!empty($this->userRestrictions['departments'])) {
-            $departmentIds = array_column($this->userRestrictions['departments'], 'id');
-            $placeholders = str_repeat('?,', count($departmentIds) - 1) . '?';
-            $conditions[] = "department_id IN ($placeholders)";
-            $params = array_merge($params, $departmentIds);
-        }
-        
-        // Aplicar restricciones de tipo de documento
-        if (!empty($this->userRestrictions['document_types'])) {
-            $typeIds = array_column($this->userRestrictions['document_types'], 'id');
-            $placeholders = str_repeat('?,', count($typeIds) - 1) . '?';
-            $conditions[] = "document_type_id IN ($placeholders)";
-            $params = array_merge($params, $typeIds);
-        }
-        
-        if (!empty($conditions)) {
-            $baseQuery .= " AND (" . implode(' OR ', $conditions) . ")";
-        }
-        
-        return ['query' => $baseQuery, 'params' => $params];
-    }
-    
-    /**
-     * Obtener todos los permisos del usuario actual
-     */
-    public function getUserPermissions() {
-        return $this->userPermissions;
-    }
-    
-    /**
-     * Obtener todas las restricciones del usuario actual
-     */
-    public function getUserRestrictions() {
-        return $this->userRestrictions;
-    }
-    
-    /**
-     * Verificar si el usuario actual es administrador
-     */
-    public function isAdmin() {
-        return $this->currentUser && $this->currentUser['role'] === 'admin';
-    }
-    
-    /**
-     * Obtener información resumida de permisos para mostrar en UI
-     */
-    public function getPermissionsSummary() {
-        if (!$this->userPermissions) {
-            return [
-                'level' => 'Sin permisos',
-                'description' => 'Usuario sin grupos asignados',
-                'capabilities' => []
-            ];
-        }
-        
-        $capabilities = [];
-        
-        if ($this->userPermissions['view']) $capabilities[] = 'Ver documentos';
-        if ($this->userPermissions['download']) $capabilities[] = 'Descargar';
-        if ($this->userPermissions['create']) $capabilities[] = 'Crear';
-        if ($this->userPermissions['edit']) $capabilities[] = 'Editar';
-        if ($this->userPermissions['delete']) $capabilities[] = 'Eliminar';
-        if ($this->userPermissions['manage_users']) $capabilities[] = 'Gestionar usuarios';
-        
-        $level = 'Básico';
-        if ($this->isAdmin()) {
-            $level = 'Administrador';
-        } elseif ($this->userPermissions['manage_users']) {
-            $level = 'Supervisor';
-        } elseif ($this->userPermissions['create'] && $this->userPermissions['edit']) {
-            $level = 'Editor';
-        } elseif ($this->userPermissions['download']) {
-            $level = 'Usuario';
-        }
-        
-        return [
-            'level' => $level,
-            'description' => implode(', ', $capabilities),
-            'capabilities' => $capabilities,
-            'restrictions' => [
-                'companies' => count($this->userRestrictions['companies'] ?? []),
-                'departments' => count($this->userRestrictions['departments'] ?? []),
-                'document_types' => count($this->userRestrictions['document_types'] ?? [])
-            ]
-        ];
+        return in_array($documentTypeId, $this->userRestrictions['document_types']);
     }
 }
 
-// Función helper para usar en cualquier parte del sistema
-function getPermissionManager() {
+/**
+ * Funciones globales para facilitar el uso
+ */
+
+function getPermissionManager($userId = null) {
     static $instance = null;
-    if ($instance === null) {
-        $instance = new PermissionManager();
+    static $lastUserId = null;
+    
+    $currentUserId = $userId ?: ($_SESSION['user_id'] ?? null);
+    
+    if ($instance === null || $lastUserId !== $currentUserId) {
+        $instance = new PermissionManager($currentUserId);
+        $lastUserId = $currentUserId;
     }
+    
     return $instance;
 }
 
-// Funciones helper para verificaciones rápidas
-function hasPermission($permission) {
-    return getPermissionManager()->hasPermission($permission);
+function hasPermission($permission, $userId = null) {
+    try {
+        $pm = getPermissionManager($userId);
+        return $pm->hasPermission($permission);
+    } catch (Exception $e) {
+        error_log('Error verificando permiso: ' . $e->getMessage());
+        return false;
+    }
 }
 
-function canAccessDocument($documentId) {
-    return getPermissionManager()->canAccessDocument($documentId);
+function canAccessDocument($documentId, $userId = null) {
+    try {
+        $pm = getPermissionManager($userId);
+        return $pm->canAccessDocument($documentId);
+    } catch (Exception $e) {
+        error_log('Error verificando acceso a documento: ' . $e->getMessage());
+        return false;
+    }
 }
 
-function canDownloadDocument($documentId) {
-    return getPermissionManager()->canDownloadDocument($documentId);
-}
-
-function isAdmin() {
-    return getPermissionManager()->isAdmin();
+function getAccessibleDocuments($filters = [], $userId = null) {
+    try {
+        $pm = getPermissionManager($userId);
+        return $pm->getAccessibleDocuments($filters);
+    } catch (Exception $e) {
+        error_log('Error obteniendo documentos accesibles: ' . $e->getMessage());
+        return [];
+    }
 }
 ?>

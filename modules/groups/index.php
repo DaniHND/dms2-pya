@@ -1,12 +1,14 @@
 <?php
 /*
  * modules/groups/index.php
- * Dashboard de grupos con sidebar integrado
+ * Módulo de Gestión de Grupos con diseño consistente
  */
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+$projectRoot = dirname(dirname(__DIR__));
+require_once $projectRoot . '/config/session.php';
+require_once $projectRoot . '/config/database.php';
 
+// Verificar sesión y permisos
 if (!SessionManager::isLoggedIn()) {
     header('Location: ../../login.php');
     exit;
@@ -17,6 +19,75 @@ if ($currentUser['role'] !== 'admin') {
     header('Location: ../../dashboard.php');
     exit;
 }
+
+try {
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    // Configuración de paginación y filtros
+    $itemsPerPage = 10;
+    $currentPage = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+    $offset = ($currentPage - 1) * $itemsPerPage;
+    
+    $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
+    $statusFilter = isset($_GET['status']) ? $_GET['status'] : '';
+    
+    // Costruir consulta con filtros
+    $whereConditions = [];
+    $params = [];
+    
+    if (!empty($searchTerm)) {
+        $whereConditions[] = "(ug.name LIKE ? OR ug.description LIKE ?)";
+        $params[] = '%' . $searchTerm . '%';
+        $params[] = '%' . $searchTerm . '%';
+    }
+    
+    if (!empty($statusFilter)) {
+        $whereConditions[] = "ug.status = ?";
+        $params[] = $statusFilter;
+    }
+    
+    $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+    
+    // Obtener grupos con información adicional
+    $groupsQuery = "
+        SELECT 
+            ug.*,
+            COUNT(DISTINCT ugm.user_id) as total_members,
+            COALESCE(CONCAT(creator.first_name, ' ', creator.last_name), 'Sistema') as created_by_name
+        FROM user_groups ug
+        LEFT JOIN user_group_members ugm ON ug.id = ugm.group_id
+        LEFT JOIN users creator ON ug.created_by = creator.id
+        $whereClause
+        GROUP BY ug.id
+        ORDER BY ug.is_system_group ASC, ug.created_at DESC
+        LIMIT $itemsPerPage OFFSET $offset
+    ";
+    
+    $stmt = $pdo->prepare($groupsQuery);
+    $stmt->execute($params);
+    $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Contar total para paginación
+    $countQuery = "
+        SELECT COUNT(DISTINCT ug.id) as total
+        FROM user_groups ug
+        LEFT JOIN user_group_members ugm ON ug.id = ugm.group_id
+        LEFT JOIN users creator ON ug.created_by = creator.id
+        $whereClause
+    ";
+    
+    $countStmt = $pdo->prepare($countQuery);
+    $countStmt->execute($params);
+    $totalItems = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
+    $totalPages = ceil($totalItems / $itemsPerPage);
+    
+} catch (Exception $e) {
+    error_log('Error en grupos: ' . $e->getMessage());
+    $groups = [];
+    $totalItems = 0;
+    $totalPages = 0;
+}
 ?>
 
 <!DOCTYPE html>
@@ -24,907 +95,625 @@ if ($currentUser['role'] !== 'admin') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Grupos - DMS</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="../../assets/css/app.css" rel="stylesheet">
+    <title>Gestión de Grupos - DMS2</title>
+    
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/dashboard.css">
+    <link rel="stylesheet" href="../../assets/css/sidebar.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
+    
+    <script src="https://unpkg.com/feather-icons"></script>
+    
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
+    :root {
+        --dms-primary: #8B4513;
+        --dms-primary-hover: #654321;
+        --dms-success: #10b981;
+        --dms-warning: #f59e0b;
+        --dms-danger: #ef4444;
+        --dms-info: #3b82f6;
+        --dms-bg: #f8fafc;
+        --dms-card-bg: #ffffff;
+        --dms-border: #e2e8f0;
+        --dms-text: #1e293b;
+        --dms-text-muted: #64748b;
+        --dms-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        --dms-radius: 12px;
+    }
+
+    .groups-container {
+        padding: 24px;
+        background: var(--dms-bg);
+        min-height: calc(100vh - 80px);
+        margin-left: 240px;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 32px;
+    }
+
+    .page-title {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--dms-text);
+        margin: 0 0 8px 0;
+    }
+
+    .page-subtitle {
+        color: var(--dms-text-muted);
+        font-size: 1rem;
+        margin: 0;
+    }
+
+    .btn-create-group {
+        background: var(--dms-primary);
+        color: white;
+        border: none;
+        padding: 14px 28px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        text-decoration: none;
+        box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+    }
+
+    .btn-create-group:hover {
+        background: var(--dms-primary-hover);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
+    }
+
+    /* Filtros */
+    .filters-section {
+        background: var(--dms-card-bg);
+        border-radius: var(--dms-radius);
+        padding: 24px;
+        margin-bottom: 24px;
+        border: 1px solid var(--dms-border);
+        box-shadow: var(--dms-shadow);
+    }
+
+    .filters-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--dms-text);
+        margin-bottom: 16px;
+    }
+
+    .filters-row {
+        display: grid;
+        grid-template-columns: 1fr 200px 200px;
+        gap: 16px;
+        align-items: end;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .filter-label {
+        font-weight: 500;
+        color: var(--dms-text);
+        font-size: 0.875rem;
+    }
+
+    .filter-input,
+    .filter-select {
+        padding: 12px 16px;
+        border: 1px solid var(--dms-border);
+        border-radius: 8px;
+        font-size: 0.875rem;
+        background: white;
+    }
+
+    .filter-input:focus,
+    .filter-select:focus {
+        outline: none;
+        border-color: var(--dms-primary);
+        box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+    }
+
+    .btn-clear {
+        background: #6b7280;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn-clear:hover {
+        background: #4b5563;
+    }
+
+    /* Lista de grupos */
+    .groups-list {
+        background: var(--dms-card-bg);
+        border-radius: var(--dms-radius);
+        border: 1px solid var(--dms-border);
+        box-shadow: var(--dms-shadow);
+        overflow: hidden;
+    }
+
+    .list-header {
+        background: #f8fafc;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--dms-border);
+        font-weight: 600;
+        color: var(--dms-text);
+        font-size: 1rem;
+    }
+
+    .groups-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .groups-table th {
+        background: #f8fafc;
+        padding: 16px 24px;
+        text-align: left;
+        font-weight: 600;
+        color: var(--dms-text);
+        font-size: 0.875rem;
+        border-bottom: 1px solid var(--dms-border);
+    }
+
+    .groups-table td {
+        padding: 16px 24px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: middle;
+    }
+
+    .groups-table tr:hover {
+        background: #f8fafc;
+    }
+
+    .group-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .group-icon {
+        width: 40px;
+        height: 40px;
+        background: var(--dms-primary);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+    }
+
+    .group-details {
+        flex: 1;
+    }
+
+    .group-name {
+        font-weight: 600;
+        color: var(--dms-text);
+        font-size: 0.875rem;
+        margin-bottom: 2px;
+    }
+
+    .group-description {
+        font-size: 0.75rem;
+        color: var(--dms-text-muted);
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .status-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .status-active {
+        background: rgba(16, 185, 129, 0.1);
+        color: #059669;
+    }
+
+    .status-inactive {
+        background: rgba(107, 114, 128, 0.1);
+        color: #4b5563;
+    }
+
+    .members-count {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.875rem;
+        color: var(--dms-text);
+    }
+
+    .members-number {
+        background: var(--dms-primary);
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        min-width: 24px;
+        text-align: center;
+    }
+
+    .actions-cell {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .btn-action {
+        padding: 8px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+
+    .btn-view {
+        background: rgba(59, 130, 246, 0.1);
+        color: #2563eb;
+    }
+
+    .btn-view:hover {
+        background: #2563eb;
+        color: white;
+    }
+
+    .btn-edit {
+        background: rgba(245, 158, 11, 0.1);
+        color: #d97706;
+    }
+
+    .btn-edit:hover {
+        background: #d97706;
+        color: white;
+    }
+
+    .btn-delete {
+        background: rgba(239, 68, 68, 0.1);
+        color: #dc2626;
+    }
+
+    .btn-delete:hover {
+        background: #dc2626;
+        color: white;
+    }
+
+    .btn-toggle {
+        background: rgba(16, 185, 129, 0.1);
+        color: #059669;
+    }
+
+    .btn-toggle:hover {
+        background: #059669;
+        color: white;
+    }
+
+    .btn-toggle.inactive {
+        background: rgba(107, 114, 128, 0.1);
+        color: #4b5563;
+    }
+
+    .btn-toggle.inactive:hover {
+        background: #4b5563;
+        color: white;
+    }
+
+    /* Paginación */
+    .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        margin-top: 24px;
+        padding: 20px;
+    }
+
+    .pagination-btn {
+        padding: 8px 12px;
+        border: 1px solid var(--dms-border);
+        background: white;
+        color: var(--dms-text);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        font-size: 0.875rem;
+    }
+
+    .pagination-btn:hover {
+        background: var(--dms-primary);
+        color: white;
+        border-color: var(--dms-primary);
+    }
+
+    .pagination-btn.active {
+        background: var(--dms-primary);
+        color: white;
+        border-color: var(--dms-primary);
+    }
+
+    .pagination-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+        .groups-container {
+            margin-left: 0;
+            padding: 16px;
         }
         
-        /* Sidebar Styles */
-        .sidebar {
-            min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            width: 250px;
-            position: fixed;
-            left: 0;
-            top: 0;
-            z-index: 1000;
-            transition: all 0.3s ease;
+        .filters-row {
+            grid-template-columns: 1fr;
         }
         
-        .sidebar-header {
-            padding: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        
-        .sidebar-brand {
-            color: white;
-            text-decoration: none;
-            font-weight: bold;
-            font-size: 1.2rem;
-        }
-        
-        .sidebar-nav {
-            padding: 20px 0;
-        }
-        
-        .nav-item {
-            margin-bottom: 5px;
-        }
-        
-        .nav-link {
-            color: rgba(255,255,255,0.8);
-            padding: 12px 20px;
-            border-radius: 0;
-            transition: all 0.3s ease;
-            border: none;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-        }
-        
-        .nav-link:hover {
-            background: rgba(255,255,255,0.1);
-            color: white;
-            transform: translateX(5px);
-        }
-        
-        .nav-link.active {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border-left: 4px solid #ffd700;
-        }
-        
-        .nav-link i {
-            width: 20px;
-            margin-right: 10px;
-        }
-        
-        /* Main Content */
-        .main-content {
-            margin-left: 250px;
-            min-height: 100vh;
-            padding: 0;
-        }
-        
-        .content-header {
-            background: white;
-            padding: 20px 30px;
-            border-bottom: 1px solid #eee;
-            margin-bottom: 30px;
-        }
-        
-        .content-body {
-            padding: 0 30px 30px;
-        }
-        
-        /* Stats Cards */
-        .stats-card {
-            background: white;
-            border-radius: 10px;
-            padding: 25px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            margin-bottom: 20px;
-            transition: transform 0.2s ease;
-        }
-        
-        .stats-card:hover {
-            transform: translateY(-2px);
-        }
-        
-        .stats-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        
-        .stats-label {
-            color: #666;
-            font-weight: 500;
-        }
-        
-        /* Group Cards */
-        .group-card {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            overflow: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .group-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-        }
-        
-        .group-header {
-            padding: 20px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .group-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #333;
-        }
-        
-        .group-description {
-            color: #666;
-            margin-bottom: 0;
-        }
-        
-        .group-meta {
-            padding: 15px 20px;
-            background: #f8f9fa;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        
-        .group-stats {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-        
-        .stat-item {
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-weight: bold;
-            color: #667eea;
-            font-size: 1.1rem;
-        }
-        
-        .stat-label {
-            font-size: 0.85em;
-            color: #666;
-        }
-        
-        .group-actions {
-            padding: 15px 20px;
-            border-top: 1px solid #eee;
-            background: white;
-        }
-        
-        /* Status Badges */
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        
-        .status-active {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-inactive {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .system-badge {
-            background: #e7f3ff;
-            color: #0c5aa6;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            margin-left: 10px;
-        }
-        
-        /* Filters */
-        .filters-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        
-        /* Buttons */
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-        }
-        
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-        }
-        
-        .btn-group-sm .btn {
-            padding: 6px 12px;
+        .groups-table {
             font-size: 0.875rem;
         }
         
-        /* User Info */
-        .user-info {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            right: 20px;
-            padding: 15px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 8px;
+        .groups-table th,
+        .groups-table td {
+            padding: 12px;
         }
-        
-        .user-name {
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .user-role {
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }
+    }
     </style>
 </head>
-<body>
 
-<!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-header">
-        <a href="../../dashboard.php" class="sidebar-brand">
-            <i class="fas fa-file-alt me-2"></i>
-            DMS Sistema
-        </a>
-    </div>
+<body class="dashboard-layout">
+    <?php include '../../includes/sidebar.php'; ?>
     
-    <nav class="sidebar-nav">
-        <ul class="nav flex-column">
-            <li class="nav-item">
-                <a href="../../dashboard.php" class="nav-link">
-                    <i class="fas fa-tachometer-alt"></i>
-                    Dashboard
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../documents/index.php" class="nav-link">
-                    <i class="fas fa-folder"></i>
-                    Subir Documentos
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/archives/index.php" class="nav-link">
-                    <i class="fas fa-archive"></i>
-                    Archivos
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/reports/index.php" class="nav-link">
-                    <i class="fas fa-chart-bar"></i>
-                    Reportes
-                </a>
-            </li>
-            
-            <?php if ($currentUser['role'] === 'admin'): ?>
-            <li class="nav-item">
-                <h6 class="nav-header px-3 py-2 text-white-50">ADMINISTRACIÓN</h6>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/users/index.php" class="nav-link">
-                    <i class="fas fa-user"></i>
-                    Usuarios
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/companies/index.php" class="nav-link">
-                    <i class="fas fa-building"></i>
-                    Empresas
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/departments/index.php" class="nav-link">
-                    <i class="fas fa-sitemap"></i>
-                    Departamentos
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/document-types/index.php" class="nav-link">
-                    <i class="fas fa-tags"></i>
-                    Tipos de Documentos
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="index.php" class="nav-link active">
-                    <i class="fas fa-users"></i>
-                    Grupos
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="../../modules/configuration/index.php" class="nav-link">
-                    <i class="fas fa-cog"></i>
-                    Configuración
-                </a>
-            </li>
-            <?php endif; ?>
-        </ul>
-    </nav>
-    
-    <!-- User Info -->
-    <div class="user-info">
-        <div class="user-name"><?= htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']) ?></div>
-        <div class="user-role"><?= ucfirst($currentUser['role']) ?></div>
-        <a href="../../logout.php" class="btn btn-sm btn-outline-light mt-2 w-100">
-            <i class="fas fa-sign-out-alt me-1"></i>Cerrar Sesión
-        </a>
-    </div>
-</div>
-
-<!-- Main Content -->
-<div class="main-content">
-    <!-- Content Header -->
-    <div class="content-header">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <h2 class="mb-1">
-                    <i class="fas fa-users me-2 text-primary"></i>
-                    Gestión de Grupos
-                </h2>
-                <p class="text-muted mb-0">Administrar grupos de usuarios y permisos del sistema</p>
-            </div>
-            <div>
-                <button class="btn btn-primary" onclick="showCreateModal()">
-                    <i class="fas fa-plus me-2"></i>Nuevo Grupo
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Content Body -->
-    <div class="content-body">
-        <!-- Estadísticas -->
-        <div class="row mb-4" id="statsRow">
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <div class="stats-number" id="totalGroups">0</div>
-                    <div class="stats-label">Total de Grupos</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <div class="stats-number" id="activeGroups">0</div>
-                    <div class="stats-label">Grupos Activos</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <div class="stats-number" id="totalMembers">0</div>
-                    <div class="stats-label">Total Miembros</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <div class="stats-number" id="systemGroups">0</div>
-                    <div class="stats-label">Grupos Sistema</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Filtros -->
-        <div class="filters-container">
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">Buscar grupos</label>
-                    <input type="text" class="form-control" id="searchInput" placeholder="Nombre o descripción..." onkeyup="filterGroups()">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Estado</label>
-                    <select class="form-select" id="statusFilter" onchange="filterGroups()">
-                        <option value="">Todos</option>
-                        <option value="active">Activos</option>
-                        <option value="inactive">Inactivos</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Tipo</label>
-                    <select class="form-select" id="typeFilter" onchange="filterGroups()">
-                        <option value="">Todos</option>
-                        <option value="system">Sistema</option>
-                        <option value="custom">Personalizados</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">&nbsp;</label>
-                    <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
-                        <i class="fas fa-times"></i> Limpiar
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Lista de Grupos -->
-        <div id="groupsList">
-            <div class="text-center py-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Cargando...</span>
-                </div>
-                <p class="mt-3">Cargando grupos...</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal Crear/Editar Grupo -->
-<div class="modal fade" id="groupModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="modalTitle">Crear Nuevo Grupo</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="groupForm">
-                <div class="modal-body">
-                    <input type="hidden" id="groupId" name="group_id">
-                    
-                    <div class="row">
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label for="groupName" class="form-label">Nombre del Grupo *</label>
-                                <input type="text" class="form-control" id="groupName" name="name" required>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="groupStatus" class="form-label">Estado</label>
-                                <select class="form-select" id="groupStatus" name="status">
-                                    <option value="active">Activo</option>
-                                    <option value="inactive">Inactivo</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="groupDescription" class="form-label">Descripción</label>
-                        <textarea class="form-control" id="groupDescription" name="description" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Permisos Básicos</label>
-                        <div class="row">
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="permView" checked disabled>
-                                    <label class="form-check-label" for="permView">Ver documentos</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="permDownload">
-                                    <label class="form-check-label" for="permDownload">Descargar</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="permCreate">
-                                    <label class="form-check-label" for="permCreate">Crear</label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="permEdit">
-                                    <label class="form-check-label" for="permEdit">Editar</label>
-                                </div>
-                            </div>
-                        </div>
-                        <small class="text-muted">Los permisos detallados se configuran después de crear el grupo.</small>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save me-1"></i>Guardar Grupo
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Scripts -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
-
-<script>
-let allGroups = [];
-let filteredGroups = [];
-
-// Inicialización
-document.addEventListener('DOMContentLoaded', function() {
-    loadGroups();
-    setupEventListeners();
-});
-
-function setupEventListeners() {
-    document.getElementById('groupForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        saveGroup();
-    });
-}
-
-// Cargar grupos
-async function loadGroups() {
-    try {
-        const response = await fetch('actions/get_groups.php');
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.success && data.groups) {
-            allGroups = data.groups;
-            filteredGroups = [...allGroups];
-            updateStats();
-            renderGroups();
-        } else {
-            showError('Error al cargar grupos: ' + (data.message || 'Respuesta inválida'));
-        }
-        
-    } catch (error) {
-        console.error('Error cargando grupos:', error);
-        showError('Error de conexión: ' + error.message);
-    }
-}
-
-// Actualizar estadísticas
-function updateStats() {
-    const stats = {
-        total: allGroups.length,
-        active: allGroups.filter(g => g.status === 'active').length,
-        members: allGroups.reduce((sum, g) => sum + (parseInt(g.total_members) || 0), 0),
-        system: allGroups.filter(g => g.is_system_group == 1).length
-    };
-    
-    document.getElementById('totalGroups').textContent = stats.total;
-    document.getElementById('activeGroups').textContent = stats.active;
-    document.getElementById('totalMembers').textContent = stats.members;
-    document.getElementById('systemGroups').textContent = stats.system;
-}
-
-// Renderizar grupos
-function renderGroups() {
-    const container = document.getElementById('groupsList');
-    
-    if (filteredGroups.length === 0) {
-        container.innerHTML = `
-            <div class="text-center py-5">
-                <i class="fas fa-users fa-3x text-muted mb-3"></i>
-                <h5>No hay grupos</h5>
-                <p class="text-muted">No se encontraron grupos con los criterios de búsqueda.</p>
-                <button class="btn btn-primary" onclick="showCreateModal()">
-                    <i class="fas fa-plus me-2"></i>Crear Primer Grupo
-                </button>
-            </div>
-        `;
-        return;
-    }
-    
-    const groupsHTML = filteredGroups.map(group => `
-        <div class="group-card">
-            <div class="group-header">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <h5 class="group-title">${escapeHtml(group.name)}</h5>
-                        <p class="group-description">${escapeHtml(group.description || 'Sin descripción')}</p>
-                    </div>
-                    <div class="text-end">
-                        <span class="status-badge status-${group.status}">
-                            ${group.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </span>
-                        ${group.is_system_group == 1 ? '<span class="system-badge">Sistema</span>' : ''}
-                    </div>
-                </div>
-            </div>
-            
-            <div class="group-meta">
-                <div class="group-stats">
-                    <div class="stat-item">
-                        <div class="stat-value">${group.total_members || 0}</div>
-                        <div class="stat-label">Miembros</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value">${group.active_members || 0}</div>
-                        <div class="stat-label">Activos</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value">${group.companies_represented || 0}</div>
-                        <div class="stat-label">Empresas</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value">${group.departments_represented || 0}</div>
-                        <div class="stat-label">Departamentos</div>
-                    </div>
-                </div>
+    <main class="main-content">
+        <div class="groups-container">
+            <!-- Header -->
+            <div class="page-header">
                 <div>
-                    <small class="text-muted">Creado: ${formatDate(group.created_at)}</small>
-                </div>
-            </div>
-            
-            <div class="group-actions">
-                <div class="btn-group btn-group-sm me-2" role="group">
-                    <button class="btn btn-outline-primary" onclick="viewGroup(${group.id})" title="Ver detalles">
-                        <i class="fas fa-eye"></i> Ver
-                    </button>
-                    <button class="btn btn-outline-success" onclick="manageMembers(${group.id})" title="Gestionar miembros">
-                        <i class="fas fa-users"></i> Miembros
-                    </button>
-                    <button class="btn btn-outline-info" onclick="managePermissions(${group.id})" title="Configurar permisos">
-                        <i class="fas fa-shield-alt"></i> Permisos
-                    </button>
+                    <h1 class="page-title">Gestión de Grupos</h1>
+                    <p class="page-subtitle">Administrar grupos de usuarios y permisos del sistema</p>
                 </div>
                 
-                <div class="btn-group btn-group-sm" role="group">
-                    <button class="btn btn-outline-secondary" onclick="editGroup(${group.id})" title="Editar">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn btn-outline-warning" onclick="toggleStatus(${group.id}, '${group.status}')" title="${group.status === 'active' ? 'Desactivar' : 'Activar'}">
-                        <i class="fas fa-power-off"></i>
-                    </button>
-                    ${group.is_system_group != 1 ? `
-                    <button class="btn btn-outline-danger" onclick="deleteGroup(${group.id})" title="Eliminar">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                    ` : ''}
+                <button class="btn-create-group" onclick="showCreateGroupModal()">
+                    <i data-feather="plus"></i>
+                    Crear Grupo
+                </button>
+            </div>
+            
+            <!-- Filtros -->
+            <div class="filters-section">
+                <h3 class="filters-title">Filtros de Búsqueda</h3>
+                
+                <form method="GET" class="filters-row">
+                    <div class="filter-group">
+                        <label class="filter-label">Buscar Grupo</label>
+                        <input type="text" name="search" class="filter-input" 
+                               placeholder="Nombre o descripción..." 
+                               value="<?php echo htmlspecialchars($searchTerm); ?>">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label class="filter-label">Estado</label>
+                        <select name="status" class="filter-select">
+                            <option value="">Todos los estados</option>
+                            <option value="active" <?php echo $statusFilter === 'active' ? 'selected' : ''; ?>>Activo</option>
+                            <option value="inactive" <?php echo $statusFilter === 'inactive' ? 'selected' : ''; ?>>Inactivo</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <button type="button" class="btn-clear" onclick="clearFilters()">
+                            <i data-feather="x"></i>
+                            Limpiar
+                        </button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Lista de grupos -->
+            <div class="groups-list">
+                <div class="list-header">
+                    Grupos de Usuarios (<?php echo $totalItems; ?> registros)
                 </div>
+                
+                <table class="groups-table">
+                    <thead>
+                        <tr>
+                            <th>Grupo</th>
+                            <th>Miembros</th>
+                            <th>Estado</th>
+                            <th>Fecha Creación</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($groups)): ?>
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 40px; color: var(--dms-text-muted); font-style: italic;">
+                                    No se encontraron grupos que coincidan con los filtros
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($groups as $group): ?>
+                                <tr>
+                                    <td>
+                                        <div class="group-info">
+                                            <div class="group-icon">
+                                                <i data-feather="<?php echo $group['is_system_group'] ? 'shield' : 'users'; ?>"></i>
+                                            </div>
+                                            <div class="group-details">
+                                                <div class="group-name"><?php echo htmlspecialchars($group['name']); ?></div>
+                                                <div class="group-description">
+                                                    <?php echo htmlspecialchars($group['description'] ?: 'Sin descripción'); ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="members-count">
+                                            <i data-feather="users"></i>
+                                            <span class="members-number"><?php echo $group['total_members']; ?></span>
+                                            <span>miembros</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge status-<?php echo $group['status']; ?>">
+                                            <?php echo $group['status'] === 'active' ? 'Activo' : 'Inactivo'; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php echo date('d/m/Y H:i', strtotime($group['created_at'])); ?>
+                                    </td>
+                                    <td>
+                                        <div class="actions-cell">
+                                            <a href="permissions.php?group=<?php echo $group['id']; ?>&tab=members" 
+                                               class="btn-action btn-view" title="Ver Miembros">
+                                                <i data-feather="users"></i>
+                                            </a>
+                                            
+                                            <a href="permissions.php?group=<?php echo $group['id']; ?>&tab=permissions" 
+                                               class="btn-action btn-edit" title="Configurar Permisos">
+                                                <i data-feather="shield"></i>
+                                            </a>
+                                            
+                                            <button class="btn-action btn-toggle <?php echo $group['status'] === 'inactive' ? 'inactive' : ''; ?>" 
+                                                    onclick="toggleGroupStatus(<?php echo $group['id']; ?>)"
+                                                    title="<?php echo $group['status'] === 'active' ? 'Desactivar' : 'Activar'; ?>">
+                                                <i data-feather="<?php echo $group['status'] === 'active' ? 'eye-off' : 'eye'; ?>"></i>
+                                            </button>
+                                            
+                                            <?php if (!$group['is_system_group']): ?>
+                                                <button class="btn-action btn-delete" 
+                                                        onclick="deleteGroup(<?php echo $group['id']; ?>)"
+                                                        title="Eliminar Grupo">
+                                                    <i data-feather="trash-2"></i>
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+                
+                <!-- Paginación -->
+                <?php if ($totalPages > 1): ?>
+                    <div class="pagination">
+                        <?php if ($currentPage > 1): ?>
+                            <a href="?page=<?php echo $currentPage - 1; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
+                               class="pagination-btn">
+                                <i data-feather="chevron-left"></i>
+                                Anterior
+                            </a>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = max(1, $currentPage - 2); $i <= min($totalPages, $currentPage + 2); $i++): ?>
+                            <a href="?page=<?php echo $i; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
+                               class="pagination-btn <?php echo $i === $currentPage ? 'active' : ''; ?>">
+                                <?php echo $i; ?>
+                            </a>
+                        <?php endfor; ?>
+                        
+                        <?php if ($currentPage < $totalPages): ?>
+                            <a href="?page=<?php echo $currentPage + 1; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
+                               class="pagination-btn">
+                                Siguiente
+                                <i data-feather="chevron-right"></i>
+                            </a>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
-    `).join('');
-    
-    container.innerHTML = groupsHTML;
-}
+    </main>
 
-// Funciones de filtro
-function filterGroups() {
-    const search = document.getElementById('searchInput').value.toLowerCase();
-    const status = document.getElementById('statusFilter').value;
-    const type = document.getElementById('typeFilter').value;
-    
-    filteredGroups = allGroups.filter(group => {
-        const matchesSearch = !search || 
-            group.name.toLowerCase().includes(search) || 
-            (group.description && group.description.toLowerCase().includes(search));
-            
-        const matchesStatus = !status || group.status === status;
-        
-        const matchesType = !type || 
-            (type === 'system' && group.is_system_group == 1) ||
-            (type === 'custom' && group.is_system_group != 1);
-        
-        return matchesSearch && matchesStatus && matchesType;
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        feather.replace();
     });
     
-    renderGroups();
-}
-
-function clearFilters() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('statusFilter').value = '';
-    document.getElementById('typeFilter').value = '';
-    filterGroups();
-}
-
-// Funciones de gestión
-function showCreateModal() {
-    document.getElementById('modalTitle').textContent = 'Crear Nuevo Grupo';
-    document.getElementById('groupForm').reset();
-    document.getElementById('groupId').value = '';
-    document.getElementById('permView').checked = true;
-    
-    const modal = new bootstrap.Modal(document.getElementById('groupModal'));
-    modal.show();
-}
-
-function editGroup(groupId) {
-    const group = allGroups.find(g => g.id == groupId);
-    if (!group) return;
-    
-    document.getElementById('modalTitle').textContent = 'Editar Grupo';
-    document.getElementById('groupId').value = group.id;
-    document.getElementById('groupName').value = group.name;
-    document.getElementById('groupDescription').value = group.description || '';
-    document.getElementById('groupStatus').value = group.status;
-    
-    try {
-        const permissions = group.module_permissions ? JSON.parse(group.module_permissions) : {};
-        document.getElementById('permDownload').checked = permissions.download || false;
-        document.getElementById('permCreate').checked = permissions.create || false;
-        document.getElementById('permEdit').checked = permissions.edit || false;
-    } catch (e) {
-        console.warn('Error cargando permisos:', e);
+    function clearFilters() {
+        window.location.href = 'index.php';
     }
     
-    const modal = new bootstrap.Modal(document.getElementById('groupModal'));
-    modal.show();
-}
-
-async function saveGroup() {
-    const formData = new FormData();
-    const groupId = document.getElementById('groupId').value;
-    
-    formData.append('name', document.getElementById('groupName').value);
-    formData.append('description', document.getElementById('groupDescription').value);
-    formData.append('status', document.getElementById('groupStatus').value);
-    
-    const permissions = {
-        view: true,
-        download: document.getElementById('permDownload').checked,
-        create: document.getElementById('permCreate').checked,
-        edit: document.getElementById('permEdit').checked
-    };
-    formData.append('basic_permissions', JSON.stringify(permissions));
-    
-    if (groupId) {
-        formData.append('group_id', groupId);
+    function showCreateGroupModal() {
+        // Por ahora redirigir a una página de creación
+        alert('Funcionalidad de crear grupo - próximamente');
     }
     
-    try {
-        const url = groupId ? 'actions/update_group.php' : 'actions/create_group.php';
-        const response = await fetch(url, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification(data.message, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
-            await loadGroups();
-        } else {
-            showNotification(data.message || 'Error al guardar grupo', 'error');
+    function toggleGroupStatus(groupId) {
+        if (confirm('¿Está seguro de cambiar el estado de este grupo?')) {
+            fetch('actions/toggle_group_status.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `group_id=${groupId}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.message || 'Error al cambiar estado');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al procesar la solicitud');
+            });
         }
-        
-    } catch (error) {
-        console.error('Error:', error);
-        showNotification('Error de conexión', 'error');
     }
-}
-
-// Funciones de navegación
-function viewGroup(groupId) {
-    window.location.href = `permissions.php?group=${groupId}`;
-}
-
-function manageMembers(groupId) {
-    window.location.href = `permissions.php?group=${groupId}&tab=members`;
-}
-
-function managePermissions(groupId) {
-    window.location.href = `permissions.php?group=${groupId}&tab=permissions`;
-}
-
-async function toggleStatus(groupId, currentStatus) {
-    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    const action = newStatus === 'active' ? 'activar' : 'desactivar';
     
-    if (!confirm(`¿Confirma ${action} este grupo?`)) return;
-    
-    try {
-        const formData = new FormData();
-        formData.append('group_id', groupId);
-        formData.append('status', newStatus);
-        
-        const response = await fetch('actions/toggle_group_status.php', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification(data.message, 'success');
-            loadGroups();
-        } else {
-            showNotification(data.message, 'error');
+    function deleteGroup(groupId) {
+        if (confirm('¿Está seguro de eliminar este grupo? Esta acción no se puede deshacer.')) {
+            fetch('actions/delete_group.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `group_id=${groupId}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.message || 'Error al eliminar grupo');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al procesar la solicitud');
+            });
         }
-    } catch (error) {
-        showNotification('Error de conexión', 'error');
     }
-}
-
-async function deleteGroup(groupId) {
-    const group = allGroups.find(g => g.id == groupId);
-    if (!group) return;
-    
-    if (!confirm(`¿Confirma eliminar el grupo "${group.name}"?\n\nEsta acción no se puede deshacer.`)) return;
-    
-    try {
-        const formData = new FormData();
-        formData.append('group_id', groupId);
-        
-        const response = await fetch('actions/delete_group.php', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification(data.message, 'success');
-            loadGroups();
-        } else {
-            showNotification(data.message, 'error');
-        }
-    } catch (error) {
-        showNotification('Error de conexión', 'error');
-    }
-}
-
-// Utilidades
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text || '';
-    return div.innerHTML;
-}
-
-function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('es-ES', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    });
-}
-
-function showNotification(message, type = 'info') {
-    const alertClass = type === 'success' ? 'alert-success' : 
-                     type === 'error' ? 'alert-danger' : 'alert-info';
-    
-    const alert = document.createElement('div');
-    alert.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
-    alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    alert.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    
-    document.body.appendChild(alert);
-    
-    setTimeout(() => {
-        if (alert.parentNode) {
-            alert.parentNode.removeChild(alert);
-        }
-    }, 5000);
-}
-
-function showError(message) {
-    document.getElementById('groupsList').innerHTML = `
-        <div class="text-center py-5">
-            <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
-            <h5 class="text-danger">Error al cargar grupos</h5>
-            <p class="text-muted">${message}</p>
-            <button class="btn btn-primary" onclick="loadGroups()">
-                <i class="fas fa-redo me-2"></i>Reintentar
-            </button>
-        </div>
-    `;
-}
-
-</script>
-
+    </script>
 </body>
 </html>

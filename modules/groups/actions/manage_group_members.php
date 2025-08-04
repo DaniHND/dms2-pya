@@ -1,188 +1,193 @@
 <?php
 /*
- * modules/groups/actions/manage_group_members.php
- * Gestionar miembros de grupos (agregar/remover usuarios)
+ * modules/groups/actions/update_group_members.php
+ * Actualización masiva de miembros de grupos
  */
 
-// Configurar headers y manejo de errores
-header('Content-Type: application/json; charset=utf-8');
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-
-// Obtener rutas absolutas
 $projectRoot = dirname(dirname(dirname(__DIR__)));
-require_once $projectRoot . '/config/database.php';
 require_once $projectRoot . '/config/session.php';
+require_once $projectRoot . '/config/database.php';
 
-// Cargar functions.php si existe
-if (file_exists($projectRoot . '/includes/functions.php')) {
-    require_once $projectRoot . '/includes/functions.php';
+header('Content-Type: application/json');
+
+// Verificar sesión y permisos
+if (!SessionManager::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'No autorizado']);
+    exit;
 }
 
+$currentUser = SessionManager::getCurrentUser();
+if ($currentUser['role'] !== 'admin') {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Sin permisos']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Método no permitido']);
+    exit;
+}
+
+// Leer datos JSON
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
+
+if (!$data) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Datos JSON inválidos']);
+    exit;
+}
+
+$groupId = (int)($data['group_id'] ?? 0);
+$memberIds = $data['member_ids'] ?? [];
+
+if (!$groupId) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'ID de grupo requerido']);
+    exit;
+}
+
+// Validar que member_ids sea un array
+if (!is_array($memberIds)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'member_ids debe ser un array']);
+    exit;
+}
+
+// Limpiar y validar IDs de usuarios
+$memberIds = array_filter(array_map('intval', $memberIds));
+
 try {
-    // Verificar autenticación
-    if (!SessionManager::isLoggedIn()) {
-        throw new Exception("Usuario no autenticado");
-    }
-    
-    $currentUser = SessionManager::getCurrentUser();
-    if ($currentUser['role'] !== 'admin') {
-        throw new Exception("Permisos insuficientes. Se requiere rol de administrador");
-    }
-    
-    // Verificar método POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception("Método HTTP no permitido");
-    }
-    
-    // Obtener y validar datos
-    $groupId = $_POST['group_id'] ?? null;
-    $userId = $_POST['user_id'] ?? null;
-    $action = $_POST['action'] ?? null;
-    
-    if (!$groupId || !is_numeric($groupId)) {
-        throw new Exception("ID de grupo inválido");
-    }
-    
-    if (!$userId || !is_numeric($userId)) {
-        throw new Exception("ID de usuario inválido");
-    }
-    
-    if (!in_array($action, ['add', 'remove'])) {
-        throw new Exception("Acción inválida. Debe ser 'add' o 'remove'");
-    }
-    
-    $groupId = (int)$groupId;
-    $userId = (int)$userId;
-    
-    // Conectar a la base de datos
     $database = new Database();
     $pdo = $database->getConnection();
     
-    if (!$pdo) {
-        throw new Exception("Error de conexión a la base de datos");
-    }
-    
-    // Verificar que el grupo existe y no es del sistema
-    $groupQuery = "SELECT id, name, is_system_group FROM user_groups WHERE id = ?";
-    $groupStmt = $pdo->prepare($groupQuery);
-    $groupStmt->execute([$groupId]);
-    $group = $groupStmt->fetch(PDO::FETCH_ASSOC);
+    // Verificar que el grupo existe
+    $groupCheck = $pdo->prepare("SELECT id, name FROM user_groups WHERE id = ?");
+    $groupCheck->execute([$groupId]);
+    $group = $groupCheck->fetch(PDO::FETCH_ASSOC);
     
     if (!$group) {
-        throw new Exception("Grupo no encontrado");
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => 'Grupo no encontrado']);
+        exit;
     }
     
-    if ($group['is_system_group'] == 1) {
-        throw new Exception("No se puede modificar la membresía de un grupo del sistema");
+    $pdo->beginTransaction();
+    
+    // Obtener miembros actuales
+    $currentMembersQuery = "SELECT user_id FROM user_group_members WHERE group_id = ?";
+    $stmt = $pdo->prepare($currentMembersQuery);
+    $stmt->execute([$groupId]);
+    $currentMembers = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    // Determinar cambios
+    $toAdd = array_diff($memberIds, $currentMembers);
+    $toRemove = array_diff($currentMembers, $memberIds);
+    
+    $addedCount = 0;
+    $removedCount = 0;
+    $errors = [];
+    
+    // Remover usuarios que ya no están seleccionados
+    if (!empty($toRemove)) {
+        $placeholders = str_repeat('?,', count($toRemove) - 1) . '?';
+        $deleteStmt = $pdo->prepare("DELETE FROM user_group_members WHERE group_id = ? AND user_id IN ($placeholders)");
+        $params = array_merge([$groupId], $toRemove);
+        
+        if ($deleteStmt->execute($params)) {
+            $removedCount = $deleteStmt->rowCount();
+        }
     }
     
-    // Verificar que el usuario existe y está activo
-    $userQuery = "SELECT id, first_name, last_name, email, status FROM users WHERE id = ?";
-    $userStmt = $pdo->prepare($userQuery);
-    $userStmt->execute([$userId]);
-    $user = $userStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$user) {
-        throw new Exception("Usuario no encontrado");
-    }
-    
-    if ($user['status'] !== 'active') {
-        throw new Exception("El usuario no está activo");
-    }
-    
-    // Verificar si ya existe la relación
-    $memberQuery = "SELECT id FROM user_group_members WHERE group_id = ? AND user_id = ?";
-    $memberStmt = $pdo->prepare($memberQuery);
-    $memberStmt->execute([$groupId, $userId]);
-    $existingMember = $memberStmt->fetch();
-    
-    if ($action === 'add') {
-        // Agregar usuario al grupo
-        if ($existingMember) {
-            throw new Exception("El usuario ya es miembro de este grupo");
+    // Agregar nuevos usuarios
+    if (!empty($toAdd)) {
+        // Verificar que todos los usuarios existen y están activos
+        $placeholders = str_repeat('?,', count($toAdd) - 1) . '?';
+        $userCheckQuery = "SELECT id, first_name, last_name FROM users WHERE id IN ($placeholders) AND status = 'active'";
+        $userCheckStmt = $pdo->prepare($userCheckQuery);
+        $userCheckStmt->execute($toAdd);
+        $validUsers = $userCheckStmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $validUserIds = array_column($validUsers, 'id');
+        $invalidUsers = array_diff($toAdd, $validUserIds);
+        
+        if (!empty($invalidUsers)) {
+            $errors[] = "Usuarios no válidos o inactivos: " . implode(', ', $invalidUsers);
         }
         
-        $insertQuery = "
-            INSERT INTO user_group_members (group_id, user_id, assigned_by, added_at) 
-            VALUES (?, ?, ?, NOW())
-        ";
-        $insertStmt = $pdo->prepare($insertQuery);
-        
-        if (!$insertStmt->execute([$groupId, $userId, $currentUser['id']])) {
-            throw new Exception("Error al agregar usuario al grupo");
+        // Insertar usuarios válidos
+        if (!empty($validUserIds)) {
+            $insertStmt = $pdo->prepare("
+                INSERT INTO user_group_members (group_id, user_id, added_by, added_at) 
+                VALUES (?, ?, ?, NOW())
+            ");
+            
+            foreach ($validUserIds as $userId) {
+                if ($insertStmt->execute([$groupId, $userId, $currentUser['id']])) {
+                    $addedCount++;
+                }
+            }
+        }
+    }
+    
+    // Registrar actividad
+    if (function_exists('logActivity')) {
+        $changes = [];
+        if ($addedCount > 0) {
+            $changes[] = "Agregados: $addedCount usuarios";
+        }
+        if ($removedCount > 0) {
+            $changes[] = "Removidos: $removedCount usuarios";
         }
         
-        // Registrar actividad
-        if (function_exists('logActivity')) {
+        if (!empty($changes)) {
+            $description = "Miembros actualizados en grupo '{$group['name']}': " . implode(', ', $changes);
             logActivity(
                 $currentUser['id'], 
-                'add_user_to_group', 
-                'groups', 
+                'update_group_members', 
+                'user_group_members', 
                 $groupId, 
-                "Usuario {$user['first_name']} {$user['last_name']} agregado al grupo {$group['name']}"
+                $description
             );
         }
-        
-        echo json_encode([
-            'success' => true,
-            'message' => "Usuario agregado al grupo exitosamente",
-            'user' => [
-                'id' => $user['id'],
-                'name' => $user['first_name'] . ' ' . $user['last_name'],
-                'email' => $user['email']
-            ]
-        ]);
-        
-    } elseif ($action === 'remove') {
-        // Remover usuario del grupo
-        if (!$existingMember) {
-            throw new Exception("El usuario no es miembro de este grupo");
-        }
-        
-        $deleteQuery = "DELETE FROM user_group_members WHERE group_id = ? AND user_id = ?";
-        $deleteStmt = $pdo->prepare($deleteQuery);
-        
-        if (!$deleteStmt->execute([$groupId, $userId])) {
-            throw new Exception("Error al remover usuario del grupo");
-        }
-        
-        // Registrar actividad
-        if (function_exists('logActivity')) {
-            logActivity(
-                $currentUser['id'], 
-                'remove_user_from_group', 
-                'groups', 
-                $groupId, 
-                "Usuario {$user['first_name']} {$user['last_name']} removido del grupo {$group['name']}"
-            );
-        }
-        
-        echo json_encode([
-            'success' => true,
-            'message' => "Usuario removido del grupo exitosamente",
-            'user' => [
-                'id' => $user['id'],
-                'name' => $user['first_name'] . ' ' . $user['last_name'],
-                'email' => $user['email']
-            ]
-        ]);
     }
     
-} catch (PDOException $e) {
-    error_log('Error PDO en manage_group_members.php: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false,
-        'message' => 'Error de base de datos: ' . $e->getMessage(),
-        'error_code' => 'DB_ERROR'
-    ]);
+    $pdo->commit();
+    
+    // Respuesta exitosa
+    $response = [
+        'success' => true,
+        'message' => 'Miembros actualizados correctamente',
+        'group' => [
+            'id' => $groupId,
+            'name' => $group['name']
+        ],
+        'changes' => [
+            'added' => $addedCount,
+            'removed' => $removedCount,
+            'total_members' => count($memberIds) - count($invalidUsers ?? [])
+        ]
+    ];
+    
+    if (!empty($errors)) {
+        $response['warnings'] = $errors;
+    }
+    
+    echo json_encode($response);
     
 } catch (Exception $e) {
-    error_log('Error en manage_group_members.php: ' . $e->getMessage());
+    if (isset($pdo)) {
+        $pdo->rollBack();
+    }
+    
+    error_log('Error en update_group_members: ' . $e->getMessage());
+    http_response_code(500);
     echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => 'GENERAL_ERROR'
+        'success' => false, 
+        'message' => 'Error interno del servidor',
+        'debug' => $e->getMessage() // Solo para desarrollo
     ]);
 }
 ?>
