@@ -1,550 +1,653 @@
 /*
  * assets/js/groups.js
  * JavaScript para el módulo de Grupos - DMS2
- * Funcionalidades completas con AJAX y validaciones
+ * Versión optimizada y modular
  */
 
 // Variables globales
 let currentGroupId = null;
-let groupsTable = null;
+let currentGroupData = null;
+let allGroupUsers = [];
 
-// Inicialización cuando el DOM está listo
+// Configuración de módulos y permisos
+const MODULE_CONFIG = {
+    'users': {
+        name: 'Usuarios',
+        icon: 'users',
+        actions: ['read', 'write', 'delete']
+    },
+    'companies': {
+        name: 'Empresas', 
+        icon: 'briefcase',
+        actions: ['read', 'write', 'delete']
+    },
+    'departments': {
+        name: 'Departamentos',
+        icon: 'layers', 
+        actions: ['read', 'write', 'delete']
+    },
+    'documents': {
+        name: 'Documentos',
+        icon: 'file-text',
+        actions: ['read', 'write', 'delete', 'download', 'upload']
+    },
+    'groups': {
+        name: 'Grupos',
+        icon: 'users',
+        actions: ['read', 'write', 'delete']
+    },
+    'reports': {
+        name: 'Reportes',
+        icon: 'bar-chart-2',
+        actions: ['read', 'write']
+    }
+};
+
+const ACTION_LABELS = {
+    'read': 'Ver/Leer',
+    'write': 'Crear/Editar', 
+    'delete': 'Eliminar',
+    'download': 'Descargar',
+    'upload': 'Subir'
+};
+
+// ============================================================================
+// INICIALIZACIÓN
+// ============================================================================
+
 document.addEventListener('DOMContentLoaded', function() {
-    initializeGroupsModule();
+    console.log('🚀 Inicializando módulo de grupos...');
+    
+    // Inicializar componentes
+    initializeFeatherIcons();
+    initializeEventListeners();
+    initializeModals();
+    
+    console.log('✅ Módulo de grupos inicializado correctamente');
 });
 
-// Función principal de inicialización
-function initializeGroupsModule() {
-    console.log('Inicializando módulo de Grupos...');
-    
-    // Configurar eventos
-    setupEventListeners();
-    
-    // Configurar tooltips si Bootstrap está disponible
-    if (typeof bootstrap !== 'undefined') {
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-        var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl);
-        });
+// Inicializar iconos de Feather
+function initializeFeatherIcons() {
+    if (typeof feather !== 'undefined') {
+        feather.replace();
     }
 }
 
 // Configurar event listeners
-function setupEventListeners() {
-    // Botones de acción en las filas
-    document.addEventListener('click', function(e) {
-        if (e.target.closest('.btn-group-action')) {
-            e.preventDefault();
-        }
+function initializeEventListeners() {
+    // Botones principales
+    const btnCreateGroup = document.getElementById('btnCreateGroup');
+    const btnCreateFirstGroup = document.getElementById('btnCreateFirstGroup');
+    
+    if (btnCreateGroup) {
+        btnCreateGroup.addEventListener('click', showCreateGroupModal);
+    }
+    
+    if (btnCreateFirstGroup) {
+        btnCreateFirstGroup.addEventListener('click', showCreateGroupModal);
+    }
+
+    // Formulario de filtros
+    const searchInput = document.getElementById('search');
+    const statusSelect = document.getElementById('status');
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', handleAutoSearch);
+    }
+    
+    if (statusSelect) {
+        statusSelect.addEventListener('change', handleAutoSearch);
+    }
+
+    // Event listeners de modales
+    setupModalEventListeners();
+}
+
+// Configurar modales
+function initializeModals() {
+    setupModalCloseHandlers();
+    setupFormHandlers();
+}
+
+// ============================================================================
+// GESTIÓN DE MODALES
+// ============================================================================
+
+function setupModalEventListeners() {
+    // Modal de grupo
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+    if (saveGroupBtn) {
+        saveGroupBtn.addEventListener('click', saveGroup);
+    }
+
+    // Modal de permisos
+    const savePermissionsBtn = document.getElementById('savePermissionsBtn');
+    if (savePermissionsBtn) {
+        savePermissionsBtn.addEventListener('click', saveGroupPermissions);
+    }
+
+    // Tabs del modal de permisos
+    const tabButtons = document.querySelectorAll('[data-tab]');
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            switchPermissionTab(this.dataset.tab);
+        });
+    });
+
+    // Restricciones de empresas y departamentos
+    const companyRestrictions = document.querySelectorAll('input[name="companyRestriction"]');
+    const departmentRestrictions = document.querySelectorAll('input[name="departmentRestriction"]');
+    
+    companyRestrictions.forEach(radio => {
+        radio.addEventListener('change', toggleCompanyRestriction);
     });
     
-    // Form submit prevention para manejo AJAX
-    const groupForm = document.getElementById('groupForm');
-    if (groupForm) {
-        groupForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            saveGroup();
-        });
+    departmentRestrictions.forEach(radio => {
+        radio.addEventListener('change', toggleDepartmentRestriction);
+    });
+
+    // Filtros del modal de usuarios
+    const userSearch = document.getElementById('userSearch');
+    const companyFilter = document.getElementById('companyFilter');
+    
+    if (userSearch) {
+        userSearch.addEventListener('input', filterUsers);
+    }
+    
+    if (companyFilter) {
+        companyFilter.addEventListener('change', filterUsers);
     }
 }
 
-// Mostrar modal para crear nuevo grupo
+function setupModalCloseHandlers() {
+    // Cerrar modales con botones de cerrar
+    document.querySelectorAll('[data-dismiss="modal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const modal = this.closest('.modal');
+            if (modal) {
+                closeModal(modal.id);
+            }
+        });
+    });
+
+    // Cerrar modales haciendo clic fuera
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeModal(modal.id);
+            }
+        });
+    });
+
+    // Cerrar modales con Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeAllModals();
+        }
+    });
+}
+
+function setupFormHandlers() {
+    // Prevenir envío de formularios
+    const forms = document.querySelectorAll('form');
+    forms.forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+        });
+    });
+}
+
+// ============================================================================
+// FUNCIONES DE MODAL
+// ============================================================================
+
+function showModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        
+        // Reinicializar iconos de Feather en el modal
+        setTimeout(() => {
+            initializeFeatherIcons();
+        }, 100);
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+}
+
+function closeAllModals() {
+    document.querySelectorAll('.modal.show').forEach(modal => {
+        modal.classList.remove('show');
+    });
+    document.body.style.overflow = '';
+}
+
+// ============================================================================
+// FUNCIONES DEL MODAL DE CREAR/EDITAR GRUPO
+// ============================================================================
+
 function showCreateGroupModal() {
     currentGroupId = null;
+    currentGroupData = null;
+    
     document.getElementById('groupModalTitle').textContent = 'Crear Nuevo Grupo';
     clearGroupForm();
+    showModal('groupModal');
     
-    const modal = new bootstrap.Modal(document.getElementById('groupModal'));
-    modal.show();
+    // Enfocar primer campo
+    setTimeout(() => {
+        const groupNameInput = document.getElementById('groupName');
+        if (groupNameInput) {
+            groupNameInput.focus();
+        }
+    }, 200);
 }
 
-// Limpiar formulario de grupo
 function clearGroupForm() {
-    document.getElementById('groupForm').reset();
-    document.getElementById('groupId').value = '';
-    
-    // Limpiar checkboxes de permisos
-    document.querySelectorAll('input[type="checkbox"][name^="permissions"]').forEach(cb => {
-        cb.checked = false;
-    });
-    
-    // Resetear restricciones
-    document.querySelector('input[name="company_restriction"][value="all"]').checked = true;
-    document.querySelector('input[name="department_restriction"][value="all"]').checked = true;
-    document.querySelector('input[name="doctype_restriction"][value="all"]').checked = true;
-    
-    // Ocultar secciones específicas
-    document.getElementById('specificCompanies').style.display = 'none';
-    document.getElementById('specificDepartments').style.display = 'none';
-    document.getElementById('specificDocTypes').style.display = 'none';
-    
-    // Limpiar checkboxes específicos
-    document.querySelectorAll('input[name="allowed_companies[]"]').forEach(cb => cb.checked = false);
-    document.querySelectorAll('input[name="allowed_departments[]"]').forEach(cb => cb.checked = false);
-    document.querySelectorAll('input[name="allowed_document_types[]"]').forEach(cb => cb.checked = false);
-}
-
-// Editar grupo existente
-function editGroup(groupId) {
-    currentGroupId = groupId;
-    document.getElementById('groupModalTitle').textContent = 'Editar Grupo';
-    
-    // Cargar datos del grupo
-    showLoader('Cargando datos del grupo...');
-    
-    fetch(`actions/get_group_details.php?id=${groupId}`)
-        .then(response => response.json())
-        .then(data => {
-            hideLoader();
-            
-            if (data.success) {
-                populateGroupForm(data.group);
-                const modal = new bootstrap.Modal(document.getElementById('groupModal'));
-                modal.show();
-            } else {
-                showAlert('Error', data.message || 'No se pudieron cargar los datos del grupo', 'error');
-            }
-        })
-        .catch(error => {
-            hideLoader();
-            console.error('Error cargando grupo:', error);
-            showAlert('Error', 'Error de conexión al cargar el grupo', 'error');
-        });
-}
-
-// Llenar formulario con datos del grupo
-function populateGroupForm(group) {
-    document.getElementById('groupId').value = group.id;
-    document.getElementById('groupName').value = group.name;
-    document.getElementById('groupDescription').value = group.description || '';
-    document.getElementById('groupStatus').value = group.status;
-    
-    // Límites operacionales
-    document.getElementById('downloadLimit').value = group.download_limit_daily || '';
-    document.getElementById('uploadLimit').value = group.upload_limit_daily || '';
-    
-    // Cargar permisos
-    if (group.permissions) {
-        loadGroupPermissions(group.permissions);
-    }
-    
-    // Cargar restricciones
-    if (group.restrictions) {
-        loadGroupRestrictions(group.restrictions);
-    }
-}
-
-// Cargar permisos en el formulario
-function loadGroupPermissions(permissions) {
-    for (const [module, actions] of Object.entries(permissions)) {
-        for (const [action, allowed] of Object.entries(actions)) {
-            const checkbox = document.getElementById(`perm_${module}_${action}`);
-            if (checkbox) {
-                checkbox.checked = allowed;
-            }
-        }
-    }
-}
-
-// Cargar restricciones en el formulario
-function loadGroupRestrictions(restrictions) {
-    // Restricciones de empresas
-    if (restrictions.companies) {
-        if (restrictions.companies === 'all') {
-            document.querySelector('input[name="company_restriction"][value="all"]').checked = true;
-        } else if (restrictions.companies === 'user_company') {
-            document.querySelector('input[name="company_restriction"][value="user_company"]').checked = true;
-        } else if (Array.isArray(restrictions.companies)) {
-            document.querySelector('input[name="company_restriction"][value="specific"]').checked = true;
-            document.getElementById('specificCompanies').style.display = 'block';
-            restrictions.companies.forEach(companyId => {
-                const checkbox = document.getElementById(`company_${companyId}`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    }
-    
-    // Restricciones de departamentos
-    if (restrictions.departments) {
-        if (restrictions.departments === 'all') {
-            document.querySelector('input[name="department_restriction"][value="all"]').checked = true;
-        } else if (restrictions.departments === 'user_department') {
-            document.querySelector('input[name="department_restriction"][value="user_department"]').checked = true;
-        } else if (Array.isArray(restrictions.departments)) {
-            document.querySelector('input[name="department_restriction"][value="specific"]').checked = true;
-            document.getElementById('specificDepartments').style.display = 'block';
-            restrictions.departments.forEach(deptId => {
-                const checkbox = document.getElementById(`dept_${deptId}`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    }
-    
-    // Restricciones de tipos de documentos
-    if (restrictions.document_types) {
-        if (restrictions.document_types === 'all') {
-            document.querySelector('input[name="doctype_restriction"][value="all"]').checked = true;
-        } else if (Array.isArray(restrictions.document_types)) {
-            document.querySelector('input[name="doctype_restriction"][value="specific"]').checked = true;
-            document.getElementById('specificDocTypes').style.display = 'block';
-            restrictions.document_types.forEach(typeId => {
-                const checkbox = document.getElementById(`doctype_${typeId}`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    }
-}
-
-// Guardar grupo (crear o actualizar)
-function saveGroup() {
     const form = document.getElementById('groupForm');
-    const formData = new FormData();
+    if (form) {
+        form.reset();
+    }
     
-    // Datos básicos
-    formData.append('group_id', document.getElementById('groupId').value);
-    formData.append('name', document.getElementById('groupName').value.trim());
-    formData.append('description', document.getElementById('groupDescription').value.trim());
-    formData.append('status', document.getElementById('groupStatus').value);
-    formData.append('download_limit_daily', document.getElementById('downloadLimit').value || null);
-    formData.append('upload_limit_daily', document.getElementById('uploadLimit').value || null);
+    const groupId = document.getElementById('groupId');
+    if (groupId) {
+        groupId.value = '';
+    }
     
-    // Validaciones
-    if (!formData.get('name')) {
-        showAlert('Error', 'El nombre del grupo es obligatorio', 'error');
+    currentGroupId = null;
+    currentGroupData = null;
+}
+
+function saveGroup() {
+    const groupName = document.getElementById('groupName')?.value.trim();
+    const groupDescription = document.getElementById('groupDescription')?.value.trim();
+    const groupStatus = document.getElementById('groupStatus')?.value;
+    const downloadLimit = document.getElementById('downloadLimit')?.value || 0;
+    const uploadLimit = document.getElementById('uploadLimit')?.value || 0;
+    
+    if (!groupName) {
+        showNotification('El nombre del grupo es obligatorio', 'error');
+        document.getElementById('groupName')?.focus();
         return;
     }
     
-    // Recopilar permisos
-    const permissions = {};
-    document.querySelectorAll('input[type="checkbox"][name^="permissions"]').forEach(checkbox => {
-        if (checkbox.checked) {
-            const match = checkbox.name.match(/permissions\[(\w+)\]\[(\w+)\]/);
-            if (match) {
-                const [, module, action] = match;
-                if (!permissions[module]) permissions[module] = {};
-                permissions[module][action] = true;
-            }
-        }
-    });
-    formData.append('permissions', JSON.stringify(permissions));
+    showLoading();
     
-    // Recopilar restricciones
-    const restrictions = {};
+    const formData = new FormData();
+    formData.append('group_name', groupName);
+    formData.append('group_description', groupDescription);
+    formData.append('group_status', groupStatus);
+    formData.append('download_limit', downloadLimit);
+    formData.append('upload_limit', uploadLimit);
     
-    // Restricciones de empresas
-    const companyRestriction = document.querySelector('input[name="company_restriction"]:checked').value;
-    if (companyRestriction === 'specific') {
-        const selectedCompanies = Array.from(document.querySelectorAll('input[name="allowed_companies[]"]:checked'))
-            .map(cb => parseInt(cb.value));
-        restrictions.companies = selectedCompanies;
-    } else {
-        restrictions.companies = companyRestriction;
+    if (currentGroupId) {
+        formData.append('group_id', currentGroupId);
     }
     
-    // Restricciones de departamentos
-    const deptRestriction = document.querySelector('input[name="department_restriction"]:checked').value;
-    if (deptRestriction === 'specific') {
-        const selectedDepts = Array.from(document.querySelectorAll('input[name="allowed_departments[]"]:checked'))
-            .map(cb => parseInt(cb.value));
-        restrictions.departments = selectedDepts;
-    } else {
-        restrictions.departments = deptRestriction;
-    }
+    const url = currentGroupId ? 'actions/update_group.php' : 'actions/create_group.php';
     
-    // Restricciones de tipos de documentos
-    const doctypeRestriction = document.querySelector('input[name="doctype_restriction"]:checked').value;
-    if (doctypeRestriction === 'specific') {
-        const selectedTypes = Array.from(document.querySelectorAll('input[name="allowed_document_types[]"]:checked'))
-            .map(cb => parseInt(cb.value));
-        restrictions.document_types = selectedTypes;
-    } else {
-        restrictions.document_types = doctypeRestriction;
-    }
-    
-    formData.append('restrictions', JSON.stringify(restrictions));
-    
-    // Enviar datos
-    const isEdit = currentGroupId !== null;
-    const actionUrl = isEdit ? 'actions/update_group.php' : 'actions/create_group.php';
-    
-    showLoader(isEdit ? 'Actualizando grupo...' : 'Creando grupo...');
-    
-    fetch(actionUrl, {
+    fetch(url, {
         method: 'POST',
         body: formData
     })
     .then(response => response.json())
     .then(data => {
-        hideLoader();
+        hideLoading();
         
         if (data.success) {
-            showAlert('Éxito', data.message, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
-            
-            // Recargar página para mostrar cambios
+            showNotification(
+                data.message || (currentGroupId ? 'Grupo actualizado correctamente' : 'Grupo creado correctamente'), 
+                'success'
+            );
+            closeModal('groupModal');
             setTimeout(() => {
                 window.location.reload();
             }, 1500);
         } else {
-            showAlert('Error', data.message || 'Error al guardar el grupo', 'error');
+            showNotification(data.message || 'Error al guardar el grupo', 'error');
         }
     })
     .catch(error => {
-        hideLoader();
-        console.error('Error guardando grupo:', error);
-        showAlert('Error', 'Error de conexión al guardar el grupo', 'error');
+        hideLoading();
+        console.error('Error:', error);
+        showNotification('Error de conexión al guardar el grupo', 'error');
     });
 }
 
-// Ver detalles del grupo
+// ============================================================================
+// FUNCIONES DE ACCIONES DE GRUPOS
+// ============================================================================
+
 function viewGroupDetails(groupId) {
-    showLoader('Cargando detalles del grupo...');
+    showLoading();
     
-    fetch(`actions/get_group_details.php?id=${groupId}&full=1`)
+    fetch(`actions/get_group_details.php?id=${groupId}`)
         .then(response => response.json())
         .then(data => {
-            hideLoader();
+            hideLoading();
             
             if (data.success) {
-                displayGroupDetails(data.group, data.members || []);
-                const modal = new bootstrap.Modal(document.getElementById('viewGroupModal'));
-                modal.show();
+                showGroupDetailsModal(data.group);
             } else {
-                showAlert('Error', data.message || 'No se pudieron cargar los detalles del grupo', 'error');
+                showNotification(data.message || 'Error al cargar detalles del grupo', 'error');
             }
         })
         .catch(error => {
-            hideLoader();
-            console.error('Error cargando detalles:', error);
-            showAlert('Error', 'Error de conexión al cargar detalles', 'error');
+            hideLoading();
+            console.error('Error:', error);
+            showNotification('Error de conexión al cargar detalles', 'error');
         });
 }
 
-// Mostrar detalles del grupo en el modal
-function displayGroupDetails(group, members) {
-    const content = document.getElementById('viewGroupContent');
+function showGroupDetailsModal(group) {
+    currentGroupData = group;
+    document.getElementById('detailsModalTitle').textContent = `Detalles: ${group.name}`;
     
-    let membersHtml = '';
-    if (members.length > 0) {
-        membersHtml = members.map(member => `
-            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-                <div>
-                    <strong>${member.first_name} ${member.last_name}</strong>
-                    <br><small class="text-muted">@${member.username} - ${member.company_name || 'Sin empresa'}</small>
-                </div>
-                <span class="badge bg-${member.status === 'active' ? 'success' : 'warning'}">${member.status}</span>
-            </div>
-        `).join('');
-    } else {
-        membersHtml = '<p class="text-muted text-center py-3">No hay usuarios asignados a este grupo</p>';
+    const detailsHtml = generateGroupDetailsHTML(group);
+    document.getElementById('groupDetails').innerHTML = detailsHtml;
+    
+    // Mostrar/ocultar botón de editar según si es grupo del sistema
+    const editBtn = document.getElementById('editFromDetailsBtn');
+    if (editBtn) {
+        editBtn.style.display = group.is_system_group ? 'none' : 'inline-flex';
+        editBtn.onclick = () => editGroupFromDetails();
     }
     
-    content.innerHTML = `
-        <div class="row">
-            <div class="col-md-6">
-                <h6><i class="fas fa-info-circle me-2"></i>Información General</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>Nombre:</strong></td><td>${group.name}</td></tr>
-                    <tr><td><strong>Descripción:</strong></td><td>${group.description || 'Sin descripción'}</td></tr>
-                    <tr><td><strong>Estado:</strong></td><td><span class="badge bg-${group.status === 'active' ? 'success' : 'warning'}">${group.status}</span></td></tr>
-                    <tr><td><strong>Tipo:</strong></td><td>${group.is_system_group ? 'Grupo del Sistema' : 'Grupo Personalizado'}</td></tr>
-                    <tr><td><strong>Creado:</strong></td><td>${new Date(group.created_at).toLocaleDateString()}</td></tr>
-                    <tr><td><strong>Límite Descargas:</strong></td><td>${group.download_limit_daily || 'Sin límite'}</td></tr>
-                    <tr><td><strong>Límite Subidas:</strong></td><td>${group.upload_limit_daily || 'Sin límite'}</td></tr>
-                </table>
+    showModal('detailsModal');
+}
+
+function generateGroupDetailsHTML(group) {
+    return `
+        <div class="group-detail-item">
+            <div class="detail-label">
+                <i data-feather="tag"></i>
+                Nombre del Grupo
             </div>
-            <div class="col-md-6">
-                <h6><i class="fas fa-users me-2"></i>Miembros (${members.length})</h6>
-                <div style="max-height: 300px; overflow-y: auto;">
-                    ${membersHtml}
+            <div class="detail-value highlight">
+                ${group.name}
+                ${group.is_system_group ? '<span class="badge badge-warning">Sistema</span>' : ''}
+            </div>
+        </div>
+        
+        <div class="group-detail-item">
+            <div class="detail-label">
+                <i data-feather="file-text"></i>
+                Descripción
+            </div>
+            <div class="detail-value">
+                ${group.description || 'Sin descripción'}
+            </div>
+        </div>
+        
+        <div class="group-detail-item">
+            <div class="detail-label">
+                <i data-feather="activity"></i>
+                Estado
+            </div>
+            <div class="detail-value">
+                <span class="badge badge-${group.status === 'active' ? 'success' : 'danger'}">
+                    ${group.status.toUpperCase()}
+                </span>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card members">
+                <div class="stat-number">${group.member_count}</div>
+                <div class="stat-label">Total Miembros</div>
+            </div>
+            <div class="stat-card active-members">
+                <div class="stat-number">${group.active_members}</div>
+                <div class="stat-label">Miembros Activos</div>
+            </div>
+        </div>
+        
+        <div class="group-detail-item">
+            <div class="detail-label">
+                <i data-feather="settings"></i>
+                Límites Diarios
+            </div>
+            <div class="limits-grid">
+                <div class="limit-item">
+                    <span class="limit-label">Descargas:</span>
+                    <span class="limit-value">${group.download_limit_daily || 'Sin límite'}</span>
+                </div>
+                <div class="limit-item">
+                    <span class="limit-label">Subidas:</span>
+                    <span class="limit-value">${group.upload_limit_daily || 'Sin límite'}</span>
                 </div>
             </div>
         </div>
         
-        <div class="mt-4">
-            <h6><i class="fas fa-key me-2"></i>Permisos por Módulo</h6>
-            <div id="permissionsDetails"></div>
-        </div>
-        
-        <div class="mt-4">
-            <h6><i class="fas fa-filter me-2"></i>Restricciones de Acceso</h6>
-            <div id="restrictionsDetails"></div>
+        <div class="creation-info">
+            <i data-feather="info"></i>
+            Creado el ${new Date(group.created_at).toLocaleDateString('es-ES')} 
+            ${group.created_by_name ? `por ${group.created_by_name}` : ''}
         </div>
     `;
-    
-    // Mostrar permisos formateados
-    displayFormattedPermissions(group.permissions, 'permissionsDetails');
-    
-    // Mostrar restricciones formateadas
-    displayFormattedRestrictions(group.restrictions, 'restrictionsDetails');
 }
 
-// Mostrar permisos formateados
-function displayFormattedPermissions(permissions, containerId) {
-    const container = document.getElementById(containerId);
-    if (!permissions || Object.keys(permissions).length === 0) {
-        container.innerHTML = '<p class="text-muted">Sin permisos específicos asignados</p>';
-        return;
+function editGroupFromDetails() {
+    if (currentGroupData) {
+        closeModal('detailsModal');
+        editGroup(currentGroupData.id);
     }
-    
-    let html = '<div class="row">';
-    for (const [module, actions] of Object.entries(permissions)) {
-        const moduleActions = Object.entries(actions)
-            .filter(([action, allowed]) => allowed)
-            .map(([action]) => action);
-            
-        if (moduleActions.length > 0) {
-            html += `
-                <div class="col-md-4 mb-2">
-                    <div class="card card-body py-2">
-                        <h6 class="mb-1">${module.charAt(0).toUpperCase() + module.slice(1)}</h6>
-                        <small class="text-success">${moduleActions.join(', ')}</small>
-                    </div>
-                </div>
-            `;
-        }
-    }
-    html += '</div>';
-    
-    container.innerHTML = html;
 }
 
-// Mostrar restricciones formateadas
-function displayFormattedRestrictions(restrictions, containerId) {
-    const container = document.getElementById(containerId);
-    if (!restrictions) {
-        container.innerHTML = '<p class="text-muted">Sin restricciones específicas</p>';
-        return;
-    }
+function editGroup(groupId) {
+    showLoading();
     
-    let html = '<div class="row">';
-    
-    // Restricciones de empresas
-    html += '<div class="col-md-4"><strong>Empresas:</strong><br>';
-    if (restrictions.companies === 'all') {
-        html += '<span class="text-success">Todas las empresas</span>';
-    } else if (restrictions.companies === 'user_company') {
-        html += '<span class="text-info">Solo su empresa</span>';
-    } else if (Array.isArray(restrictions.companies)) {
-        html += `<span class="text-warning">${restrictions.companies.length} empresas específicas</span>`;
-    }
-    html += '</div>';
-    
-    // Restricciones de departamentos
-    html += '<div class="col-md-4"><strong>Departamentos:</strong><br>';
-    if (restrictions.departments === 'all') {
-        html += '<span class="text-success">Todos los departamentos</span>';
-    } else if (restrictions.departments === 'user_department') {
-        html += '<span class="text-info">Solo su departamento</span>';
-    } else if (Array.isArray(restrictions.departments)) {
-        html += `<span class="text-warning">${restrictions.departments.length} departamentos específicos</span>`;
-    }
-    html += '</div>';
-    
-    // Restricciones de tipos de documentos
-    html += '<div class="col-md-4"><strong>Tipos de Documentos:</strong><br>';
-    if (restrictions.document_types === 'all') {
-        html += '<span class="text-success">Todos los tipos</span>';
-    } else if (Array.isArray(restrictions.document_types)) {
-        html += `<span class="text-warning">${restrictions.document_types.length} tipos específicos</span>`;
-    }
-    html += '</div>';
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-// Gestionar usuarios del grupo
-function manageGroupUsers(groupId) {
-    showLoader('Cargando gestión de usuarios...');
-    
-    fetch(`actions/get_group_users.php?group_id=${groupId}`)
+    fetch(`actions/get_group_details.php?id=${groupId}`)
         .then(response => response.json())
         .then(data => {
-            hideLoader();
+            hideLoading();
             
             if (data.success) {
-                displayUserManagement(groupId, data.current_users || [], data.available_users || []);
-                const modal = new bootstrap.Modal(document.getElementById('manageUsersModal'));
-                modal.show();
+                const group = data.group;
+                
+                // Verificar si es grupo del sistema
+                if (group.is_system_group) {
+                    showNotification('No se puede editar un grupo del sistema', 'warning');
+                    return;
+                }
+                
+                // Llenar formulario
+                currentGroupId = groupId;
+                currentGroupData = group;
+                document.getElementById('groupModalTitle').textContent = 'Editar Grupo';
+                document.getElementById('groupId').value = groupId;
+                document.getElementById('groupName').value = group.name;
+                document.getElementById('groupDescription').value = group.description || '';
+                document.getElementById('groupStatus').value = group.status;
+                document.getElementById('downloadLimit').value = group.download_limit_daily || '';
+                document.getElementById('uploadLimit').value = group.upload_limit_daily || '';
+                
+                showModal('groupModal');
+                
+                setTimeout(() => {
+                    document.getElementById('groupName')?.focus();
+                }, 200);
             } else {
-                showAlert('Error', data.message || 'No se pudo cargar la gestión de usuarios', 'error');
+                showNotification(data.message || 'Error al cargar datos del grupo', 'error');
             }
         })
         .catch(error => {
-            hideLoader();
-            console.error('Error cargando usuarios:', error);
-            showAlert('Error', 'Error de conexión al cargar usuarios', 'error');
+            hideLoading();
+            console.error('Error:', error);
+            showNotification('Error de conexión al cargar el grupo', 'error');
         });
 }
 
-// Mostrar interfaz de gestión de usuarios
-function displayUserManagement(groupId, currentUsers, availableUsers) {
-    const content = document.getElementById('manageUsersContent');
+function toggleGroupStatus(groupId, currentStatus) {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    const action = newStatus === 'active' ? 'activar' : 'desactivar';
     
-    content.innerHTML = `
-        <div class="row">
-            <div class="col-md-6">
-                <h6><i class="fas fa-users me-2"></i>Usuarios Actuales (${currentUsers.length})</h6>
-                <div id="currentUsers" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px;">
-                    ${currentUsers.length > 0 ? 
-                        currentUsers.map(user => `
-                            <div class="d-flex justify-content-between align-items-center py-2 border-bottom" data-user-id="${user.id}">
-                                <div>
-                                    <strong>${user.first_name} ${user.last_name}</strong>
-                                    <br><small class="text-muted">@${user.username} - ${user.company_name || 'Sin empresa'}</small>
-                                </div>
-                                <button class="btn btn-sm btn-outline-danger" onclick="removeUserFromGroup(${groupId}, ${user.id})">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                        `).join('') : 
-                        '<p class="text-muted text-center">No hay usuarios asignados</p>'
+    if (confirm(`¿Está seguro que desea ${action} este grupo?`)) {
+        showLoading();
+        
+        const formData = new FormData();
+        formData.append('group_id', groupId);
+        formData.append('new_status', newStatus);
+        
+        fetch('actions/toggle_group_status.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            
+            if (data.success) {
+                showNotification(
+                    data.message || `Grupo ${action === 'activar' ? 'activado' : 'desactivado'} correctamente`, 
+                    'success'
+                );
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                showNotification(data.message || 'Error al cambiar estado del grupo', 'error');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error:', error);
+            showNotification('Error de conexión al cambiar estado', 'error');
+        });
+    }
+}
+
+// ============================================================================
+// FUNCIONES DE GESTIÓN DE USUARIOS
+// ============================================================================
+
+function manageGroupUsers(groupId) {
+    currentGroupId = groupId;
+    showLoading();
+    
+    // Cargar datos del grupo y usuarios
+    Promise.all([
+        fetch(`actions/get_group_details.php?id=${groupId}`).then(r => r.json()),
+        fetch(`actions/get_group_users.php?group_id=${groupId}`).then(r => r.json())
+    ])
+    .then(([groupData, usersData]) => {
+        hideLoading();
+        
+        if (groupData.success && usersData.success) {
+            document.getElementById('usersModalTitle').textContent = `Gestionar Usuarios: ${groupData.group.name}`;
+            document.getElementById('currentGroupId').value = groupId;
+            
+            allGroupUsers = usersData.users || [];
+            renderUsersList();
+            showModal('usersModal');
+        } else {
+            showNotification('Error al cargar datos del grupo', 'error');
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        console.error('Error:', error);
+        showNotification('Error de conexión al cargar usuarios', 'error');
+    });
+}
+
+function renderUsersList() {
+    const searchTerm = document.getElementById('userSearch')?.value.toLowerCase() || '';
+    const companyFilter = document.getElementById('companyFilter')?.value || '';
+    
+    let filteredUsers = availableUsers.filter(user => {
+        const matchesSearch = !searchTerm || 
+            user.first_name.toLowerCase().includes(searchTerm) ||
+            user.last_name.toLowerCase().includes(searchTerm) ||
+            user.email.toLowerCase().includes(searchTerm) ||
+            user.username.toLowerCase().includes(searchTerm);
+        
+        const matchesCompany = !companyFilter || user.company_id == companyFilter;
+        
+        return matchesSearch && matchesCompany;
+    });
+
+    const usersList = document.getElementById('usersList');
+    const userStats = document.getElementById('userStats');
+    
+    if (!usersList) return;
+    
+    if (filteredUsers.length === 0) {
+        usersList.innerHTML = `
+            <div class="text-center py-4">
+                <div class="empty-icon mx-auto mb-3">
+                    <i data-feather="users"></i>
+                </div>
+                <p class="text-muted">No se encontraron usuarios</p>
+            </div>
+        `;
+        initializeFeatherIcons();
+        return;
+    }
+
+    const usersHtml = filteredUsers.map(user => {
+        const isInGroup = allGroupUsers.some(gu => gu.user_id == user.id);
+        const company = availableCompanies.find(c => c.id == user.company_id);
+        
+        return `
+            <div class="user-item">
+                <div class="user-info">
+                    <div class="user-name">${user.first_name} ${user.last_name}</div>
+                    <div class="user-details">${user.email} • ${user.username}</div>
+                    ${company ? `<div class="user-company">${company.name}</div>` : ''}
+                </div>
+                <div class="user-actions">
+                    ${isInGroup ? 
+                        `<button class="btn-user-action btn-remove-user" onclick="removeUserFromGroup(${user.id})">
+                            <i data-feather="user-minus"></i>
+                            Remover
+                        </button>` :
+                        `<button class="btn-user-action btn-add-user" onclick="addUserToGroup(${user.id})">
+                            <i data-feather="user-plus"></i>
+                            Agregar
+                        </button>`
                     }
                 </div>
             </div>
-            <div class="col-md-6">
-                <h6><i class="fas fa-user-plus me-2"></i>Usuarios Disponibles</h6>
-                <div class="mb-3">
-                    <input type="text" class="form-control" id="userSearch" placeholder="Buscar usuarios..." onkeyup="filterAvailableUsers()">
-                </div>
-                <div id="availableUsers" style="max-height: 350px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px;">
-                    ${availableUsers.map(user => `
-                        <div class="d-flex justify-content-between align-items-center py-2 border-bottom user-item" data-user-id="${user.id}" data-user-name="${user.first_name} ${user.last_name} ${user.username}">
-                            <div>
-                                <strong>${user.first_name} ${user.last_name}</strong>
-                                <br><small class="text-muted">@${user.username} - ${user.company_name || 'Sin empresa'}</small>
-                            </div>
-                            <button class="btn btn-sm btn-outline-success" onclick="addUserToGroup(${groupId}, ${user.id})">
-                                <i class="fas fa-plus"></i>
-                            </button>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        </div>
-    `;
-}
+        `;
+    }).join('');
 
-// Filtrar usuarios disponibles
-function filterAvailableUsers() {
-    const searchTerm = document.getElementById('userSearch').value.toLowerCase();
-    const userItems = document.querySelectorAll('.user-item');
+    usersList.innerHTML = usersHtml;
     
-    userItems.forEach(item => {
-        const userName = item.getAttribute('data-user-name').toLowerCase();
-        if (userName.includes(searchTerm)) {
-            item.style.display = 'flex';
-        } else {
-            item.style.display = 'none';
-        }
-    });
+    // Actualizar estadísticas
+    if (userStats) {
+        const totalUsers = filteredUsers.length;
+        const usersInGroup = filteredUsers.filter(user => 
+            allGroupUsers.some(gu => gu.user_id == user.id)
+        ).length;
+        
+        userStats.innerHTML = `
+            <span class="text-muted">
+                ${totalUsers} usuarios • 
+                <span class="badge badge-info">${usersInGroup}</span> en el grupo
+            </span>
+        `;
+    }
+    
+    initializeFeatherIcons();
 }
 
-// Agregar usuario al grupo
-function addUserToGroup(groupId, userId) {
+function filterUsers() {
+    renderUsersList();
+}
+
+function addUserToGroup(userId) {
+    if (!currentGroupId) return;
+    
     const formData = new FormData();
-    formData.append('group_id', groupId);
+    formData.append('group_id', currentGroupId);
     formData.append('user_id', userId);
     formData.append('action', 'add');
     
@@ -555,153 +658,381 @@ function addUserToGroup(groupId, userId) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showAlert('Éxito', 'Usuario agregado al grupo correctamente', 'success');
-            // Recargar gestión de usuarios
-            manageGroupUsers(groupId);
+            showNotification(data.message || 'Usuario agregado al grupo', 'success');
+            
+            // Actualizar lista local
+            allGroupUsers.push({
+                user_id: userId,
+                group_id: currentGroupId,
+                assigned_at: new Date().toISOString()
+            });
+            
+            renderUsersList();
         } else {
-            showAlert('Error', data.message || 'Error al agregar usuario al grupo', 'error');
+            showNotification(data.message || 'Error al agregar usuario', 'error');
         }
     })
     .catch(error => {
-        console.error('Error agregando usuario:', error);
-        showAlert('Error', 'Error de conexión al agregar usuario', 'error');
+        console.error('Error:', error);
+        showNotification('Error de conexión al agregar usuario', 'error');
     });
 }
 
-// Remover usuario del grupo
-function removeUserFromGroup(groupId, userId) {
-    if (!confirm('¿Está seguro de que desea remover este usuario del grupo?')) {
-        return;
+function removeUserFromGroup(userId) {
+    if (!currentGroupId) return;
+    
+    const user = availableUsers.find(u => u.id == userId);
+    if (user && confirm(`¿Remover a ${user.first_name} ${user.last_name} del grupo?`)) {
+        const formData = new FormData();
+        formData.append('group_id', currentGroupId);
+        formData.append('user_id', userId);
+        formData.append('action', 'remove');
+        
+        fetch('actions/manage_group_users.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(data.message || 'Usuario removido del grupo', 'success');
+                
+                // Actualizar lista local
+                allGroupUsers = allGroupUsers.filter(gu => gu.user_id != userId);
+                
+                renderUsersList();
+            } else {
+                showNotification(data.message || 'Error al remover usuario', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('Error de conexión al remover usuario', 'error');
+        });
+    }
+}
+
+// ============================================================================
+// FUNCIONES DE GESTIÓN DE PERMISOS
+// ============================================================================
+
+function manageGroupPermissions(groupId) {
+    showLoading();
+    
+    fetch(`actions/get_group_details.php?id=${groupId}`)
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            
+            if (data.success) {
+                const group = data.group;
+                
+                // Verificar si es grupo del sistema
+                if (group.is_system_group) {
+                    showNotification('No se pueden editar permisos de un grupo del sistema', 'warning');
+                    return;
+                }
+                
+                document.getElementById('permissionsModalTitle').textContent = `Permisos: ${group.name}`;
+                document.getElementById('currentPermissionGroupId').value = groupId;
+                
+                // Cargar permisos actuales
+                loadCurrentPermissions(data.module_permissions || {});
+                loadCurrentRestrictions(data.access_restrictions || {});
+                
+                showModal('permissionsModal');
+            } else {
+                showNotification(data.message || 'Error al cargar permisos del grupo', 'error');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error:', error);
+            showNotification('Error de conexión al cargar permisos', 'error');
+        });
+}
+
+function switchPermissionTab(tabName) {
+    // Desactivar todas las pestañas
+    document.querySelectorAll('.nav-link').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(content => content.classList.remove('active'));
+    
+    // Activar pestaña seleccionada
+    document.getElementById(tabName + 'Tab').classList.add('active');
+    document.getElementById(tabName + 'Content').classList.add('active');
+    
+    // Re-renderizar iconos
+    setTimeout(() => {
+        initializeFeatherIcons();
+    }, 50);
+}
+
+function loadCurrentPermissions(permissions) {
+    let html = '';
+    
+    for (const [moduleKey, moduleData] of Object.entries(MODULE_CONFIG)) {
+        const modulePermissions = permissions[moduleKey] || {};
+        
+        html += `
+            <div class="permission-module">
+                <h8>
+                    <i data-feather="${moduleData.icon}"></i>
+                    ${moduleData.name}
+                </h8>
+                <div class="permission-actions">
+        `;
+        
+        moduleData.actions.forEach(action => {
+            const isChecked = modulePermissions[action] === true;
+            html += `
+                <div class="permission-checkbox">
+                    <input type="checkbox" id="perm_${moduleKey}_${action}" 
+                           name="permissions[${moduleKey}][${action}]" 
+                           value="1" ${isChecked ? 'checked' : ''}>
+                    <label for="perm_${moduleKey}_${action}">${ACTION_LABELS[action] || action}</label>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
     }
     
+    document.getElementById('modulePermissionsList').innerHTML = html;
+    initializeFeatherIcons();
+}
+
+function loadCurrentRestrictions(restrictions) {
+    // Restricciones de empresas
+    const companyRestriction = restrictions.companies || 'all';
+    
+    if (companyRestriction === 'all') {
+        document.querySelector('input[name="companyRestriction"][value="all"]').checked = true;
+    } else if (companyRestriction === 'user_company') {
+        document.querySelector('input[name="companyRestriction"][value="user_company"]').checked = true;
+    } else if (Array.isArray(companyRestriction)) {
+        document.querySelector('input[name="companyRestriction"][value="specific"]').checked = true;
+        document.getElementById('specificCompanies').style.display = 'block';
+        
+        companyRestriction.forEach(companyId => {
+            const checkbox = document.querySelector(`input[name="allowedCompanies[]"][value="${companyId}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+    
+    // Restricciones de departamentos
+    const departmentRestriction = restrictions.departments || 'all';
+    
+    if (departmentRestriction === 'all') {
+        document.querySelector('input[name="departmentRestriction"][value="all"]').checked = true;
+    } else if (departmentRestriction === 'user_department') {
+        document.querySelector('input[name="departmentRestriction"][value="user_department"]').checked = true;
+    } else if (Array.isArray(departmentRestriction)) {
+        document.querySelector('input[name="departmentRestriction"][value="specific"]').checked = true;
+        document.getElementById('specificDepartments').style.display = 'block';
+        
+        departmentRestriction.forEach(deptId => {
+            const checkbox = document.querySelector(`input[name="allowedDepartments[]"][value="${deptId}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+}
+
+function toggleCompanyRestriction() {
+    const specificDiv = document.getElementById('specificCompanies');
+    const specificRadio = document.querySelector('input[name="companyRestriction"][value="specific"]');
+    
+    if (specificRadio.checked) {
+        specificDiv.style.display = 'block';
+    } else {
+        specificDiv.style.display = 'none';
+        // Desmarcar todos los checkboxes
+        document.querySelectorAll('input[name="allowedCompanies[]"]').forEach(cb => cb.checked = false);
+    }
+}
+
+function toggleDepartmentRestriction() {
+    const specificDiv = document.getElementById('specificDepartments');
+    const specificRadio = document.querySelector('input[name="departmentRestriction"][value="specific"]');
+    
+    if (specificRadio.checked) {
+        specificDiv.style.display = 'block';
+    } else {
+        specificDiv.style.display = 'none';
+        // Desmarcar todos los checkboxes
+        document.querySelectorAll('input[name="allowedDepartments[]"]').forEach(cb => cb.checked = false);
+    }
+}
+
+function saveGroupPermissions() {
+    const groupId = document.getElementById('currentPermissionGroupId').value;
+    if (!groupId) return;
+    
+    showLoading();
+    
+    // Recopilar permisos
+    const permissions = {};
+    document.querySelectorAll('input[name^="permissions["]').forEach(checkbox => {
+        if (checkbox.checked) {
+            const match = checkbox.name.match(/permissions\[([^\]]+)\]\[([^\]]+)\]/);
+            if (match) {
+                const [, module, action] = match;
+                if (!permissions[module]) permissions[module] = {};
+                permissions[module][action] = true;
+            }
+        }
+    });
+    
+    // Recopilar restricciones
+    const restrictions = {};
+    
+    // Restricciones de empresas
+    const companyRestrictionType = document.querySelector('input[name="companyRestriction"]:checked')?.value;
+    if (companyRestrictionType === 'specific') {
+        const selectedCompanies = Array.from(document.querySelectorAll('input[name="allowedCompanies[]"]:checked'))
+            .map(cb => parseInt(cb.value));
+        restrictions.companies = selectedCompanies;
+    } else {
+        restrictions.companies = companyRestrictionType;
+    }
+    
+    // Restricciones de departamentos
+    const departmentRestrictionType = document.querySelector('input[name="departmentRestriction"]:checked')?.value;
+    if (departmentRestrictionType === 'specific') {
+        const selectedDepartments = Array.from(document.querySelectorAll('input[name="allowedDepartments[]"]:checked'))
+            .map(cb => parseInt(cb.value));
+        restrictions.departments = selectedDepartments;
+    } else {
+        restrictions.departments = departmentRestrictionType;
+    }
+    
+    // Enviar datos
     const formData = new FormData();
     formData.append('group_id', groupId);
-    formData.append('user_id', userId);
-    formData.append('action', 'remove');
+    formData.append('permissions', JSON.stringify(permissions));
+    formData.append('restrictions', JSON.stringify(restrictions));
     
-    fetch('actions/manage_group_users.php', {
+    fetch('actions/update_group_permissions.php', {
         method: 'POST',
         body: formData
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success) {
-            showAlert('Éxito', 'Usuario removido del grupo correctamente', 'success');
-            // Recargar gestión de usuarios
-            manageGroupUsers(groupId);
-        } else {
-            showAlert('Error', data.message || 'Error al remover usuario del grupo', 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error removiendo usuario:', error);
-        showAlert('Error', 'Error de conexión al remover usuario', 'error');
-    });
-}
-
-// Cambiar estado del grupo (activar/desactivar)
-function toggleGroupStatus(groupId, currentStatus) {
-    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    const action = newStatus === 'active' ? 'activar' : 'desactivar';
-    
-    if (!confirm(`¿Está seguro de que desea ${action} este grupo?`)) {
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('group_id', groupId);
-    formData.append('status', newStatus);
-    
-    showLoader(`${action.charAt(0).toUpperCase() + action.slice(1)}ando grupo...`);
-    
-    fetch('actions/toggle_group_status.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        hideLoader();
+        hideLoading();
         
         if (data.success) {
-            showAlert('Éxito', data.message, 'success');
+            showNotification(data.message || 'Permisos actualizados correctamente', 'success');
+            closeModal('permissionsModal');
             setTimeout(() => {
                 window.location.reload();
             }, 1500);
         } else {
-            showAlert('Error', data.message || `Error al ${action} el grupo`, 'error');
+            showNotification(data.message || 'Error al actualizar permisos', 'error');
         }
     })
     .catch(error => {
-        hideLoader();
-        console.error('Error cambiando estado:', error);
-        showAlert('Error', 'Error de conexión al cambiar estado', 'error');
+        hideLoading();
+        console.error('Error:', error);
+        showNotification('Error de conexión al guardar permisos', 'error');
     });
 }
 
-// Exportar grupos
-function exportGroups() {
-    window.location.href = 'actions/export_groups.php';
+// ============================================================================
+// FUNCIONES DE BÚSQUEDA Y FILTROS
+// ============================================================================
+
+let searchTimeout;
+function handleAutoSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        document.getElementById('filtersForm')?.submit();
+    }, 500);
 }
 
-// Funciones de utilidad
-function showAlert(title, message, type = 'info') {
-    // Crear alert dinámico si no existe un sistema de alertas
-    const alertClass = type === 'success' ? 'alert-success' : type === 'error' ? 'alert-danger' : 'alert-info';
+function clearFilters() {
+    const searchInput = document.getElementById('search');
+    const statusSelect = document.getElementById('status');
     
-    const alertHtml = `
-        <div class="alert ${alertClass} alert-dismissible fade show position-fixed" style="top: 20px; right: 20px; z-index: 9999;" role="alert">
-            <strong>${title}:</strong> ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    if (searchInput) searchInput.value = '';
+    if (statusSelect) statusSelect.selectedIndex = 0;
+    
+    window.location.href = window.location.pathname;
+}
+
+// ============================================================================
+// FUNCIONES DE UTILIDAD
+// ============================================================================
+
+function showNotification(message, type = 'success') {
+    // Remover notificaciones existentes
+    document.querySelectorAll('.notification').forEach(n => n.remove());
+    
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.style.animation = 'slideInRight 0.3s ease-out reverse';
+            setTimeout(() => {
+                notification.remove();
+            }, 300);
+        }
+    }, 4000);
+}
+
+function showLoading() {
+    // Remover loading existente
+    hideLoading();
+    
+    const loading = document.createElement('div');
+    loading.className = 'loading-overlay';
+    loading.id = 'loadingOverlay';
+    
+    loading.innerHTML = `
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Cargando...</div>
         </div>
     `;
     
-    document.body.insertAdjacentHTML('beforeend', alertHtml);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        const alert = document.querySelector('.alert:last-of-type');
-        if (alert) {
-            alert.remove();
-        }
-    }, 5000);
+    document.body.appendChild(loading);
 }
 
-function showLoader(message = 'Cargando...') {
-    // Crear o mostrar loader
-    let loader = document.getElementById('globalLoader');
-    if (!loader) {
-        loader = document.createElement('div');
-        loader.id = 'globalLoader';
-        loader.className = 'position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center';
-        loader.style.cssText = 'background: rgba(0,0,0,0.7); z-index: 9999;';
-        loader.innerHTML = `
-            <div class="card text-center p-4">
-                <div class="spinner-border text-primary mb-3" role="status"></div>
-                <div id="loaderMessage">${message}</div>
-            </div>
-        `;
-        document.body.appendChild(loader);
-    } else {
-        document.getElementById('loaderMessage').textContent = message;
-        loader.style.display = 'flex';
+function hideLoading() {
+    const loading = document.getElementById('loadingOverlay');
+    if (loading && loading.parentNode) {
+        loading.parentNode.removeChild(loading);
     }
 }
 
-function hideLoader() {
-    const loader = document.getElementById('globalLoader');
-    if (loader) {
-        loader.style.display = 'none';
-    }
-}
+// ============================================================================
+// FUNCIONES GLOBALES REQUERIDAS
+// ============================================================================
 
-// Exportar funciones globales para uso en HTML
+// Estas funciones son llamadas desde el HTML, por lo que deben estar en el scope global
 window.showCreateGroupModal = showCreateGroupModal;
-window.editGroup = editGroup;
 window.viewGroupDetails = viewGroupDetails;
+window.editGroup = editGroup;
 window.manageGroupUsers = manageGroupUsers;
+window.manageGroupPermissions = manageGroupPermissions;
 window.toggleGroupStatus = toggleGroupStatus;
-window.exportGroups = exportGroups;
-window.saveGroup = saveGroup;
 window.addUserToGroup = addUserToGroup;
 window.removeUserFromGroup = removeUserFromGroup;
-window.filterAvailableUsers = filterAvailableUsers;
+window.clearFilters = clearFilters;
+
+// ============================================================================
+// DEBUG Y LOGGING
+// ============================================================================
+
+console.log('📋 Funciones del módulo de grupos disponibles:');
+console.log('- showCreateGroupModal:', typeof showCreateGroupModal);
+console.log('- viewGroupDetails:', typeof viewGroupDetails);
+console.log('- editGroup:', typeof editGroup);
+console.log('- toggleGroupStatus:', typeof toggleGroupStatus);
+console.log('- manageGroupUsers:', typeof manageGroupUsers);
+console.log('- manageGroupPermissions:', typeof manageGroupPermissions);

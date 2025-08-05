@@ -33,7 +33,7 @@ try {
     $statusFilter = isset($_GET['status']) ? $_GET['status'] : '';
     
     // Costruir consulta con filtros
-    $whereConditions = [];
+    $whereConditions = ["ug.deleted_at IS NULL"];
     $params = [];
     
     if (!empty($searchTerm)) {
@@ -47,7 +47,7 @@ try {
         $params[] = $statusFilter;
     }
     
-    $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+    $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
     
     // Obtener grupos con información adicional
     $groupsQuery = "
@@ -97,393 +97,329 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Grupos - DMS2</title>
     
+    <!-- CSS Principal del sistema -->
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/sidebar.css">
     <link rel="stylesheet" href="../../assets/css/modal.css">
     
+    <!-- Feather Icons -->
     <script src="https://unpkg.com/feather-icons"></script>
     
     <style>
-    :root {
-        --dms-primary: #8B4513;
-        --dms-primary-hover: #654321;
-        --dms-success: #10b981;
-        --dms-warning: #f59e0b;
-        --dms-danger: #ef4444;
-        --dms-info: #3b82f6;
-        --dms-bg: #f8fafc;
-        --dms-card-bg: #ffffff;
-        --dms-border: #e2e8f0;
-        --dms-text: #1e293b;
-        --dms-text-muted: #64748b;
-        --dms-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        --dms-radius: 12px;
-    }
-
-    .groups-container {
-        padding: 24px;
-        background: var(--dms-bg);
-        min-height: calc(100vh - 80px);
-        margin-left: 240px;
-    }
-
-    .page-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 32px;
-    }
-
-    .page-title {
-        font-size: 2rem;
-        font-weight: 700;
-        color: var(--dms-text);
-        margin: 0 0 8px 0;
-    }
-
-    .page-subtitle {
-        color: var(--dms-text-muted);
-        font-size: 1rem;
-        margin: 0;
-    }
-
-    .btn-create-group {
-        background: var(--dms-primary);
-        color: white;
-        border: none;
-        padding: 14px 28px;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 15px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        text-decoration: none;
-        box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
-    }
-
-    .btn-create-group:hover {
-        background: var(--dms-primary-hover);
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
-    }
-
-    /* Filtros */
-    .filters-section {
-        background: var(--dms-card-bg);
-        border-radius: var(--dms-radius);
-        padding: 24px;
-        margin-bottom: 24px;
-        border: 1px solid var(--dms-border);
-        box-shadow: var(--dms-shadow);
-    }
-
-    .filters-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--dms-text);
-        margin-bottom: 16px;
-    }
-
-    .filters-row {
-        display: grid;
-        grid-template-columns: 1fr 200px 200px;
-        gap: 16px;
-        align-items: end;
-    }
-
-    .filter-group {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .filter-label {
-        font-weight: 500;
-        color: var(--dms-text);
-        font-size: 0.875rem;
-    }
-
-    .filter-input,
-    .filter-select {
-        padding: 12px 16px;
-        border: 1px solid var(--dms-border);
-        border-radius: 8px;
-        font-size: 0.875rem;
-        background: white;
-    }
-
-    .filter-input:focus,
-    .filter-select:focus {
-        outline: none;
-        border-color: var(--dms-primary);
-        box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
-    }
-
-    .btn-clear {
-        background: #6b7280;
-        color: white;
-        border: none;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .btn-clear:hover {
-        background: #4b5563;
-    }
-
-    /* Lista de grupos */
-    .groups-list {
-        background: var(--dms-card-bg);
-        border-radius: var(--dms-radius);
-        border: 1px solid var(--dms-border);
-        box-shadow: var(--dms-shadow);
-        overflow: hidden;
-    }
-
-    .list-header {
-        background: #f8fafc;
-        padding: 16px 24px;
-        border-bottom: 1px solid var(--dms-border);
-        font-weight: 600;
-        color: var(--dms-text);
-        font-size: 1rem;
-    }
-
-    .groups-table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-
-    .groups-table th {
-        background: #f8fafc;
-        padding: 16px 24px;
-        text-align: left;
-        font-weight: 600;
-        color: var(--dms-text);
-        font-size: 0.875rem;
-        border-bottom: 1px solid var(--dms-border);
-    }
-
-    .groups-table td {
-        padding: 16px 24px;
-        border-bottom: 1px solid #f1f5f9;
-        vertical-align: middle;
-    }
-
-    .groups-table tr:hover {
-        background: #f8fafc;
-    }
-
-    .group-info {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-
-    .group-icon {
-        width: 40px;
-        height: 40px;
-        background: var(--dms-primary);
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-    }
-
-    .group-details {
-        flex: 1;
-    }
-
-    .group-name {
-        font-weight: 600;
-        color: var(--dms-text);
-        font-size: 0.875rem;
-        margin-bottom: 2px;
-    }
-
-    .group-description {
-        font-size: 0.75rem;
-        color: var(--dms-text-muted);
-        max-width: 300px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .status-badge {
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-
-    .status-active {
-        background: rgba(16, 185, 129, 0.1);
-        color: #059669;
-    }
-
-    .status-inactive {
-        background: rgba(107, 114, 128, 0.1);
-        color: #4b5563;
-    }
-
-    .members-count {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 0.875rem;
-        color: var(--dms-text);
-    }
-
-    .members-number {
-        background: var(--dms-primary);
-        color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        min-width: 24px;
-        text-align: center;
-    }
-
-    .actions-cell {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-    }
-
-    .btn-action {
-        padding: 8px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-decoration: none;
-    }
-
-    .btn-view {
-        background: rgba(59, 130, 246, 0.1);
-        color: #2563eb;
-    }
-
-    .btn-view:hover {
-        background: #2563eb;
-        color: white;
-    }
-
-    .btn-edit {
-        background: rgba(245, 158, 11, 0.1);
-        color: #d97706;
-    }
-
-    .btn-edit:hover {
-        background: #d97706;
-        color: white;
-    }
-
-    .btn-delete {
-        background: rgba(239, 68, 68, 0.1);
-        color: #dc2626;
-    }
-
-    .btn-delete:hover {
-        background: #dc2626;
-        color: white;
-    }
-
-    .btn-toggle {
-        background: rgba(16, 185, 129, 0.1);
-        color: #059669;
-    }
-
-    .btn-toggle:hover {
-        background: #059669;
-        color: white;
-    }
-
-    .btn-toggle.inactive {
-        background: rgba(107, 114, 128, 0.1);
-        color: #4b5563;
-    }
-
-    .btn-toggle.inactive:hover {
-        background: #4b5563;
-        color: white;
-    }
-
-    /* Paginación */
-    .pagination {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 8px;
-        margin-top: 24px;
-        padding: 20px;
-    }
-
-    .pagination-btn {
-        padding: 8px 12px;
-        border: 1px solid var(--dms-border);
-        background: white;
-        color: var(--dms-text);
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        text-decoration: none;
-        font-size: 0.875rem;
-    }
-
-    .pagination-btn:hover {
-        background: var(--dms-primary);
-        color: white;
-        border-color: var(--dms-primary);
-    }
-
-    .pagination-btn.active {
-        background: var(--dms-primary);
-        color: white;
-        border-color: var(--dms-primary);
-    }
-
-    .pagination-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    @media (max-width: 768px) {
-        .groups-container {
-            margin-left: 0;
-            padding: 16px;
+        /* Estilos adicionales para mantener consistencia con tipos de documentos */
+        .btn-action {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border: none;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 0 2px;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
         }
-        
-        .filters-row {
-            grid-template-columns: 1fr;
+        .btn-action:hover {
+            background: rgba(59, 130, 246, 0.2);
         }
-        
-        .groups-table {
+        .btn-action.edit {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+        }
+        .btn-action.edit:hover {
+            background: rgba(245, 158, 11, 0.2);
+        }
+        .btn-action.delete {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+        .btn-action.delete:hover {
+            background: rgba(239, 68, 68, 0.2);
+        }
+        .btn-action.toggle {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+        .btn-action.toggle:hover {
+            background: rgba(16, 185, 129, 0.2);
+        }
+        .status-active {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .status-inactive {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .cell-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .primary-text {
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .secondary-text {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+        }
+        .no-data i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+        .data-table th,
+        .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .data-table th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #374151;
+        }
+        .data-table tr:hover {
+            background: #f8fafc;
+        }
+        .actions-header {
+            text-align: center;
+        }
+        .table-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+        .table-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #374151;
+        }
+        .table-section {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .filters-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        .filters-section h3 {
+            margin: 0 0 16px 0;
+            font-size: 1.1rem;
+            color: #374151;
+        }
+        .filters-grid {
+            display: grid;
+            grid-template-columns: 1fr 200px;
+            gap: 16px;
+            align-items: end;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .filter-group label {
+            font-weight: 500;
+            color: #374151;
             font-size: 0.875rem;
         }
-        
-        .groups-table th,
-        .groups-table td {
-            padding: 12px;
+        .form-input {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: white;
         }
-    }
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        /* Estilo del botón igual a otros módulos */
+        .btn.btn-primary {
+            background: #8B4513;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .btn.btn-primary:hover {
+            background: #654321;
+        }
+        
+        /* Estilos para header igual a departamentos */
+        .content-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            height: 80px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 24px;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .header-left h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin: 0;
+        }
+        
+        .mobile-menu-toggle {
+            display: none;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .header-info {
+            text-align: right;
+        }
+        
+        .user-name-header {
+            font-weight: 600;
+            color: #374151;
+            font-size: 14px;
+        }
+        
+        .current-time {
+            font-size: 12px;
+            color: #64748b;
+        }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-icon {
+            background: transparent;
+            border: none;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #64748b;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+        
+        .btn-icon:hover {
+            background: #f1f5f9;
+            color: #374151;
+        }
+        
+        .logout-btn {
+            color: #ef4444;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: #dc2626;
+        }
+        
+        /* Container igual a departamentos */
+        .container {
+            padding: 0 24px;
+        }
+        
+        /* Botón crear igual a departamentos */
+        .create-button-section {
+            margin-bottom: 24px;
+        }
+        
+        .btn-create-group {
+            background: linear-gradient(135deg, var(--dms-primary) 0%, var(--dms-primary-hover) 100%);
+            border: none;
+            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+            padding: 14px 28px;
+            font-weight: 600;
+            font-size: 15px;
+            text-transform: none;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            border-radius: 8px;
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-create-group:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
+            background: linear-gradient(135deg, var(--dms-primary-hover) 0%, #4a2c0a 100%);
+        }
+        
+        .btn-create-group span {
+            margin-left: 2px;
+        }
+        
+        /* Actualizar estilos de filtros */
+        .filters-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
     </style>
 </head>
 
@@ -491,229 +427,490 @@ try {
     <?php include '../../includes/sidebar.php'; ?>
     
     <main class="main-content">
-        <div class="groups-container">
-            <!-- Header -->
-            <div class="page-header">
-                <div>
-                    <h1 class="page-title">Gestión de Grupos</h1>
-                    <p class="page-subtitle">Administrar grupos de usuarios y permisos del sistema</p>
+        <!-- Header igual a departamentos -->
+        <header class="content-header">
+            <div class="header-left">
+                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+                    <i data-feather="menu"></i>
+                </button>
+                <h1>Gestión de Grupos</h1>
+            </div>
+
+            <div class="header-right">
+                <div class="header-info">
+                    <div class="user-name-header"><?php echo htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']); ?></div>
+                    <div class="current-time" id="currentTime"></div>
                 </div>
-                
-                <button class="btn-create-group" onclick="showCreateGroupModal()">
-                    <i data-feather="plus"></i>
-                    Crear Grupo
+                <div class="header-actions">
+                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
+                        <i data-feather="settings"></i>
+                    </button>
+                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                        <i data-feather="log-out"></i>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Contenido del módulo -->
+        <div class="container">
+            <!-- Botón Crear Grupo -->
+            <div class="create-button-section">
+                <button class="btn btn-primary btn-create-group" onclick="openCreateGroupModal()">
+                    <i data-feather="layers"></i>
+                    <span>Crear Grupo</span>
                 </button>
             </div>
-            
-            <!-- Filtros -->
+            <!-- Filtros de búsqueda -->
             <div class="filters-section">
-                <h3 class="filters-title">Filtros de Búsqueda</h3>
+                <h3>Filtros de Búsqueda</h3>
                 
-                <form method="GET" class="filters-row">
-                    <div class="filter-group">
-                        <label class="filter-label">Buscar Grupo</label>
-                        <input type="text" name="search" class="filter-input" 
-                               placeholder="Nombre o descripción..." 
-                               value="<?php echo htmlspecialchars($searchTerm); ?>">
-                    </div>
-                    
-                    <div class="filter-group">
-                        <label class="filter-label">Estado</label>
-                        <select name="status" class="filter-select">
-                            <option value="">Todos los estados</option>
-                            <option value="active" <?php echo $statusFilter === 'active' ? 'selected' : ''; ?>>Activo</option>
-                            <option value="inactive" <?php echo $statusFilter === 'inactive' ? 'selected' : ''; ?>>Inactivo</option>
-                        </select>
-                    </div>
-                    
-                    <div class="filter-group">
-                        <button type="button" class="btn-clear" onclick="clearFilters()">
-                            <i data-feather="x"></i>
-                            Limpiar
-                        </button>
+                <form method="GET" class="filters-form" id="filtersForm">
+                    <div class="filters-grid">
+                        <div class="filter-group">
+                            <label for="search">Buscar Grupo</label>
+                            <input type="text" 
+                                   id="search" 
+                                   name="search" 
+                                   class="form-input"
+                                   placeholder="Nombre, descripción..."
+                                   value="<?php echo htmlspecialchars($searchTerm); ?>"
+                                   oninput="autoSubmitFilters()">
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label for="status">Estado</label>
+                            <select id="status" name="status" class="form-input" onchange="autoSubmitFilters()">
+                                <option value="">Todos los estados</option>
+                                <option value="active" <?php echo $statusFilter === 'active' ? 'selected' : ''; ?>>
+                                    Activo
+                                </option>
+                                <option value="inactive" <?php echo $statusFilter === 'inactive' ? 'selected' : ''; ?>>
+                                    Inactivo
+                                </option>
+                            </select>
+                        </div>
                     </div>
                 </form>
             </div>
-            
-            <!-- Lista de grupos -->
-            <div class="groups-list">
-                <div class="list-header">
-                    Grupos de Usuarios (<?php echo $totalItems; ?> registros)
+
+            <!-- Tabla de grupos -->
+            <div class="table-section">
+                <div class="table-header">
+                    <h3>Grupos de Usuarios (<?php echo $totalItems; ?> registros)</h3>
                 </div>
-                
-                <table class="groups-table">
-                    <thead>
-                        <tr>
-                            <th>Grupo</th>
-                            <th>Miembros</th>
-                            <th>Estado</th>
-                            <th>Fecha Creación</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($groups)): ?>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
                             <tr>
-                                <td colspan="5" style="text-align: center; padding: 40px; color: var(--dms-text-muted); font-style: italic;">
-                                    No se encontraron grupos que coincidan con los filtros
-                                </td>
+                                <th>Grupo</th>
+                                <th>Miembros</th>
+                                <th>Estado</th>
+                                <th>Fecha Creación</th>
+                                <th class="actions-header">Acciones</th>
                             </tr>
-                        <?php else: ?>
-                            <?php foreach ($groups as $group): ?>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($groups)): ?>
                                 <tr>
-                                    <td>
-                                        <div class="group-info">
-                                            <div class="group-icon">
+                                    <td colspan="5" class="no-data">
+                                        <i data-feather="users"></i>
+                                        <p>No se encontraron grupos</p>
+                                        <button class="btn btn-primary" onclick="openCreateGroupModal()">
+                                            <i data-feather="plus"></i>
+                                            Crear primer grupo
+                                        </button>
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($groups as $group): ?>
+                                    <tr>
+                                        <td>
+                                            <div class="cell-content">
                                                 <i data-feather="<?php echo $group['is_system_group'] ? 'shield' : 'users'; ?>"></i>
-                                            </div>
-                                            <div class="group-details">
-                                                <div class="group-name"><?php echo htmlspecialchars($group['name']); ?></div>
-                                                <div class="group-description">
-                                                    <?php echo htmlspecialchars($group['description'] ?: 'Sin descripción'); ?>
+                                                <div>
+                                                    <div class="primary-text"><?php echo htmlspecialchars($group['name']); ?></div>
+                                                    <?php if (!empty($group['description'])): ?>
+                                                        <div class="secondary-text"><?php echo htmlspecialchars($group['description']); ?></div>
+                                                    <?php endif; ?>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="members-count">
-                                            <i data-feather="users"></i>
-                                            <span class="members-number"><?php echo $group['total_members']; ?></span>
-                                            <span>miembros</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="status-badge status-<?php echo $group['status']; ?>">
-                                            <?php echo $group['status'] === 'active' ? 'Activo' : 'Inactivo'; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <?php echo date('d/m/Y H:i', strtotime($group['created_at'])); ?>
-                                    </td>
-                                    <td>
-                                        <div class="actions-cell">
-                                            <a href="permissions.php?group=<?php echo $group['id']; ?>&tab=members" 
-                                               class="btn-action btn-view" title="Ver Miembros">
+                                        </td>
+                                        <td>
+                                            <div class="cell-content">
                                                 <i data-feather="users"></i>
-                                            </a>
+                                                <span><?php echo $group['total_members']; ?> miembros</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="status-badge status-<?php echo $group['status']; ?>">
+                                                <?php echo $group['status'] === 'active' ? 'Activo' : 'Inactivo'; ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo date('d/m/Y H:i', strtotime($group['created_at'])); ?></td>
+                                        <td style="text-align: center;">
+                                            <button class="btn-action" 
+                                                    onclick="viewGroupDetails(<?php echo $group['id']; ?>)" 
+                                                    title="Ver detalles">
+                                                <i data-feather="eye"></i>
+                                            </button>
                                             
                                             <a href="permissions.php?group=<?php echo $group['id']; ?>&tab=permissions" 
-                                               class="btn-action btn-edit" title="Configurar Permisos">
-                                                <i data-feather="shield"></i>
+                                               class="btn-action edit" 
+                                               title="Configurar permisos">
+                                                <i data-feather="edit"></i>
                                             </a>
                                             
-                                            <button class="btn-action btn-toggle <?php echo $group['status'] === 'inactive' ? 'inactive' : ''; ?>" 
-                                                    onclick="toggleGroupStatus(<?php echo $group['id']; ?>)"
+                                            <button class="btn-action toggle" 
+                                                    onclick="toggleGroupStatus(<?php echo $group['id']; ?>, '<?php echo $group['status']; ?>')"
                                                     title="<?php echo $group['status'] === 'active' ? 'Desactivar' : 'Activar'; ?>">
-                                                <i data-feather="<?php echo $group['status'] === 'active' ? 'eye-off' : 'eye'; ?>"></i>
+                                                <i data-feather="<?php echo $group['status'] === 'active' ? 'toggle-right' : 'toggle-left'; ?>"></i>
                                             </button>
                                             
                                             <?php if (!$group['is_system_group']): ?>
-                                                <button class="btn-action btn-delete" 
+                                                <button class="btn-action delete" 
                                                         onclick="deleteGroup(<?php echo $group['id']; ?>)"
-                                                        title="Eliminar Grupo">
+                                                        title="Eliminar grupo">
                                                     <i data-feather="trash-2"></i>
                                                 </button>
                                             <?php endif; ?>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-                
-                <!-- Paginación -->
-                <?php if ($totalPages > 1): ?>
-                    <div class="pagination">
-                        <?php if ($currentPage > 1): ?>
-                            <a href="?page=<?php echo $currentPage - 1; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
-                               class="pagination-btn">
-                                <i data-feather="chevron-left"></i>
-                                Anterior
-                            </a>
-                        <?php endif; ?>
-                        
-                        <?php for ($i = max(1, $currentPage - 2); $i <= min($totalPages, $currentPage + 2); $i++): ?>
-                            <a href="?page=<?php echo $i; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
-                               class="pagination-btn <?php echo $i === $currentPage ? 'active' : ''; ?>">
-                                <?php echo $i; ?>
-                            </a>
-                        <?php endfor; ?>
-                        
-                        <?php if ($currentPage < $totalPages): ?>
-                            <a href="?page=<?php echo $currentPage + 1; ?>&search=<?php echo urlencode($searchTerm); ?>&status=<?php echo urlencode($statusFilter); ?>" 
-                               class="pagination-btn">
-                                Siguiente
-                                <i data-feather="chevron-right"></i>
-                            </a>
-                        <?php endif; ?>
-                    </div>
-                <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </main>
 
+    <!-- Modal para crear grupo -->
+    <div class="modal" id="createGroupModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Crear Nuevo Grupo</h3>
+                <button type="button" class="modal-close" onclick="closeCreateGroupModal()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <form id="createGroupForm" onsubmit="submitCreateGroup(event)">
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="name">Nombre del Grupo *</label>
+                            <input type="text" id="name" name="name" class="form-input" 
+                                   placeholder="Nombre del grupo..." required maxlength="150">
+                        </div>
+                        <div class="form-group">
+                            <label for="status">Estado</label>
+                            <select id="status" name="status" class="form-input">
+                                <option value="active">Activo</option>
+                                <option value="inactive">Inactivo</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row single">
+                        <div class="form-group">
+                            <label for="description">Descripción</label>
+                            <textarea id="description" name="description" class="form-input" rows="3"
+                                      placeholder="Describe el grupo y su propósito..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateGroupModal()">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i data-feather="plus"></i>
+                        Crear Grupo
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
     <script>
+    // Variables globales
+    let currentModal = null;
+    let searchTimeout = null;
+
+    // Inicializar cuando el DOM esté listo
     document.addEventListener('DOMContentLoaded', function() {
-        feather.replace();
+        console.log('🚀 Inicializando módulo de Grupos...');
+        
+        // Inicializar iconos de Feather
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+            console.log('✅ Iconos de Feather inicializados');
+        } else {
+            console.error('❌ Feather Icons no está disponible');
+        }
     });
-    
-    function clearFilters() {
-        window.location.href = 'index.php';
+
+    // Función para enviar filtros automáticamente
+    function autoSubmitFilters() {
+        // Limpiar timeout anterior si existe
+        if (searchTimeout) {
+            clearTimeout(searchTimeout);
+        }
+        
+        // Esperar 500ms después de que el usuario deje de escribir
+        searchTimeout = setTimeout(function() {
+            document.getElementById('filtersForm').submit();
+        }, 500);
+    }
+
+    // Función para mostrar coming soon igual a departamentos
+    function showComingSoon(feature) {
+        alert(`Función "${feature}" próximamente disponible`);
+    }
+
+    // Función para toggle del sidebar (mobile)
+    function toggleSidebar() {
+        // Funcionalidad para móviles si es necesaria
     }
     
-    function showCreateGroupModal() {
-        // Por ahora redirigir a una página de creación
-        alert('Funcionalidad de crear grupo - próximamente');
-    }
-    
-    function toggleGroupStatus(groupId) {
-        if (confirm('¿Está seguro de cambiar el estado de este grupo?')) {
-            fetch('actions/toggle_group_status.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `group_id=${groupId}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert(data.message || 'Error al cambiar estado');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al procesar la solicitud');
-            });
+    // Actualizar reloj cada minuto
+    function updateTime() {
+        const now = new Date();
+        const timeString = now.toLocaleDateString('es-ES', {
+            day: '2-digit',
+            month: '2-digit', 
+            year: 'numeric'
+        }) + ' ' + now.toLocaleTimeString('es-ES', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        const timeElement = document.getElementById('currentTime');
+        if (timeElement) {
+            timeElement.textContent = timeString;
         }
     }
     
+    // Actualizar tiempo cada minuto
+    setInterval(updateTime, 60000);
+    updateTime(); // Llamada inicial
+
+    function openCreateGroupModal() {
+        console.log('🆕 Abriendo modal para crear grupo...');
+        
+        const modal = document.getElementById('createGroupModal');
+        if (modal) {
+            modal.classList.add('active');
+            currentModal = modal;
+            
+            // Reinicializar iconos después de mostrar el modal
+            setTimeout(() => {
+                if (typeof feather !== 'undefined') {
+                    feather.replace();
+                }
+            }, 100);
+            
+            console.log('✅ Modal de crear grupo abierto');
+        }
+    }
+
+    function closeCreateGroupModal() {
+        console.log('❌ Cerrando modal de crear grupo...');
+        const modal = document.getElementById('createGroupModal');
+        if (modal) {
+            modal.classList.remove('active');
+            currentModal = null;
+            
+            // Limpiar formulario
+            const form = document.getElementById('createGroupForm');
+            if (form) {
+                form.reset();
+            }
+        }
+    }
+
+    function submitCreateGroup(event) {
+        event.preventDefault();
+        console.log('📝 Enviando formulario de crear grupo...');
+        
+        const formData = new FormData(event.target);
+        const submitBtn = event.target.querySelector('button[type="submit"]');
+        
+        // Deshabilitar botón
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i data-feather="loader"></i> Creando...';
+        
+        // Reinicializar iconos
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+        
+        fetch('actions/create_group.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('✅ Grupo creado exitosamente');
+                showNotification('Grupo creado exitosamente', 'success');
+                closeCreateGroupModal();
+                
+                // Recargar página después de un breve delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                console.error('❌ Error al crear grupo:', data.message);
+                showNotification(data.message || 'Error al crear el grupo', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error de conexión:', error);
+            showNotification('Error de conexión al crear el grupo', 'error');
+        })
+        .finally(() => {
+            // Restaurar botón
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i data-feather="plus"></i> Crear Grupo';
+            
+            if (typeof feather !== 'undefined') {
+                feather.replace();
+            }
+        });
+    }
+
+    function viewGroupDetails(groupId) {
+        console.log('👁️ Viendo detalles del grupo:', groupId);
+        // Redirigir a la página de permisos con tab de miembros
+        window.location.href = `permissions.php?group=${groupId}&tab=members`;
+    }
+
+    function toggleGroupStatus(groupId, currentStatus) {
+        const action = currentStatus === 'active' ? 'desactivar' : 'activar';
+        const confirmMessage = `¿Está seguro que desea ${action} este grupo?`;
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        console.log(`🔄 Cambiando estado del grupo ${groupId} de ${currentStatus}`);
+        
+        const formData = new FormData();
+        formData.append('group_id', groupId);
+        
+        fetch('actions/toggle_group_status.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('✅ Estado cambiado exitosamente');
+                showNotification(`Grupo ${action}do correctamente`, 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                console.error('❌ Error al cambiar estado:', data.message);
+                showNotification(data.message || `Error al ${action} grupo`, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error de conexión:', error);
+            showNotification('Error de conexión', 'error');
+        });
+    }
+
     function deleteGroup(groupId) {
-        if (confirm('¿Está seguro de eliminar este grupo? Esta acción no se puede deshacer.')) {
-            fetch('actions/delete_group.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `group_id=${groupId}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert(data.message || 'Error al eliminar grupo');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al procesar la solicitud');
-            });
+        if (!confirm('¿Está seguro de eliminar este grupo? Esta acción no se puede deshacer.')) {
+            return;
         }
+        
+        console.log('🗑️ Eliminando grupo:', groupId);
+        
+        const formData = new FormData();
+        formData.append('group_id', groupId);
+        
+        fetch('actions/delete_group.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('✅ Grupo eliminado exitosamente');
+                showNotification('Grupo eliminado correctamente', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                console.error('❌ Error al eliminar grupo:', data.message);
+                showNotification(data.message || 'Error al eliminar grupo', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error de conexión:', error);
+            showNotification('Error de conexión', 'error');
+        });
     }
+
+    function showNotification(message, type = 'info') {
+        console.log(`📢 Notificación [${type}]: ${message}`);
+        
+        // Crear elemento de notificación
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <i data-feather="${type === 'success' ? 'check-circle' : type === 'error' ? 'x-circle' : 'info'}"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        // Agregar al DOM
+        document.body.appendChild(notification);
+        
+        // Inicializar iconos
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+        
+        // Mostrar notificación
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 100);
+        
+        // Ocultar después de 5 segundos
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 300);
+        }, 5000);
+    }
+
+    // Cerrar modal con Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && currentModal) {
+            currentModal.classList.remove('active');
+            currentModal = null;
+        }
+    });
+
+    // Cerrar modal al hacer clic fuera
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('modal') && e.target.classList.contains('active')) {
+            e.target.classList.remove('active');
+            currentModal = null;
+        }
+    });
+
+    console.log('✅ Módulo de grupos JavaScript cargado correctamente');
     </script>
 </body>
 </html>

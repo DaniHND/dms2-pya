@@ -1,7 +1,7 @@
 <?php
 /*
- * modules/groups/actions/update_group_members.php
- * Actualización masiva de miembros de grupos
+ * modules/groups/actions/manage_group_members.php
+ * Actualización masiva de miembros de grupos - Versión final corregida
  */
 
 $projectRoot = dirname(dirname(dirname(__DIR__)));
@@ -92,65 +92,54 @@ try {
     
     // Remover usuarios que ya no están seleccionados
     if (!empty($toRemove)) {
-        $placeholders = str_repeat('?,', count($toRemove) - 1) . '?';
-        $deleteStmt = $pdo->prepare("DELETE FROM user_group_members WHERE group_id = ? AND user_id IN ($placeholders)");
-        $params = array_merge([$groupId], $toRemove);
-        
-        if ($deleteStmt->execute($params)) {
-            $removedCount = $deleteStmt->rowCount();
+        foreach ($toRemove as $userIdToRemove) {
+            try {
+                $deleteStmt = $pdo->prepare("DELETE FROM user_group_members WHERE group_id = ? AND user_id = ?");
+                if ($deleteStmt->execute([$groupId, $userIdToRemove])) {
+                    $removedCount++;
+                }
+            } catch (PDOException $e) {
+                $errors[] = "Error removiendo usuario $userIdToRemove: " . $e->getMessage();
+            }
         }
     }
     
     // Agregar nuevos usuarios
     if (!empty($toAdd)) {
         // Verificar que todos los usuarios existen y están activos
-        $placeholders = str_repeat('?,', count($toAdd) - 1) . '?';
-        $userCheckQuery = "SELECT id, first_name, last_name FROM users WHERE id IN ($placeholders) AND status = 'active'";
+        $userCheckQuery = "SELECT id FROM users WHERE status = 'active'";
         $userCheckStmt = $pdo->prepare($userCheckQuery);
-        $userCheckStmt->execute($toAdd);
-        $validUsers = $userCheckStmt->fetchAll(PDO::FETCH_ASSOC);
+        $userCheckStmt->execute();
+        $allValidUsers = $userCheckStmt->fetchAll(PDO::FETCH_COLUMN);
         
-        $validUserIds = array_column($validUsers, 'id');
-        $invalidUsers = array_diff($toAdd, $validUserIds);
+        // Filtrar solo usuarios válidos que queremos agregar
+        $usersToAdd = array_intersect($toAdd, $allValidUsers);
+        $invalidUsers = array_diff($toAdd, $allValidUsers);
         
         if (!empty($invalidUsers)) {
             $errors[] = "Usuarios no válidos o inactivos: " . implode(', ', $invalidUsers);
         }
         
-        // Insertar usuarios válidos
-        if (!empty($validUserIds)) {
-            $insertStmt = $pdo->prepare("
-                INSERT INTO user_group_members (group_id, user_id, added_by, added_at) 
-                VALUES (?, ?, ?, NOW())
-            ");
-            
-            foreach ($validUserIds as $userId) {
-                if ($insertStmt->execute([$groupId, $userId, $currentUser['id']])) {
-                    $addedCount++;
+        // Insertar usuarios válidos (manejando duplicados correctamente)
+        if (!empty($usersToAdd)) {
+            foreach ($usersToAdd as $userId) {
+                try {
+                    // Usar INSERT IGNORE para evitar errores de duplicado
+                    $insertStmt = $pdo->prepare("
+                        INSERT IGNORE INTO user_group_members (group_id, user_id) 
+                        VALUES (?, ?)
+                    ");
+                    
+                    if ($insertStmt->execute([$groupId, $userId])) {
+                        // Solo contar si realmente se insertó (no era duplicado)
+                        if ($insertStmt->rowCount() > 0) {
+                            $addedCount++;
+                        }
+                    }
+                } catch (PDOException $e) {
+                    $errors[] = "Error agregando usuario $userId: " . $e->getMessage();
                 }
             }
-        }
-    }
-    
-    // Registrar actividad
-    if (function_exists('logActivity')) {
-        $changes = [];
-        if ($addedCount > 0) {
-            $changes[] = "Agregados: $addedCount usuarios";
-        }
-        if ($removedCount > 0) {
-            $changes[] = "Removidos: $removedCount usuarios";
-        }
-        
-        if (!empty($changes)) {
-            $description = "Miembros actualizados en grupo '{$group['name']}': " . implode(', ', $changes);
-            logActivity(
-                $currentUser['id'], 
-                'update_group_members', 
-                'user_group_members', 
-                $groupId, 
-                $description
-            );
         }
     }
     
@@ -167,7 +156,7 @@ try {
         'changes' => [
             'added' => $addedCount,
             'removed' => $removedCount,
-            'total_members' => count($memberIds) - count($invalidUsers ?? [])
+            'total_members' => count($memberIds)
         ]
     ];
     
@@ -177,17 +166,26 @@ try {
     
     echo json_encode($response);
     
+} catch (PDOException $e) {
+    if (isset($pdo)) {
+        $pdo->rollBack();
+    }
+    
+    error_log('Error PDO en manage_group_members: ' . $e->getMessage());
+    echo json_encode([
+        'success' => false, 
+        'message' => 'Error de base de datos: ' . $e->getMessage()
+    ]);
+    
 } catch (Exception $e) {
     if (isset($pdo)) {
         $pdo->rollBack();
     }
     
-    error_log('Error en update_group_members: ' . $e->getMessage());
-    http_response_code(500);
+    error_log('Error en manage_group_members: ' . $e->getMessage());
     echo json_encode([
         'success' => false, 
-        'message' => 'Error interno del servidor',
-        'debug' => $e->getMessage() // Solo para desarrollo
+        'message' => 'Error interno del servidor: ' . $e->getMessage()
     ]);
 }
 ?>

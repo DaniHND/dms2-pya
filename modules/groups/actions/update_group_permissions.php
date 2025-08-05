@@ -1,7 +1,7 @@
 <?php
 /*
  * modules/groups/actions/update_group_permissions.php
- * Actualización de permisos y restricciones de grupos
+ * Actualización de permisos y restricciones de grupos - Versión corregida
  */
 
 $projectRoot = dirname(dirname(dirname(__DIR__)));
@@ -43,8 +43,6 @@ if (!$data) {
 $groupId = (int)($data['group_id'] ?? 0);
 $permissions = $data['permissions'] ?? [];
 $restrictions = $data['restrictions'] ?? [];
-$downloadLimit = $data['download_limit_daily'] ?? null;
-$uploadLimit = $data['upload_limit_daily'] ?? null;
 
 if (!$groupId) {
     http_response_code(400);
@@ -77,43 +75,34 @@ try {
     // Validar empresas
     if (!empty($restrictions['companies']) && is_array($restrictions['companies'])) {
         $companyIds = array_map('intval', $restrictions['companies']);
-        $companyPlaceholders = str_repeat('?,', count($companyIds) - 1) . '?';
-        
-        $companyCheck = $pdo->prepare("SELECT id FROM companies WHERE id IN ($companyPlaceholders) AND status = 'active'");
-        $companyCheck->execute($companyIds);
-        $validatedRestrictions['companies'] = $companyCheck->fetchAll(PDO::FETCH_COLUMN);
+        if (!empty($companyIds)) {
+            $companyPlaceholders = str_repeat('?,', count($companyIds) - 1) . '?';
+            $companyCheck = $pdo->prepare("SELECT id FROM companies WHERE id IN ($companyPlaceholders) AND status = 'active'");
+            $companyCheck->execute($companyIds);
+            $validatedRestrictions['companies'] = $companyCheck->fetchAll(PDO::FETCH_COLUMN);
+        }
     }
     
     // Validar departamentos
     if (!empty($restrictions['departments']) && is_array($restrictions['departments'])) {
         $departmentIds = array_map('intval', $restrictions['departments']);
-        $departmentPlaceholders = str_repeat('?,', count($departmentIds) - 1) . '?';
-        
-        $departmentCheck = $pdo->prepare("SELECT id FROM departments WHERE id IN ($departmentPlaceholders) AND status = 'active'");
-        $departmentCheck->execute($departmentIds);
-        $validatedRestrictions['departments'] = $departmentCheck->fetchAll(PDO::FETCH_COLUMN);
+        if (!empty($departmentIds)) {
+            $departmentPlaceholders = str_repeat('?,', count($departmentIds) - 1) . '?';
+            $departmentCheck = $pdo->prepare("SELECT id FROM departments WHERE id IN ($departmentPlaceholders) AND status = 'active'");
+            $departmentCheck->execute($departmentIds);
+            $validatedRestrictions['departments'] = $departmentCheck->fetchAll(PDO::FETCH_COLUMN);
+        }
     }
     
     // Validar tipos de documento
     if (!empty($restrictions['document_types']) && is_array($restrictions['document_types'])) {
         $docTypeIds = array_map('intval', $restrictions['document_types']);
-        $docTypePlaceholders = str_repeat('?,', count($docTypeIds) - 1) . '?';
-        
-        $docTypeCheck = $pdo->prepare("SELECT id FROM document_types WHERE id IN ($docTypePlaceholders) AND status = 'active'");
-        $docTypeCheck->execute($docTypeIds);
-        $validatedRestrictions['document_types'] = $docTypeCheck->fetchAll(PDO::FETCH_COLUMN);
-    }
-    
-    // Validar límites
-    $downloadLimitValue = null;
-    $uploadLimitValue = null;
-    
-    if ($downloadLimit !== null && $downloadLimit !== '') {
-        $downloadLimitValue = max(0, (int)$downloadLimit);
-    }
-    
-    if ($uploadLimit !== null && $uploadLimit !== '') {
-        $uploadLimitValue = max(0, (int)$uploadLimit);
+        if (!empty($docTypeIds)) {
+            $docTypePlaceholders = str_repeat('?,', count($docTypeIds) - 1) . '?';
+            $docTypeCheck = $pdo->prepare("SELECT id FROM document_types WHERE id IN ($docTypePlaceholders) AND status = 'active'");
+            $docTypeCheck->execute($docTypeIds);
+            $validatedRestrictions['document_types'] = $docTypeCheck->fetchAll(PDO::FETCH_COLUMN);
+        }
     }
     
     // Preparar permisos para almacenamiento
@@ -135,83 +124,59 @@ try {
         SET 
             module_permissions = ?,
             access_restrictions = ?,
-            download_limit_daily = ?,
-            upload_limit_daily = ?,
             updated_at = NOW()
         WHERE id = ?
     ");
     
-    $result = $updateStmt->execute([
+    $success = $updateStmt->execute([
         json_encode($validatedPermissions),
         json_encode($validatedRestrictions),
-        $downloadLimitValue,
-        $uploadLimitValue,
         $groupId
     ]);
     
-    if ($result) {
-        // Log de actividad
-        if (function_exists('logActivity')) {
-            $changes = [];
-            if (!empty($validatedPermissions)) {
-                $activePermissions = array_keys(array_filter($validatedPermissions));
-                $changes[] = "Permisos: " . implode(', ', $activePermissions);
-            }
-            
-            if (!empty($validatedRestrictions['companies'])) {
-                $changes[] = "Empresas restringidas: " . count($validatedRestrictions['companies']);
-            }
-            
-            if (!empty($validatedRestrictions['departments'])) {
-                $changes[] = "Departamentos restringidos: " . count($validatedRestrictions['departments']);
-            }
-            
-            if (!empty($validatedRestrictions['document_types'])) {
-                $changes[] = "Tipos de documento restringidos: " . count($validatedRestrictions['document_types']);
-            }
-            
-            if ($downloadLimitValue !== null) {
-                $changes[] = "Límite descargas: $downloadLimitValue/día";
-            }
-            
-            if ($uploadLimitValue !== null) {
-                $changes[] = "Límite subidas: $uploadLimitValue/día";
-            }
-            
-            $description = "Permisos actualizados para grupo '{$group['name']}': " . implode(', ', $changes);
-            
-            logActivity(
-                $currentUser['id'], 
-                'update_group_permissions', 
-                'user_groups', 
-                $groupId, 
-                $description
-            );
-        }
-        
-        $pdo->commit();
-        
-        echo json_encode([
-            'success' => true, 
-            'message' => 'Permisos actualizados correctamente',
-            'group' => [
-                'id' => $groupId,
-                'name' => $group['name']
-            ],
-            'updated' => [
-                'permissions' => $validatedPermissions,
-                'restrictions' => $validatedRestrictions,
-                'limits' => [
-                    'download' => $downloadLimitValue,
-                    'upload' => $uploadLimitValue
-                ]
-            ]
-        ]);
-        
-    } else {
-        $pdo->rollBack();
-        echo json_encode(['success' => false, 'message' => 'Error al actualizar permisos']);
+    if (!$success) {
+        throw new Exception('Error al actualizar el grupo');
     }
+    
+    // Registrar actividad (opcional - solo si existe la función)
+    if (function_exists('logActivity')) {
+        $description = "Permisos actualizados para el grupo '{$group['name']}'";
+        logActivity(
+            $currentUser['id'], 
+            'update_group_permissions', 
+            'user_groups', 
+            $groupId, 
+            $description
+        );
+    }
+    
+    $pdo->commit();
+    
+    // Respuesta exitosa
+    echo json_encode([
+        'success' => true,
+        'message' => 'Permisos actualizados correctamente',
+        'group' => [
+            'id' => $groupId,
+            'name' => $group['name']
+        ],
+        'updated' => [
+            'permissions' => $validatedPermissions,
+            'restrictions' => $validatedRestrictions
+        ]
+    ]);
+    
+} catch (PDOException $e) {
+    if (isset($pdo)) {
+        $pdo->rollBack();
+    }
+    
+    error_log('Error PDO en update_group_permissions: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode([
+        'success' => false, 
+        'message' => 'Error de base de datos: ' . $e->getMessage()
+    ]);
     
 } catch (Exception $e) {
     if (isset($pdo)) {
@@ -222,8 +187,7 @@ try {
     http_response_code(500);
     echo json_encode([
         'success' => false, 
-        'message' => 'Error interno del servidor',
-        'debug' => $e->getMessage() // Solo para desarrollo, remover en producción
+        'message' => 'Error interno del servidor: ' . $e->getMessage()
     ]);
 }
 ?>
