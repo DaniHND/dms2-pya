@@ -1,7 +1,7 @@
 <?php
 /*
  * modules/groups/actions/manage_group_members.php
- * Actualización masiva de miembros de grupos - Versión final corregida
+ * Actualización masiva de miembros de grupos - Versión corregida
  */
 
 $projectRoot = dirname(dirname(dirname(__DIR__)));
@@ -120,17 +120,17 @@ try {
             $errors[] = "Usuarios no válidos o inactivos: " . implode(', ', $invalidUsers);
         }
         
-        // Insertar usuarios válidos (manejando duplicados correctamente)
+        // Insertar usuarios válidos (CORREGIDO - incluye added_by)
         if (!empty($usersToAdd)) {
             foreach ($usersToAdd as $userId) {
                 try {
-                    // Usar INSERT IGNORE para evitar errores de duplicado
+                    // Usar INSERT IGNORE para evitar errores de duplicado e incluir added_by
                     $insertStmt = $pdo->prepare("
-                        INSERT IGNORE INTO user_group_members (group_id, user_id) 
-                        VALUES (?, ?)
+                        INSERT IGNORE INTO user_group_members (group_id, user_id, added_by) 
+                        VALUES (?, ?, ?)
                     ");
                     
-                    if ($insertStmt->execute([$groupId, $userId])) {
+                    if ($insertStmt->execute([$groupId, $userId, $currentUser['id']])) {
                         // Solo contar si realmente se insertó (no era duplicado)
                         if ($insertStmt->rowCount() > 0) {
                             $addedCount++;

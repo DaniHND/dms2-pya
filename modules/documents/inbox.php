@@ -1,102 +1,195 @@
 <?php
-// modules/documents/inbox.php - VERSIÓN COMPACTA
+// modules/documents/inbox.php
+// Bandeja de entrada de documentos - DMS2 CON PERMISOS INTEGRADOS
+
 require_once '../../config/session.php';
 require_once '../../config/database.php';
+require_once '../../includes/permission_functions.php';
+
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-// Funciones compactas
-function getDocuments($userId, $companyId, $role) {
-    $query = "SELECT d.*, dt.name as document_type, dt.icon as file_icon, c.name as company_name, 
-              dep.name as department_name, CONCAT(u.first_name, ' ', u.last_name) as uploaded_by
-              FROM documents d
-              LEFT JOIN document_types dt ON d.document_type_id = dt.id
-              LEFT JOIN companies c ON d.company_id = c.id  
-              LEFT JOIN departments dep ON d.department_id = dep.id
-              LEFT JOIN users u ON d.user_id = u.id
-              WHERE d.status = 'active'" . ($role !== 'admin' ? " AND d.company_id = :company_id" : "") . "
-              ORDER BY d.created_at DESC";
-    return fetchAll($query, $role !== 'admin' ? ['company_id' => $companyId] : []);
-}
+// Verificar permisos básicos
+$canView = hasUserPermission('view');
+$canDownload = hasUserPermission('download') && SessionManager::canDownload();
+$canEdit = hasUserPermission('edit');
+$canDelete = hasUserPermission('delete');
 
-function getFolders($documents) {
-    $folders = [];
-    foreach ($documents as $doc) {
-        $key = ($doc['company_name'] ?? 'Sin Empresa') . '/' . ($doc['department_name'] ?? 'General');
-        $folders[$key] = ($folders[$key] ?? 0) + 1;
+// Parámetros de búsqueda y filtrado
+$searchTerm = trim($_GET['search'] ?? '');
+$selectedFolder = $_GET['folder'] ?? '';
+$selectedType = $_GET['type'] ?? '';
+$sortBy = $_GET['sort'] ?? 'created_at';
+$sortOrder = $_GET['order'] ?? 'desc';
+
+// Variables para datos
+$documents = [];
+$folders = [];
+$documentsData = [];
+
+if (!$canView) {
+    $error_message = 'No tienes permisos para ver documentos. Contacta con tu administrador.';
+} else {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+
+        // Obtener condiciones de filtrado según permisos
+        $filterData = getDocumentFilterConditions();
+        $permissionConditions = $filterData['conditions'];
+        $permissionParams = $filterData['params'];
+
+        // Consulta base
+        $baseQuery = "
+            SELECT 
+                d.id,
+                d.name,
+                d.original_name,
+                d.file_size,
+                d.mime_type,
+                d.description,
+                d.status,
+                d.created_at,
+                d.updated_at,
+                d.user_id,
+                d.file_path,
+                c.name as company_name,
+                dep.name as department_name,
+                dt.name as document_type,
+                dt.icon as document_type_icon,
+                dt.color as document_type_color,
+                CONCAT(u.first_name, ' ', u.last_name) as uploaded_by
+            FROM documents d
+            LEFT JOIN companies c ON d.company_id = c.id
+            LEFT JOIN departments dep ON d.department_id = dep.id
+            LEFT JOIN document_types dt ON d.document_type_id = dt.id
+            LEFT JOIN users u ON d.user_id = u.id
+        ";
+
+        // Condiciones adicionales del usuario
+        $userConditions = [];
+        $userParams = [];
+
+        // Filtro de búsqueda
+        if (!empty($searchTerm)) {
+            $userConditions[] = "(d.name LIKE ? OR d.description LIKE ? OR d.original_name LIKE ?)";
+            $searchPattern = "%$searchTerm%";
+            $userParams = array_merge($userParams, [$searchPattern, $searchPattern, $searchPattern]);
+        }
+
+        // Filtro por carpeta
+        if (!empty($selectedFolder)) {
+            $userConditions[] = "d.company_id = ?";
+            $userParams[] = $selectedFolder;
+        }
+
+        // Filtro por tipo
+        if (!empty($selectedType)) {
+            $userConditions[] = "d.document_type_id = ?";
+            $userParams[] = $selectedType;
+        }
+
+        // Combinar condiciones
+        $allConditions = array_merge($permissionConditions, $userConditions);
+        $allParams = array_merge($permissionParams, $userParams);
+
+        if (!empty($allConditions)) {
+            $baseQuery .= " WHERE " . implode(' AND ', $allConditions);
+        }
+
+        // Ordenamiento
+        $validSortFields = ['name', 'created_at', 'updated_at', 'file_size'];
+        $sortBy = in_array($sortBy, $validSortFields) ? $sortBy : 'created_at';
+        $sortOrder = ($sortOrder === 'asc') ? 'ASC' : 'DESC';
+        $baseQuery .= " ORDER BY d.{$sortBy} {$sortOrder}";
+
+        // Ejecutar consulta
+        $stmt = $pdo->prepare($baseQuery);
+        $stmt->execute($allParams);
+        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Filtrar por acceso específico
+        $documents = array_filter($documents, function($doc) {
+            return canAccessDocument($doc['id']);
+        });
+
+        // Convertir a formato JavaScript
+        $documentsData = array_map(function($doc) {
+            return [
+                'id' => (int)$doc['id'],
+                'name' => $doc['name'],
+                'original_name' => $doc['original_name'],
+                'file_size' => (int)$doc['file_size'],
+                'mime_type' => $doc['mime_type'],
+                'description' => $doc['description'],
+                'status' => $doc['status'],
+                'created_at' => $doc['created_at'],
+                'updated_at' => $doc['updated_at'],
+                'user_id' => (int)$doc['user_id'],
+                'company_name' => $doc['company_name'],
+                'department_name' => $doc['department_name'],
+                'document_type' => $doc['document_type'],
+                'document_type_icon' => $doc['document_type_icon'],
+                'document_type_color' => $doc['document_type_color'],
+                'uploaded_by' => $doc['uploaded_by']
+            ];
+        }, $documents);
+
+        // Obtener carpetas accesibles
+        $accessibleCompanies = getAccessibleCompanies();
+        $folders = [];
+        foreach ($accessibleCompanies as $company) {
+            $countQuery = "SELECT COUNT(*) as count FROM documents d WHERE d.company_id = ? AND d.status = 'active'";
+            if (!empty($permissionConditions)) {
+                $countQuery .= " AND " . implode(' AND ', $permissionConditions);
+            }
+            
+            $countStmt = $pdo->prepare($countQuery);
+            $countParams = array_merge([$company['id']], $permissionParams);
+            $countStmt->execute($countParams);
+            $countResult = $countStmt->fetch(PDO::FETCH_ASSOC);
+            
+            $folders[] = [
+                'id' => $company['id'],
+                'name' => $company['name'],
+                'count' => $countResult['count'] ?? 0
+            ];
+        }
+
+    } catch (Exception $e) {
+        error_log('Error cargando documentos: ' . $e->getMessage());
+        $documents = [];
+        $folders = [];
+        $documentsData = [];
+        $error_message = 'Error cargando documentos. Por favor, inténtalo de nuevo.';
     }
-    return $folders;
 }
 
-function sortDocs($docs, $sortBy, $order) {
-    usort($docs, function($a, $b) use ($sortBy, $order) {
-        $result = match($sortBy) {
-            'date' => strtotime($a['created_at'] ?? '1970-01-01') - strtotime($b['created_at'] ?? '1970-01-01'),
-            'size' => ($a['file_size'] ?? 0) - ($b['file_size'] ?? 0),
-            'type' => strcasecmp($a['document_type'] ?? '', $b['document_type'] ?? ''),
-            default => strcasecmp($a['name'] ?? '', $b['name'] ?? '')
-        };
-        return $order === 'desc' ? -$result : $result;
-    });
-    return $docs;
-}
+// Obtener tipos de documentos accesibles
+$documentTypes = $canView ? getAccessibleDocumentTypes() : [];
 
-function filterDocs($docs, $folder, $search, $type) {
-    return array_filter($docs, function($doc) use ($folder, $search, $type) {
-        // Filtro carpeta
-        if ($folder) {
-            $docFolder = ($doc['company_name'] ?? 'Sin Empresa') . '/' . ($doc['department_name'] ?? 'General');
-            if ($docFolder !== $folder) return false;
-        }
-        // Filtro búsqueda
-        if ($search) {
-            $fields = [$doc['name'] ?? '', $doc['description'] ?? '', $doc['document_type'] ?? ''];
-            if (!array_filter($fields, fn($f) => stripos($f, $search) !== false)) return false;
-        }
-        // Filtro tipo
-        if ($type) {
-            $ext = strtolower(pathinfo($doc['original_name'] ?? '', PATHINFO_EXTENSION));
-            $category = match(true) {
-                in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp']) => 'imagen',
-                $ext === 'pdf' => 'pdf',
-                in_array($ext, ['doc', 'docx']) => 'document',
-                in_array($ext, ['xls', 'xlsx']) => 'spreadsheet',
-                default => 'other'
-            };
-            if ($category !== $type) return false;
-        }
-        return true;
-    });
-}
-
-// Procesamiento
-try {
-    $documents = getDocuments($currentUser['id'], $currentUser['company_id'], $currentUser['role']);
-    $folders = getFolders($documents);
-    $canDownload = fetchOne("SELECT download_enabled FROM users WHERE id = :id", ['id' => $currentUser['id']])['download_enabled'] ?? true;
-    
-    // Filtros con verificación de existencia
-    $selectedFolder = trim($_GET['folder'] ?? '');
-    $searchTerm = trim($_GET['search'] ?? '');
-    $selectedType = trim($_GET['type'] ?? '');
-    $sortBy = in_array($_GET['sort'] ?? 'name', ['name', 'date', 'size', 'type']) ? ($_GET['sort'] ?? 'name') : 'name';
-    $sortOrder = in_array($_GET['order'] ?? 'asc', ['asc', 'desc']) ? ($_GET['order'] ?? 'asc') : 'asc';
-    
-    // Aplicar filtros y ordenación
-    $documents = filterDocs($documents, $selectedFolder, $searchTerm, $selectedType);
-    $documents = sortDocs($documents, $sortBy, $sortOrder);
-    
-    logActivity($currentUser['id'], 'view', 'documents', null, 'Usuario accedió a la bandeja de entrada');
-} catch (Exception $e) {
-    error_log("Error in inbox.php: " . $e->getMessage());
-    $documents = $folders = [];
-    $canDownload = false;
-}
+// Mensaje de restricciones
+$restrictionsMessage = $canView ? getRestrictionsMessage() : null;
 
 // Funciones auxiliares
 $formatSize = fn($bytes) => $bytes ? round($bytes / pow(1024, floor(log($bytes) / log(1024))), 2) . ' ' . ['B', 'KB', 'MB', 'GB'][floor(log($bytes) / log(1024))] : '0 B';
 $formatDate = fn($date) => $date ? (new DateTime($date))->format('d/m/Y H:i') : 'Sin fecha';
-$canDelete = fn($userId, $role, $ownerId) => $role === 'admin' || $userId == $ownerId;
+
+function getDocumentIconClass($mimeType) {
+    if (strpos($mimeType, 'pdf') !== false) return 'pdf';
+    if (strpos($mimeType, 'word') !== false || strpos($mimeType, 'document') !== false) return 'word';
+    if (strpos($mimeType, 'excel') !== false || strpos($mimeType, 'sheet') !== false) return 'excel';
+    if (strpos($mimeType, 'image') !== false) return 'image';
+    return 'file';
+}
+
+function getDocumentIcon($mimeType) {
+    if (strpos($mimeType, 'pdf') !== false) return 'file-text';
+    if (strpos($mimeType, 'word') !== false || strpos($mimeType, 'document') !== false) return 'file-text';
+    if (strpos($mimeType, 'excel') !== false || strpos($mimeType, 'sheet') !== false) return 'grid';
+    if (strpos($mimeType, 'image') !== false) return 'image';
+    return 'file';
+}
 ?>
 
 <!DOCTYPE html>
@@ -122,25 +215,53 @@ $canDelete = fn($userId, $role, $ownerId) => $role === 'admin' || $userId == $ow
                 </button>
                 <h1>Bandeja de Entrada</h1>
                 <div class="header-stats">
-                    <div class="stat-item"><i data-feather="file"></i><span><?= count($documents) ?> documentos</span></div>
-                    <div class="stat-item"><i data-feather="folder"></i><span><?= count($folders) ?> carpetas</span></div>
+                    <div class="stat-item">
+                        <i data-feather="file"></i>
+                        <span><?= count($documents) ?> documentos</span>
+                    </div>
+                    <div class="stat-item">
+                        <i data-feather="folder"></i>
+                        <span><?= count($folders) ?> carpetas</span>
+                    </div>
+                    <?php if ($restrictionsMessage): ?>
+                        <div class="stat-item" style="color: #f59e0b;" title="Restricciones activas">
+                            <i data-feather="filter"></i>
+                            <span><?= htmlspecialchars($restrictionsMessage) ?></span>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="header-right">
                 <div class="header-info">
-                    <div class="user-name-header"><?= htmlspecialchars(trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''))) ?></div>
+                    <div class="user-name-header">
+                        <?= htmlspecialchars(trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''))) ?>
+                    </div>
                     <div class="current-datetime" id="currentDateTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="alert('Configuración estará disponible próximamente.')">
+                    <?php if (hasUserPermission('create')): ?>
+                        <a href="upload.php" class="btn-icon" title="Subir documento">
+                            <i data-feather="upload"></i>
+                        </a>
+                    <?php endif; ?>
+                    <button class="btn-icon" onclick="alert('Configuración próximamente')">
                         <i data-feather="settings"></i>
                     </button>
-                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Cerrar sesión?')">
                         <i data-feather="log-out"></i>
                     </a>
                 </div>
             </div>
         </header>
+
+        <?php if (isset($error_message)): ?>
+            <div style="padding: 2rem;">
+                <div style="background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-feather="alert-circle" style="width: 20px; height: 20px;"></i>
+                    <?= htmlspecialchars($error_message) ?>
+                </div>
+            </div>
+        <?php endif; ?>
 
         <div class="inbox-container">
             <!-- Panel de filtros -->
@@ -158,14 +279,16 @@ $canDelete = fn($userId, $role, $ownerId) => $role === 'admin' || $userId == $ow
                         <div class="search-input-group">
                             <i data-feather="search"></i>
                             <input type="text" name="search" placeholder="Buscar documentos..." value="<?= htmlspecialchars($searchTerm) ?>">
-                            <button type="submit" class="btn-search"><i data-feather="arrow-right"></i></button>
+                            <button type="submit" class="btn-search">
+                                <i data-feather="arrow-right"></i>
+                            </button>
                         </div>
                         <?php 
                         $hiddenFields = [
                             'folder' => $selectedFolder, 
                             'type' => $selectedType, 
-                            'sort' => ($sortBy !== 'name' ? $sortBy : ''), 
-                            'order' => ($sortOrder !== 'asc' ? $sortOrder : '')
+                            'sort' => ($sortBy !== 'created_at' ? $sortBy : ''), 
+                            'order' => ($sortOrder !== 'desc' ? $sortOrder : '')
                         ];
                         foreach($hiddenFields as $key => $value): 
                             if($value): 
@@ -183,317 +306,648 @@ $canDelete = fn($userId, $role, $ownerId) => $role === 'admin' || $userId == $ow
                     <h4>Carpetas</h4>
                     <div class="folders-list">
                         <a href="?" class="folder-item <?= !$selectedFolder ? 'active' : '' ?>">
-                            <i data-feather="inbox"></i><span>Todos los documentos</span><small>(<?= count($documents) ?>)</small>
+                            <i data-feather="inbox"></i>
+                            <div class="folder-info">
+                                <span class="folder-name">Todos los documentos</span>
+                            </div>
+                            <span class="count"><?= count($documents) ?></span>
                         </a>
-                        <?php foreach($folders as $folderKey => $count): ?>
-                            <a href="?folder=<?= urlencode($folderKey) ?><?= $searchTerm ? '&search=' . urlencode($searchTerm) : '' ?>" 
-                               class="folder-item <?= $selectedFolder === $folderKey ? 'active' : '' ?>">
+
+                        <?php foreach ($folders as $folder): ?>
+                            <a href="?folder=<?= $folder['id'] ?><?= $searchTerm ? '&search=' . urlencode($searchTerm) : '' ?><?= $selectedType ? '&type=' . $selectedType : '' ?>" 
+                               class="folder-item <?= $selectedFolder == $folder['id'] ? 'active' : '' ?>">
                                 <i data-feather="folder"></i>
-                                <div>
-                                    <span><?= htmlspecialchars(explode('/', $folderKey)[0]) ?></span>
-                                    <?php if(explode('/', $folderKey)[1] !== 'General'): ?>
-                                        <small><?= htmlspecialchars(explode('/', $folderKey)[1]) ?></small>
-                                    <?php endif; ?>
+                                <div class="folder-info">
+                                    <span class="folder-name"><?= htmlspecialchars($folder['name']) ?></span>
                                 </div>
-                                <small>(<?= $count ?>)</small>
+                                <span class="count"><?= $folder['count'] ?></span>
                             </a>
                         <?php endforeach; ?>
                     </div>
                 </div>
 
-                <!-- Tipos de archivo -->
-                <div class="file-types-section">
-                    <h4>Tipos de archivo</h4>
-                    <div class="file-types-list">
-                        <a href="?" class="type-item <?= !$selectedType ? 'active' : '' ?>">
-                            <i data-feather="file"></i><span>Todos</span>
-                        </a>
-                        <?php 
-                        $types = ['imagen' => ['image', 'Imágenes'], 'pdf' => ['file-text', 'PDF'], 'document' => ['file-text', 'Documentos'], 'spreadsheet' => ['grid', 'Hojas de cálculo'], 'other' => ['file', 'Otros']];
-                        foreach($types as $typeKey => [$icon, $name]): 
-                            if(array_filter($documents, function($doc) use ($typeKey) {
-                                $ext = strtolower(pathinfo($doc['original_name'] ?? '', PATHINFO_EXTENSION));
-                                return match($typeKey) {
-                                    'imagen' => in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp']),
-                                    'pdf' => $ext === 'pdf',
-                                    'document' => in_array($ext, ['doc', 'docx']),
-                                    'spreadsheet' => in_array($ext, ['xls', 'xlsx']),
-                                    'other' => !in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx'])
-                                };
-                            })):
-                        ?>
-                            <a href="?type=<?= $typeKey ?><?= $searchTerm ? '&search=' . urlencode($searchTerm) : '' ?><?= $selectedFolder ? '&folder=' . urlencode($selectedFolder) : '' ?>" 
-                               class="type-item <?= $selectedType === $typeKey ? 'active' : '' ?>">
-                                <i data-feather="<?= $icon ?>"></i><span><?= $name ?></span>
+                <!-- Tipos de documentos -->
+                <div class="types-section">
+                    <h4>Tipos</h4>
+                    <div class="types-list">
+                        <?php foreach ($documentTypes as $type): ?>
+                            <a href="?type=<?= $type['id'] ?><?= $searchTerm ? '&search=' . urlencode($searchTerm) : '' ?><?= $selectedFolder ? '&folder=' . $selectedFolder : '' ?>" 
+                               class="type-item <?= $selectedType == $type['id'] ? 'active' : '' ?>">
+                                <i data-feather="<?= $type['icon'] ?: 'file' ?>" style="color: <?= $type['color'] ?: '#6c757d' ?>"></i>
+                                <span><?= htmlspecialchars($type['name']) ?></span>
                             </a>
-                        <?php endif; endforeach; ?>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <!-- Información del usuario -->
+                <div class="user-info-section">
+                    <div class="user-card">
+                        <div class="user-avatar">
+                            <?= strtoupper(substr($currentUser['first_name'] ?? 'U', 0, 1)) ?>
+                        </div>
+                        <div class="user-details">
+                            <div class="user-name">
+                                <?= htmlspecialchars(trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''))) ?>
+                            </div>
+                            <div class="user-role"><?= htmlspecialchars(ucfirst($currentUser['role'] ?? 'Usuario')) ?></div>
+                        </div>
+                    </div>
+                    
+                    <div class="permission-status">
+                        <i data-feather="<?= $canView ? 'check-circle' : 'x-circle' ?>"></i>
+                        <span><?= $canView ? 'Acceso completo' : 'Acceso limitado' ?></span>
                     </div>
                 </div>
             </aside>
 
-            <!-- Área principal -->
-            <main class="documents-area">
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="view-controls">
-                            <button class="btn-view active" data-view="grid" onclick="changeView('grid')">
-                                <i data-feather="grid"></i>Cuadros
-                            </button>
-                            <button class="btn-view" data-view="list" onclick="changeView('list')">
-                                <i data-feather="list"></i>Lista  
-                            </button>
-                        </div>
+            <!-- Panel principal de documentos -->
+            <div class="documents-panel-full">
+                <div class="documents-header">
+                    <div class="view-controls">
+                        <button class="view-btn active" data-view="grid" onclick="changeView('grid')">
+                            <i data-feather="grid"></i>
+                            Cuadrícula
+                        </button>
+                        <button class="view-btn" data-view="list" onclick="changeView('list')">
+                            <i data-feather="list"></i>
+                            Lista
+                        </button>
                     </div>
-                    <div class="toolbar-right">
-                        <div class="sort-controls">
-                            <select id="sortBy" onchange="changeSorting()" class="form-control-sm">
-                                <?php foreach(['name' => 'nombre', 'date' => 'fecha', 'size' => 'tamaño', 'type' => 'tipo'] as $value => $label): ?>
-                                    <option value="<?= $value ?>" <?= $sortBy === $value ? 'selected' : '' ?>>Ordenar por <?= $label ?></option>
-                                <?php endforeach; ?>
+
+                    <div class="sort-controls">
+                        <form method="GET" onchange="this.submit()">
+                            <?php foreach(['search' => $searchTerm, 'folder' => $selectedFolder, 'type' => $selectedType] as $key => $value): ?>
+                                <?php if($value): ?>
+                                    <input type="hidden" name="<?= $key ?>" value="<?= htmlspecialchars($value) ?>">
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                            
+                            <select name="sort">
+                                <option value="created_at" <?= $sortBy === 'created_at' ? 'selected' : '' ?>>Fecha de creación</option>
+                                <option value="name" <?= $sortBy === 'name' ? 'selected' : '' ?>>Nombre</option>
+                                <option value="updated_at" <?= $sortBy === 'updated_at' ? 'selected' : '' ?>>Última modificación</option>
+                                <option value="file_size" <?= $sortBy === 'file_size' ? 'selected' : '' ?>>Tamaño</option>
                             </select>
-                            <button onclick="toggleSortOrder()" class="btn-icon-sm">
-                                <i data-feather="<?= $sortOrder === 'asc' ? 'arrow-up' : 'arrow-down' ?>"></i>
-                            </button>
-                        </div>
+                            
+                            <select name="order">
+                                <option value="desc" <?= $sortOrder === 'desc' ? 'selected' : '' ?>>Descendente</option>
+                                <option value="asc" <?= $sortOrder === 'asc' ? 'selected' : '' ?>>Ascendente</option>
+                            </select>
+                        </form>
                     </div>
                 </div>
 
-                <!-- Documentos -->
-                <div class="documents-grid" id="documentsContainer">
-                    <?php if(empty($documents)): ?>
+                <div class="documents-content">
+                    <?php if (empty($documents)): ?>
                         <div class="empty-state">
-                            <i data-feather="inbox" class="empty-icon"></i>
-                            <h3>No hay documentos</h3>
-                            <p><?= ($searchTerm || $selectedFolder || $selectedType) ? 'No se encontraron documentos que coincidan con los filtros aplicados.' : 'Aún no tienes documentos. <a href="upload.php">Sube tu primer documento</a>' ?></p>
-                            <?php if($searchTerm || $selectedFolder || $selectedType): ?>
+                            <i data-feather="file-text"></i>
+                            <h3>No hay documentos disponibles</h3>
+                            <?php if (!empty($searchTerm) || !empty($selectedFolder) || !empty($selectedType)): ?>
+                                <p>No se encontraron documentos que coincidan con los filtros aplicados.</p>
                                 <a href="?" class="clear-filters">Limpiar filtros</a>
+                            <?php elseif ($restrictionsMessage): ?>
+                                <p>No hay documentos disponibles según tus permisos actuales.</p>
+                            <?php else: ?>
+                                <p>Aún no se han subido documentos al sistema.</p>
+                                <?php if (hasUserPermission('create')): ?>
+                                    <a href="upload.php" class="upload-link">Subir el primer documento</a>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                     <?php else: ?>
-                        <?php foreach($documents as $doc): 
-                            $ext = strtolower(pathinfo($doc['original_name'] ?? '', PATHINFO_EXTENSION));
-                            $isImage = in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp']);
-                            $imageUrl = $isImage && $doc['file_path'] ? (strpos($doc['file_path'], 'uploads/') === 0 ? '../../' . $doc['file_path'] : $doc['file_path']) : '';
-                        ?>
-                            <div class="document-card" data-id="<?= $doc['id'] ?>">
-                                <div class="document-preview" onclick="viewDocument(<?= $doc['id'] ?>)">
-                                    <?php if($imageUrl): ?>
-                                        <img src="<?= htmlspecialchars($imageUrl) ?>" alt="<?= htmlspecialchars($doc['name']) ?>" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-                                        <div class="document-icon fallback" style="display:none;"><i data-feather="image"></i><span class="preview-label">IMG</span></div>
-                                    <?php else: ?>
-                                        <div class="document-icon <?= match($ext) { 'pdf' => 'pdf-preview', 'doc', 'docx' => 'doc-preview', 'xls', 'xlsx' => 'xls-preview', default => 'generic-preview' } ?>">
-                                            <i data-feather="<?= match($ext) { 'pdf' => 'file-text', 'doc', 'docx' => 'file-text', 'xls', 'xlsx' => 'grid', default => $doc['file_icon'] ?? 'file' } ?>"></i>
-                                            <span class="preview-label"><?= strtoupper($ext ?: 'FILE') ?></span>
+                        <div class="documents-grid" id="documentsContainer">
+                            <?php foreach ($documents as $doc): ?>
+                                <?php
+                                // Verificar permisos específicos para cada documento
+                                $docCanDownload = $canDownload && canAccessDocument($doc['id']);
+                                $docCanEdit = $canEdit && canAccessDocument($doc['id']);
+                                $docCanDelete = $canDelete && canAccessDocument($doc['id']) && 
+                                                ($currentUser['role'] === 'admin' || $doc['user_id'] == $currentUser['id']);
+                                ?>
+                                
+                                <div class="document-card" data-id="<?= $doc['id'] ?>">
+                                    <div class="document-preview">
+                                        <?php if (strpos($doc['mime_type'], 'image/') === 0 && !empty($doc['file_path'])): ?>
+                                            <img src="../../<?= htmlspecialchars($doc['file_path']) ?>" 
+                                                 alt="<?= htmlspecialchars($doc['name']) ?>" 
+                                                 class="image-preview"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                        <?php endif; ?>
+                                        
+                                        <div class="document-icon <?= getDocumentIconClass($doc['mime_type']) ?>">
+                                            <i data-feather="<?= getDocumentIcon($doc['mime_type']) ?>"></i>
                                         </div>
-                                    <?php endif; ?>
-                                </div>
-
-                                <div class="document-info">
-                                    <h4 class="document-name" title="<?= htmlspecialchars($doc['name']) ?>">
-                                        <?= htmlspecialchars($doc['name']) ?>
-                                    </h4>
-                                    <div class="document-meta">
-                                        <span class="document-type"><?= htmlspecialchars($doc['document_type'] ?? 'Sin tipo') ?></span>
-                                        <span class="document-size"><?= $formatSize($doc['file_size'] ?? 0) ?></span>
-                                        <span class="document-date"><?= $formatDate($doc['created_at'] ?? '') ?></span>
                                     </div>
-                                    <div class="document-location">
-                                        <?= htmlspecialchars($doc['company_name'] ?? 'Sin empresa') ?>
-                                        <?php if($doc['department_name']): ?> • <?= htmlspecialchars($doc['department_name']) ?><?php endif; ?>
-                                    </div>
-                                </div>
 
-                                <div class="document-actions">
-                                    <button class="action-btn view-btn" onclick="viewDocument(<?= $doc['id'] ?>)" title="Ver documento">
-                                        <i data-feather="eye"></i>
-                                    </button>
-                                    <?php if($canDownload): ?>
-                                        <form method="POST" action="download.php" style="display:inline;">
-                                            <input type="hidden" name="document_id" value="<?= $doc['id'] ?>">
-                                            <button type="submit" class="action-btn download-btn" title="Descargar">
+                                    <!-- Botones de acción -->
+                                    <div class="document-actions">
+                                        <button class="action-btn view-btn" data-doc-id="<?= $doc['id'] ?>" title="Ver documento">
+                                            <i data-feather="eye"></i>
+                                        </button>
+                                        
+                                        <?php if ($docCanDownload): ?>
+                                            <button class="action-btn download-btn" data-doc-id="<?= $doc['id'] ?>" title="Descargar">
                                                 <i data-feather="download"></i>
                                             </button>
-                                        </form>
-                                    <?php else: ?>
-                                        <button class="action-btn disabled" disabled><i data-feather="download"></i></button>
-                                    <?php endif; ?>
-                                    <?php if($canDelete($currentUser['id'], $currentUser['role'], $doc['user_id'])): ?>
-                                        <button class="action-btn delete-btn" onclick="deleteDocument(<?= $doc['id'] ?>, '<?= htmlspecialchars($doc['name'], ENT_QUOTES) ?>')" title="Eliminar">
-                                            <i data-feather="trash-2"></i>
-                                        </button>
-                                    <?php else: ?>
-                                        <button class="action-btn disabled" disabled><i data-feather="trash-2"></i></button>
-                                    <?php endif; ?>
+                                        <?php endif; ?>
+                                        
+                                        <?php if ($docCanDelete): ?>
+                                            <button class="action-btn delete-btn" data-doc-id="<?= $doc['id'] ?>" title="Eliminar">
+                                                <i data-feather="trash-2"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <div class="document-info">
+                                        <h3 class="document-name" title="<?= htmlspecialchars($doc['name']) ?>">
+                                            <?= htmlspecialchars($doc['name']) ?>
+                                        </h3>
+
+                                        <div class="document-meta">
+                                            <span class="document-type">
+                                                <?= htmlspecialchars($doc['document_type'] ?: 'Documento') ?>
+                                            </span>
+                                            <span class="document-size"><?= $formatSize($doc['file_size']) ?></span>
+                                        </div>
+
+                                        <div class="document-location">
+                                            <i data-feather="building"></i>
+                                            <span><?= htmlspecialchars($doc['company_name'] ?: 'Sin empresa') ?></span>
+                                        </div>
+
+                                        <?php if ($doc['department_name']): ?>
+                                            <div class="document-location">
+                                                <i data-feather="layers"></i>
+                                                <span><?= htmlspecialchars($doc['department_name']) ?></span>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <div class="document-date">
+                                            <i data-feather="calendar"></i>
+                                            <span><?= $formatDate($doc['created_at']) ?></span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        </div>
                     <?php endif; ?>
                 </div>
-            </main>
+            </div>
         </div>
     </main>
 
     <script>
-        // JavaScript compacto
-        const updateTime = () => {
+        // Variables globales
+        const currentUserId = <?= json_encode($currentUser['id']) ?>;
+        const currentUserRole = <?= json_encode($currentUser['role']) ?>;
+        const canDownload = <?= json_encode($canDownload) ?>;
+        const documentsData = <?= json_encode($documentsData) ?>;
+
+        // Funciones principales
+        function updateTime() {
             const now = new Date();
-            document.getElementById('currentDateTime').textContent = 
-                now.toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit',year:'numeric'}) + ' ' + 
-                now.toLocaleTimeString('es-ES', {hour:'2-digit',minute:'2-digit'});
-        };
+            const timeString = now.toLocaleDateString('es-ES', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            }) + ' ' + now.toLocaleTimeString('es-ES', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('currentDateTime').textContent = timeString;
+        }
 
-        const changeSorting = () => {
-            const url = new URL(window.location);
-            url.searchParams.set('sort', document.getElementById('sortBy').value);
-            window.location.href = url.toString();
-        };
-
-        const toggleSortOrder = () => {
-            const url = new URL(window.location);
-            const currentOrder = url.searchParams.get('order');
-            const newOrder = (currentOrder === null || currentOrder === 'asc') ? 'desc' : 'asc';
-            url.searchParams.set('order', newOrder);
-            window.location.href = url.toString();
-        };
-
-        const changeView = (viewType) => {
-            document.querySelectorAll('.btn-view').forEach(btn => 
+        function changeView(viewType) {
+            document.querySelectorAll('.view-btn').forEach(btn => 
                 btn.classList.toggle('active', btn.dataset.view === viewType));
             document.getElementById('documentsContainer').className = 
                 viewType === 'grid' ? 'documents-grid' : 'documents-list';
-            try { localStorage.setItem('inbox_view_preference', viewType); } catch(e) {}
-        };
+            try { 
+                localStorage.setItem('inbox_view_preference', viewType); 
+            } catch(e) {}
+        }
 
-        const viewDocument = (id) => window.location.href = `view.php?id=${id}`;
+        function toggleSidebar() {
+            document.querySelector('.sidebar')?.classList.toggle('active');
+        }
 
-        const deleteDocument = (id, name) => {
-            if(confirm(`¿Está seguro que desea eliminar "${name}"?`)) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = 'delete.php';
-                form.innerHTML = `<input type="hidden" name="document_id" value="${id}">`;
-                document.body.appendChild(form);
-                form.submit();
+        // Funciones de documentos con verificación de permisos
+        function viewDocument(documentId) {
+            fetch('../../api/check_document_access.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document_id: documentId, action: 'view' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.href = `view.php?id=${documentId}`;
+                } else {
+                    alert('No tienes permisos para ver este documento: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                window.location.href = `view.php?id=${documentId}`;
+            });
+        }
+
+        function downloadDocument(documentId) {
+            if (!canDownload) {
+                alert('No tienes permisos para descargar documentos');
+                return;
             }
-        };
 
-        const toggleSidebar = () => document.querySelector('.sidebar')?.classList.toggle('active');
+            fetch('../../api/check_document_access.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document_id: documentId, action: 'download' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Mostrar información de límites si está disponible
+                    if (data.download_info && data.download_info.daily_limit !== null) {
+                        const remaining = data.download_info.remaining;
+                        if (remaining !== null && remaining <= 5) {
+                            alert(`Descargas restantes hoy: ${remaining}`);
+                        }
+                    }
+
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = 'download.php';
+                    form.innerHTML = `<input type="hidden" name="document_id" value="${documentId}">`;
+                    document.body.appendChild(form);
+                    form.submit();
+                    document.body.removeChild(form);
+                } else {
+                    alert('No puedes descargar este documento: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error verificando permisos de descarga');
+            });
+        }
+
+        function deleteDocument(documentId) {
+            const docData = documentsData.find(doc => doc.id == documentId);
+            const docName = docData ? docData.name : 'este documento';
+            
+            if (confirm(`¿Está seguro que desea eliminar "${docName}"?`)) {
+                fetch('../../api/check_document_access.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ document_id: documentId, action: 'delete' })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.action = 'delete.php';
+                        form.innerHTML = `<input type="hidden" name="document_id" value="${documentId}">`;
+                        document.body.appendChild(form);
+                        form.submit();
+                    } else {
+                        alert('No tienes permisos para eliminar este documento: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error verificando permisos de eliminación');
+                });
+            }
+        }
 
         // Inicialización
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', function() {
             if(typeof feather !== 'undefined') feather.replace();
             updateTime();
-            setInterval(updateTime, 1000);
+            setInterval(updateTime, 60000);
             
-            // Eventos
-            document.addEventListener('click', (e) => {
-                if(e.target.closest('.document-preview')) {
+            // Event listeners para botones
+            document.addEventListener('click', function(e) {
+                // Botón VER
+                if (e.target.closest('.view-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const docId = e.target.closest('.view-btn').dataset.docId;
+                    if (docId) viewDocument(docId);
+                }
+                
+                // Botón DESCARGAR
+                if (e.target.closest('.download-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const docId = e.target.closest('.download-btn').dataset.docId;
+                    if (docId) downloadDocument(docId);
+                }
+                
+                // Botón ELIMINAR
+                if (e.target.closest('.delete-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const docId = e.target.closest('.delete-btn').dataset.docId;
+                    if (docId) deleteDocument(docId);
+                }
+                
+                // Click en vista previa del documento
+                if (e.target.closest('.document-preview')) {
+                    e.preventDefault();
+                    e.stopPropagation();
                     const card = e.target.closest('.document-card');
-                    if(card) viewDocument(card.dataset.id);
+                    if (card && card.dataset.id) {
+                        viewDocument(card.dataset.id);
+                    }
                 }
             });
 
-            // Restaurar vista
+            // Restaurar vista guardada
             try {
                 const savedView = localStorage.getItem('inbox_view_preference');
-                if(savedView && ['grid', 'list'].includes(savedView)) changeView(savedView);
-            } catch(e) {}
+                if (savedView && ['grid', 'list'].includes(savedView)) {
+                    changeView(savedView);
+                }
+            } catch(e) {
+                console.log('No se pudo cargar preferencia de vista');
+            }
+        });
+
+        // Responsive
+        window.addEventListener('resize', function() {
+            if (window.innerWidth <= 768) {
+                const sidebar = document.querySelector('.sidebar');
+                if (sidebar && !sidebar.classList.contains('collapsed')) {
+                    sidebar.classList.add('collapsed');
+                }
+            }
         });
     </script>
 
-    <!-- CSS compacto inline -->
     <style>
-        .inbox-container{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 80px);background:#f8fafc;gap:0;overflow:hidden}
-        .filters-panel{background:#fff;border-right:1px solid #e2e8f0;overflow-y:auto;padding:1.5rem;height:calc(100vh - 80px);width:280px;flex-shrink:0}
-        .filters-panel::-webkit-scrollbar{width:6px}.filters-panel::-webkit-scrollbar-track{background:#f1f5f9}.filters-panel::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
-        .header-info{display:flex;flex-direction:column;align-items:flex-end;gap:0.1rem;text-align:right}
-        .user-name-header{font-size:0.875rem;font-weight:600;color:#1e293b;line-height:1.1;margin:0}
-        .current-datetime{font-size:0.75rem;color:#64748b;font-weight:400;line-height:1.1;margin:0;letter-spacing:0.01em}
-        .documents-area{flex:1;display:flex;flex-direction:column;background:#fff;overflow:hidden}
-        .documents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.5rem;padding:1.5rem;overflow-y:auto;flex:1;align-content:start}
-        .documents-grid::-webkit-scrollbar{width:8px}.documents-grid::-webkit-scrollbar-track{background:#f1f5f9}.documents-grid::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}
-        .document-card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;transition:all 0.3s ease;cursor:pointer;position:relative;display:flex;flex-direction:column;height:400px}
-        .document-card:hover{transform:translateY(-4px);box-shadow:0 8px 25px rgba(0,0,0,0.15)}
-        .document-preview{width:100%;height:200px;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-bottom:1px solid #e2e8f0;cursor:pointer;overflow:hidden;position:relative;flex-shrink:0}
-        .document-preview img{width:100%;height:100%;object-fit:cover;transition:transform 0.3s ease}
-        .document-preview:hover img{transform:scale(1.05)}
-        .document-icon{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100px;height:100px;background:rgba(139,69,19,0.1);border-radius:16px;color:#8B4513;transition:all 0.3s ease}
-        .document-icon:hover{transform:scale(1.05);background:rgba(139,69,19,0.15)}
-        .document-icon i{width:40px;height:40px;margin-bottom:0.5rem}
-        .preview-label{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:inherit}
-        .pdf-preview{background:rgba(220,38,38,0.1)!important;color:#dc2626!important}
-        .doc-preview{background:rgba(59,130,246,0.1)!important;color:#3b82f6!important}
-        .xls-preview{background:rgba(16,185,129,0.1)!important;color:#10b981!important}
-        .generic-preview{background:rgba(107,114,128,0.1)!important;color:#6b7280!important}
-        .fallback{background:rgba(239,68,68,0.1)!important;color:#ef4444!important}
-        .document-info{padding:1rem;flex:1;display:flex;flex-direction:column;justify-content:space-between;min-height:0}
-        .document-name{font-size:1rem;font-weight:600;color:#1e293b;margin:0 0 0.5rem 0;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
-        .document-meta{display:flex;flex-direction:column;gap:0.25rem;margin-bottom:0.75rem;flex:1}
-        .document-meta span{font-size:0.875rem;color:#64748b}
-        .document-type{background:#8B4513;color:#fff!important;padding:0.25rem 0.5rem;border-radius:4px;font-size:0.75rem!important;font-weight:500;text-transform:uppercase;display:inline-block;width:fit-content}
-        .document-location{font-size:0.8rem;color:#94a3b8;margin-top:auto}
-        .document-actions{position:absolute;top:0.75rem;right:0.75rem;display:flex;gap:0.5rem;opacity:0;transition:opacity 0.3s ease}
-        .document-card:hover .document-actions{opacity:1}
-        .action-btn{background:rgba(255,255,255,0.9);border:1px solid rgba(226,232,240,0.8);color:#64748b;cursor:pointer;padding:0.5rem;border-radius:6px;transition:all 0.2s ease;display:flex;align-items:center;justify-content:center;width:36px;height:36px;backdrop-filter:blur(8px);box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-        .action-btn:hover{background:#8B4513;color:#fff;border-color:#8B4513;transform:scale(1.1);box-shadow:0 4px 8px rgba(0,0,0,0.15)}
-        .action-btn.delete-btn{background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.3);color:#ef4444}
-        .action-btn.delete-btn:hover{background:#ef4444;color:#fff;border-color:#dc2626}
-        .action-btn.disabled{opacity:0.5;cursor:not-allowed;background:rgba(255,255,255,0.7)}
-        .action-btn.disabled:hover{background:rgba(255,255,255,0.7);color:#64748b;transform:none}
-        .action-btn i{width:16px;height:16px}
-        .documents-list{display:flex;flex-direction:column;gap:1rem;padding:1.5rem;overflow-y:auto;flex:1}
-        .documents-list .document-card{display:flex;flex-direction:row;align-items:center;height:80px;min-height:80px;max-height:80px;padding:1rem;gap:1rem}
-        .documents-list .document-preview{width:60px;height:60px;border-bottom:none;border-radius:8px;margin:0;flex-shrink:0}
-        .documents-list .document-info{flex:1;padding:0;display:flex;flex-direction:column;justify-content:center;min-height:60px;gap:0.25rem}
-        .documents-list .document-name{font-size:0.9rem;margin:0;-webkit-line-clamp:1;line-clamp:1;line-height:1.2}
-        .documents-list .document-meta{display:flex;flex-direction:row;gap:0.5rem;margin:0;flex-wrap:wrap;align-items:center}
-        .documents-list .document-meta span{font-size:0.75rem;white-space:nowrap}
-        .documents-list .document-type{font-size:0.65rem!important;padding:0.125rem 0.375rem}
-        .documents-list .document-location{font-size:0.7rem;margin:0}
-        .documents-list .document-actions{position:static;opacity:1;margin:0;flex-shrink:0}
-        .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:3rem;color:#94a3b8;min-height:300px}
-        .empty-state i{width:64px;height:64px;margin-bottom:1.5rem;opacity:0.5}
-        .empty-state h3{margin-bottom:0.75rem;color:#1e293b;font-size:1.25rem}
-        .empty-state p{margin-bottom:1.5rem;line-height:1.6}
-        .upload-link,.clear-filters{color:#8B4513;text-decoration:none;font-weight:500}
-        .upload-link:hover,.clear-filters:hover{text-decoration:underline}
-        .toolbar{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.5rem;background:#fff;border-bottom:1px solid #e2e8f0}
-        .toolbar-left{display:flex;align-items:center;gap:1rem}
-        .toolbar-right{display:flex;align-items:center;gap:1rem}
-        .view-controls{display:flex;gap:0.5rem}
-        .btn-view{background:#f1f5f9;border:1px solid #e2e8f0;color:#64748b;cursor:pointer;padding:0.5rem 1rem;border-radius:6px;transition:all 0.2s ease;display:flex;align-items:center;gap:0.5rem;font-size:0.875rem;font-weight:500}
-        .btn-view:hover{background:#e2e8f0;color:#475569}
-        .btn-view.active{background:#8B4513;color:#fff;border-color:#8B4513}
-        .btn-view i{width:16px;height:16px}
-        .sort-controls{display:flex;align-items:center;gap:0.5rem}
-        .form-control-sm{padding:0.5rem;border:1px solid #e2e8f0;border-radius:6px;font-size:0.875rem;color:#64748b;background:#fff}
-        .btn-icon-sm{background:#f1f5f9;border:none;color:#64748b;cursor:pointer;padding:0.5rem;border-radius:6px;transition:all 0.2s}
-        .btn-icon-sm:hover{background:#e2e8f0;color:#475569}
-        .filters-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem}
-        .filters-header h3{margin:0;color:#1e293b;font-size:1.125rem;font-weight:600}
-        .search-section{margin-bottom:1.5rem}
-        .search-input-group{position:relative;display:flex;align-items:center}
-        .search-input-group i{position:absolute;left:0.75rem;color:#64748b;width:16px;height:16px}
-        .search-input-group input{width:100%;padding:0.75rem 0.75rem 0.75rem 2.5rem;border:1px solid #e2e8f0;border-radius:6px;font-size:0.875rem;background:#fff}
-        .btn-search{background:#8B4513;color:#fff;border:none;padding:0.5rem;border-radius:0 6px 6px 0;cursor:pointer;margin-left:-1px}
-        .folders-section,.file-types-section{margin-bottom:1.5rem}
-        .folders-section h4,.file-types-section h4{margin:0 0 0.75rem 0;color:#1e293b;font-size:0.875rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em}
-        .folders-list,.file-types-list{display:flex;flex-direction:column;gap:0.25rem}
-        .folder-item,.type-item{display:flex;align-items:center;gap:0.75rem;padding:0.75rem;border-radius:8px;text-decoration:none;color:#64748b;transition:all 0.2s ease;font-size:0.875rem}
-        .folder-item:hover,.type-item:hover{background:#f1f5f9;color:#1e293b}
-        .folder-item.active,.type-item.active{background:#fff7ed;color:#8B4513;font-weight:500}
-        .folder-item i,.type-item i{width:16px;height:16px;flex-shrink:0}
-        .folder-item span,.type-item span{flex:1}
-        .folder-item small{color:#94a3b8;font-size:0.75rem}
-        .header-stats{display:flex;gap:1rem;margin-left:1rem}
-        .stat-item{display:flex;align-items:center;gap:0.25rem;color:#64748b;font-size:0.875rem}
-        .stat-item i{width:14px;height:14px}
-        @media (max-width:768px){
-            .inbox-container{grid-template-columns:1fr;height:calc(100vh - 80px)}
-            .filters-panel{height:auto;max-height:200px}
-            .documents-grid{grid-template-columns:1fr;gap:1rem;padding:1rem;height:calc(100vh - 300px)}
-            .documents-list{height:calc(100vh - 300px);padding:1rem}
-            .toolbar{flex-direction:column;gap:1rem;align-items:stretch;padding:1rem}
+        /* Estilos para mantener el diseño original */
+        .document-actions {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 10;
+        }
+
+        .document-card:hover .document-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #e2e8f0;
+            color: #64748b;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+            width: 36px;
+            height: 36px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .action-btn:hover {
+            background: #8B4513;
+            color: white;
+            border-color: #8B4513;
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .action-btn.delete-btn {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+        }
+
+        .action-btn.delete-btn:hover {
+            background: #ef4444;
+            color: white;
+            border-color: #dc2626;
+            box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+        }
+
+        .action-btn i {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Vista previa de documento */
+        .document-preview {
+            position: relative;
+            height: 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fafbfc;
+            border-bottom: 1px solid #e2e8f0;
+            cursor: pointer;
+        }
+
+        .document-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .document-icon.pdf { background: #ef4444; }
+        .document-icon.word { background: #2563eb; }
+        .document-icon.excel { background: #059669; }
+        .document-icon.image { background: #7c3aed; }
+        .document-icon.file { background: #64748b; }
+
+        .document-icon i {
+            width: 32px;
+            height: 32px;
+        }
+
+        .image-preview {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* Información del documento */
+        .document-info {
+            padding: 1rem;
+            min-height: 120px;
+        }
+
+        .document-name {
+            margin: 0 0 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #1e293b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .document-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .document-type {
+            background: #8B4513;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.625rem;
+            font-weight: 500;
+        }
+
+        .document-size {
+            color: #94a3b8;
+            font-size: 0.75rem;
+        }
+
+        .document-location,
+        .document-date {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            margin-bottom: 0.25rem;
+            font-size: 0.75rem;
+            color: #94a3b8;
+        }
+
+        .document-location i,
+        .document-date i {
+            width: 12px;
+            height: 12px;
+        }
+
+        /* Estado vacío */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 3rem;
+            color: #94a3b8;
+            min-height: 300px;
+        }
+
+        .empty-state i {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1.5rem;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 0.75rem;
+            color: #1e293b;
+            font-size: 1.25rem;
+        }
+
+        .empty-state p {
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        .clear-filters,
+        .upload-link {
+            color: #8B4513;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .clear-filters:hover,
+        .upload-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Vista de lista específica */
+        .documents-list .document-card {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            height: auto;
+            border-radius: 8px;
+            min-height: 80px;
+        }
+
+        .documents-list .document-preview {
+            width: 48px;
+            height: 48px;
+            margin-right: 0.75rem;
+            border-bottom: none;
+            flex-shrink: 0;
+        }
+
+        .documents-list .document-icon {
+            width: 48px;
+            height: 48px;
+        }
+
+        .documents-list .document-icon i {
+            width: 24px;
+            height: 24px;
+        }
+
+        .documents-list .document-info {
+            flex: 1;
+            min-height: auto;
+            padding: 0;
+        }
+
+        .documents-list .document-actions {
+            position: static;
+            flex-direction: row;
+            opacity: 1;
+            margin-left: 1rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .inbox-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .filters-panel {
+                display: none;
+            }
+            
+            .documents-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header-stats {
+                display: none;
+            }
+            
+            .document-actions {
+                opacity: 1;
+            }
         }
     </style>
 </body>
