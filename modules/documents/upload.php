@@ -556,14 +556,6 @@ function formatBytes($size, $precision = 2)
                                 rows="3" placeholder="Descripción opcional del documento"><?php echo htmlspecialchars($description ?? ''); ?></textarea>
                         </div>
 
-                        <div class="form-group">
-                            <label for="tags">Etiquetas</label>
-                            <input type="text" id="tags" name="tags" class="form-control"
-                                value="<?php echo htmlspecialchars($tags ?? ''); ?>"
-                                placeholder="Ej: factura, 2024, cliente (separadas por comas)">
-                            <small class="form-help">Separa las etiquetas con comas para facilitar la búsqueda</small>
-                        </div>
-
                         <div class="form-actions">
                             <button type="submit" name="upload_document" class="btn btn-primary btn-upload"
                                     <?php echo (empty($companies) || empty($documentTypes)) ? 'disabled' : ''; ?>>

@@ -5,35 +5,36 @@ require_once '../../config/database.php';
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-function getUserPermissions($userId) {
+function getUserPermissions($userId)
+{
     try {
         $database = new Database();
         $pdo = $database->getConnection();
-        
+
         $query = "
             SELECT ug.module_permissions, ug.access_restrictions 
             FROM user_groups ug
             INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
             WHERE ugm.user_id = ? AND ug.status = 'active'
         ";
-        
+
         $stmt = $pdo->prepare($query);
         $stmt->execute([$userId]);
         $groupData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         $mergedPermissions = ['view' => false, 'download' => false, 'create' => false, 'edit' => false, 'delete' => false];
         $mergedRestrictions = ['companies' => [], 'departments' => [], 'document_types' => []];
-        
+
         foreach ($groupData as $group) {
             $permissions = json_decode($group['module_permissions'] ?: '{}', true);
             $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
-            
+
             foreach ($mergedPermissions as $key => $value) {
                 if (isset($permissions[$key]) && $permissions[$key] === true) {
                     $mergedPermissions[$key] = true;
                 }
             }
-            
+
             foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
                 if (isset($restrictions[$restrictionType]) && is_array($restrictions[$restrictionType])) {
                     $mergedRestrictions[$restrictionType] = array_unique(
@@ -42,7 +43,7 @@ function getUserPermissions($userId) {
                 }
             }
         }
-        
+
         return ['permissions' => $mergedPermissions, 'restrictions' => $mergedRestrictions];
     } catch (Exception $e) {
         error_log("Error getting user permissions: " . $e->getMessage());
@@ -50,21 +51,23 @@ function getUserPermissions($userId) {
     }
 }
 
-function getNavigationItems($userId, $userRole, $currentPath = '') {
+function getNavigationItems($userId, $userRole, $currentPath = '')
+{
     $database = new Database();
     $pdo = $database->getConnection();
     $items = [];
-    
+
     $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
     $currentLevel = count($pathParts);
-    
+
     if ($currentLevel === 0) {
+        // NIVEL 0: EMPRESAS (sin cambios)
         $userPermissions = getUserPermissions($userId);
         $restrictions = $userPermissions['restrictions'];
-        
+
         $whereConditions = ["c.status = 'active'"];
         $params = [];
-        
+
         if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
             $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
             $whereConditions[] = "c.id IN ($placeholders)";
@@ -78,9 +81,9 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
                 $params[] = $userInfo['company_id'];
             }
         }
-        
+
         $whereClause = implode(' AND ', $whereConditions);
-        
+
         $query = "
             SELECT c.id, c.name, c.description,
                    COUNT(DISTINCT d.id) as document_count,
@@ -92,11 +95,11 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
             GROUP BY c.id, c.name, c.description
             ORDER BY c.name
         ";
-        
+
         $stmt = $pdo->prepare($query);
         $stmt->execute($params);
         $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         foreach ($companies as $company) {
             $items[] = [
                 'type' => 'company',
@@ -111,13 +114,13 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
                 'can_create_inside' => true
             ];
         }
-        
     } elseif ($currentLevel === 1) {
+        // NIVEL 1: DEPARTAMENTOS + CARPETAS DE DOCUMENTOS (ACTUALIZADO)
         $companyId = (int)$pathParts[0];
-        
+
         $userPermissions = getUserPermissions($userId);
         $restrictions = $userPermissions['restrictions'];
-        
+
         $hasAccess = $userRole === 'admin';
         if (!$hasAccess) {
             if (!empty($restrictions['companies'])) {
@@ -129,11 +132,12 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
                 $hasAccess = $userInfo && $userInfo['company_id'] == $companyId;
             }
         }
-        
+
         if (!$hasAccess) {
             return [];
         }
-        
+
+        // DEPARTAMENTOS (mantener como está)
         $deptQuery = "
             SELECT d.id, d.name, d.description,
                    COUNT(doc.id) as document_count
@@ -143,11 +147,11 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
             GROUP BY d.id, d.name, d.description
             ORDER BY d.name
         ";
-        
+
         $stmt = $pdo->prepare($deptQuery);
         $stmt->execute([$companyId]);
         $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         foreach ($departments as $dept) {
             $items[] = [
                 'type' => 'department',
@@ -162,20 +166,55 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
                 'can_create_inside' => false
             ];
         }
-        
+
+        // CARPETAS DE DOCUMENTOS (NUEVO) - mostrar como items adicionales
+        $foldersQuery = "
+            SELECT f.id, f.name, f.description, f.folder_color, f.folder_icon,
+                   COUNT(doc.id) as document_count,
+                   d.name as department_name
+            FROM document_folders f
+            LEFT JOIN documents doc ON f.id = doc.folder_id AND doc.status = 'active'
+            LEFT JOIN departments d ON f.department_id = d.id
+            WHERE f.company_id = ? AND f.is_active = 1
+            GROUP BY f.id, f.name, f.description, f.folder_color, f.folder_icon, d.name
+            ORDER BY f.name
+        ";
+
+        $stmt = $pdo->prepare($foldersQuery);
+        $stmt->execute([$companyId]);
+        $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($folders as $folder) {
+            $items[] = [
+                'type' => 'document_folder',
+                'id' => $folder['id'],
+                'name' => $folder['name'],
+                'description' => $folder['description'] . ' (' . $folder['department_name'] . ')',
+                'path' => $companyId . '/folder_' . $folder['id'],
+                'document_count' => $folder['document_count'],
+                'subfolder_count' => 0,
+                'icon' => $folder['folder_icon'] ?: 'folder',
+                'folder_color' => $folder['folder_color'] ?: '#3498db',
+                'can_enter' => true,
+                'can_create_inside' => false,
+                'draggable_target' => true
+            ];
+        }
+
+        // DOCUMENTOS SIN CARPETA (mantener como está)
         $docQuery = "
             SELECT d.*, dt.name as document_type, u.first_name, u.last_name
             FROM documents d
             LEFT JOIN document_types dt ON d.document_type_id = dt.id
             LEFT JOIN users u ON d.user_id = u.id
-            WHERE d.company_id = ? AND d.department_id IS NULL AND d.status = 'active'
+            WHERE d.company_id = ? AND d.department_id IS NULL AND d.folder_id IS NULL AND d.status = 'active'
             ORDER BY d.name
         ";
-        
+
         $stmt = $pdo->prepare($docQuery);
         $stmt->execute([$companyId]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         foreach ($documents as $doc) {
             $items[] = [
                 'type' => 'document',
@@ -191,67 +230,116 @@ function getNavigationItems($userId, $userRole, $currentPath = '') {
                 'document_type' => $doc['document_type'],
                 'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
                 'can_enter' => false,
-                'can_create_inside' => false
+                'can_create_inside' => false,
+                'draggable' => true
             ];
         }
-        
     } elseif ($currentLevel === 2) {
+        // NIVEL 2: DOCUMENTOS (ACTUALIZADO para manejar carpetas de documentos)
         $companyId = (int)$pathParts[0];
-        $departmentId = (int)$pathParts[1];
-        
-        $docQuery = "
-            SELECT d.*, dt.name as document_type, u.first_name, u.last_name
-            FROM documents d
-            LEFT JOIN document_types dt ON d.document_type_id = dt.id
-            LEFT JOIN users u ON d.user_id = u.id
-            WHERE d.company_id = ? AND d.department_id = ? AND d.status = 'active'
-            ORDER BY d.name
-        ";
-        
-        $stmt = $pdo->prepare($docQuery);
-        $stmt->execute([$companyId, $departmentId]);
-        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        foreach ($documents as $doc) {
-            $items[] = [
-                'type' => 'document',
-                'id' => $doc['id'],
-                'name' => $doc['name'],
-                'description' => $doc['description'],
-                'path' => $companyId . '/' . $departmentId . '/doc_' . $doc['id'],
-                'file_size' => $doc['file_size'],
-                'mime_type' => $doc['mime_type'],
-                'original_name' => $doc['original_name'],
-                'file_path' => $doc['file_path'],
-                'created_at' => $doc['created_at'],
-                'document_type' => $doc['document_type'],
-                'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
-                'can_enter' => false,
-                'can_create_inside' => false
-            ];
+        $secondPart = $pathParts[1];
+
+        if (strpos($secondPart, 'folder_') === 0) {
+            // ES UNA CARPETA DE DOCUMENTOS
+            $folderId = (int)substr($secondPart, 7); // remover "folder_"
+            
+            $docQuery = "
+                SELECT d.*, dt.name as document_type, u.first_name, u.last_name,
+                       f.name as folder_name, f.folder_color, f.folder_icon
+                FROM documents d
+                LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                LEFT JOIN users u ON d.user_id = u.id
+                LEFT JOIN document_folders f ON d.folder_id = f.id
+                WHERE d.folder_id = ? AND d.status = 'active'
+                ORDER BY d.name
+            ";
+
+            $stmt = $pdo->prepare($docQuery);
+            $stmt->execute([$folderId]);
+            $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($documents as $doc) {
+                $items[] = [
+                    'type' => 'document',
+                    'id' => $doc['id'],
+                    'name' => $doc['name'],
+                    'description' => $doc['description'],
+                    'path' => $companyId . '/folder_' . $folderId . '/doc_' . $doc['id'],
+                    'file_size' => $doc['file_size'],
+                    'mime_type' => $doc['mime_type'],
+                    'original_name' => $doc['original_name'],
+                    'file_path' => $doc['file_path'],
+                    'created_at' => $doc['created_at'],
+                    'document_type' => $doc['document_type'],
+                    'folder_name' => $doc['folder_name'],
+                    'folder_color' => $doc['folder_color'],
+                    'folder_icon' => $doc['folder_icon'],
+                    'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                    'can_enter' => false,
+                    'can_create_inside' => false,
+                    'draggable' => true
+                ];
+            }
+        } else {
+            // ES UN DEPARTAMENTO (mantener como está)
+            $departmentId = (int)$secondPart;
+
+            $docQuery = "
+                SELECT d.*, dt.name as document_type, u.first_name, u.last_name
+                FROM documents d
+                LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                LEFT JOIN users u ON d.user_id = u.id
+                WHERE d.company_id = ? AND d.department_id = ? AND d.status = 'active'
+                ORDER BY d.name
+            ";
+
+            $stmt = $pdo->prepare($docQuery);
+            $stmt->execute([$companyId, $departmentId]);
+            $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($documents as $doc) {
+                $items[] = [
+                    'type' => 'document',
+                    'id' => $doc['id'],
+                    'name' => $doc['name'],
+                    'description' => $doc['description'],
+                    'path' => $companyId . '/' . $departmentId . '/doc_' . $doc['id'],
+                    'file_size' => $doc['file_size'],
+                    'mime_type' => $doc['mime_type'],
+                    'original_name' => $doc['original_name'],
+                    'file_path' => $doc['file_path'],
+                    'created_at' => $doc['created_at'],
+                    'document_type' => $doc['document_type'],
+                    'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                    'can_enter' => false,
+                    'can_create_inside' => false,
+                    'draggable' => true
+                ];
+            }
         }
     }
-    
+
     return $items;
 }
 
-function getBreadcrumbs($currentPath, $userId) {
+function getBreadcrumbs($currentPath, $userId)
+{
     if (empty($currentPath)) {
         return [['name' => 'Inicio', 'path' => '', 'icon' => 'home']];
     }
-    
+
     $database = new Database();
     $pdo = $database->getConnection();
     $breadcrumbs = [['name' => 'Inicio', 'path' => '', 'icon' => 'home']];
-    
+
     $pathParts = explode('/', trim($currentPath, '/'));
-    
+
     if (count($pathParts) >= 1 && is_numeric($pathParts[0])) {
         $companyId = (int)$pathParts[0];
         $stmt = $pdo->prepare("SELECT name FROM companies WHERE id = ?");
         $stmt->execute([$companyId]);
         $company = $stmt->fetch();
-        
+
         if ($company) {
             $breadcrumbs[] = [
                 'name' => $company['name'],
@@ -260,26 +348,46 @@ function getBreadcrumbs($currentPath, $userId) {
             ];
         }
     }
-    
-    if (count($pathParts) >= 2 && is_numeric($pathParts[1])) {
-        $departmentId = (int)$pathParts[1];
-        $stmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
-        $stmt->execute([$departmentId]);
-        $department = $stmt->fetch();
+
+    if (count($pathParts) >= 2) {
+        $secondPart = $pathParts[1];
         
-        if ($department) {
-            $breadcrumbs[] = [
-                'name' => $department['name'],
-                'path' => $pathParts[0] . '/' . $departmentId,
-                'icon' => 'folder'
-            ];
+        if (strpos($secondPart, 'folder_') === 0) {
+            // ES UNA CARPETA DE DOCUMENTOS
+            $folderId = (int)substr($secondPart, 7);
+            $stmt = $pdo->prepare("SELECT name, folder_icon FROM document_folders WHERE id = ?");
+            $stmt->execute([$folderId]);
+            $folder = $stmt->fetch();
+
+            if ($folder) {
+                $breadcrumbs[] = [
+                    'name' => $folder['name'],
+                    'path' => $pathParts[0] . '/' . $secondPart,
+                    'icon' => $folder['folder_icon'] ?: 'folder'
+                ];
+            }
+        } elseif (is_numeric($secondPart)) {
+            // ES UN DEPARTAMENTO
+            $departmentId = (int)$secondPart;
+            $stmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
+            $stmt->execute([$departmentId]);
+            $department = $stmt->fetch();
+
+            if ($department) {
+                $breadcrumbs[] = [
+                    'name' => $department['name'],
+                    'path' => $pathParts[0] . '/' . $departmentId,
+                    'icon' => 'folder'
+                ];
+            }
         }
     }
-    
+
     return $breadcrumbs;
 }
 
-function formatBytes($bytes) {
+function formatBytes($bytes)
+{
     if ($bytes == 0) return '0 B';
     $units = array('B', 'KB', 'MB', 'GB');
     $bytes = max($bytes, 0);
@@ -289,11 +397,13 @@ function formatBytes($bytes) {
     return round($bytes, 1) . ' ' . $units[$pow];
 }
 
-function formatDate($date) {
+function formatDate($date)
+{
     return $date ? date('d/m/Y H:i', strtotime($date)) : '';
 }
 
-function getFileIcon($filename, $mimeType) {
+function getFileIcon($filename, $mimeType)
+{
     $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
     if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
     if ($ext === 'pdf') return 'file-text';
@@ -303,7 +413,8 @@ function getFileIcon($filename, $mimeType) {
     return 'file';
 }
 
-function getFileTypeClass($filename) {
+function getFileTypeClass($filename)
+{
     $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
     if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
     if ($ext === 'pdf') return 'pdf';
@@ -312,51 +423,66 @@ function getFileTypeClass($filename) {
     return 'file';
 }
 
+function adjustBrightness($color, $percent) {
+    if (strlen($color) != 7) return $color;
+    $red = hexdec(substr($color, 1, 2));
+    $green = hexdec(substr($color, 3, 2));
+    $blue = hexdec(substr($color, 5, 2));
+    
+    $red = max(0, min(255, $red + ($red * $percent / 100)));
+    $green = max(0, min(255, $green + ($green * $percent / 100)));
+    $blue = max(0, min(255, $blue + ($blue * $percent / 100)));
+    
+    return sprintf("#%02x%02x%02x", $red, $green, $blue);
+}
+
 try {
     $database = new Database();
     $pdo = $database->getConnection();
-    
+
     $userPermissions = getUserPermissions($currentUser['id']);
     $canDownload = $userPermissions['permissions']['download'] ?? true;
     $canCreate = $userPermissions['permissions']['create'] ?? true;
     $canEdit = $userPermissions['permissions']['edit'] ?? false;
     $canDelete = $userPermissions['permissions']['delete'] ?? false;
-    
+
     if ($currentUser['role'] === 'admin') {
         $canDownload = $canCreate = $canEdit = $canDelete = true;
     }
-    
+
     $downloadStmt = $pdo->prepare("SELECT download_enabled FROM users WHERE id = ?");
     $downloadStmt->execute([$currentUser['id']]);
     $downloadResult = $downloadStmt->fetch();
     $canDownload = $canDownload && ($downloadResult['download_enabled'] ?? true);
-    
+
     $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
     $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
-    
+
     $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
-    
+
     if ($searchTerm) {
-        $items = array_filter($items, function($item) use ($searchTerm) {
-            return stripos($item['name'], $searchTerm) !== false || 
-                   stripos($item['description'] ?? '', $searchTerm) !== false;
+        $items = array_filter($items, function ($item) use ($searchTerm) {
+            return stripos($item['name'], $searchTerm) !== false ||
+                stripos($item['description'] ?? '', $searchTerm) !== false;
         });
     }
-    
+
     $breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
-    
+
     logActivity($currentUser['id'], 'view', 'visual_explorer', null, 'Usuario navegó por el explorador visual');
-    
 } catch (Exception $e) {
     error_log("Error in visual explorer: " . $e->getMessage());
     $items = [];
     $breadcrumbs = [['name' => 'Inicio', 'path' => '', 'icon' => 'home']];
     $canDownload = $canCreate = $canEdit = $canDelete = false;
 }
+
+$pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -396,20 +522,19 @@ try {
 
         <div class="container">
             <div class="page-header">
-                <h1>Explorador de Documentos</h1>
                 <p class="page-subtitle">Navegue y gestione sus documentos organizados por empresas y departamentos</p>
             </div>
 
             <div class="breadcrumb-section">
                 <div class="breadcrumb-card">
-                    <?php foreach($breadcrumbs as $index => $crumb): ?>
-                        <?php if($index > 0): ?>
+                    <?php foreach ($breadcrumbs as $index => $crumb): ?>
+                        <?php if ($index > 0): ?>
                             <span class="breadcrumb-separator">
                                 <i data-feather="chevron-right"></i>
                             </span>
                         <?php endif; ?>
-                        <a href="?path=<?= urlencode($crumb['path']) ?>" 
-                           class="breadcrumb-item <?= $index === count($breadcrumbs) - 1 ? 'current' : '' ?>">
+                        <a href="?path=<?= urlencode($crumb['path']) ?>"
+                            class="breadcrumb-item <?= $index === count($breadcrumbs) - 1 ? 'current' : '' ?>">
                             <i data-feather="<?= $crumb['icon'] ?>"></i>
                             <span><?= htmlspecialchars($crumb['name']) ?></span>
                         </a>
@@ -420,31 +545,39 @@ try {
             <div class="toolbar-section">
                 <div class="toolbar-card">
                     <div class="toolbar-left">
-                        <?php if($canCreate && !empty($currentPath)): ?>
-                        <button class="btn-create" onclick="createNewFolder()">
-                            <i data-feather="folder-plus"></i>
-                            <span>Nueva Carpeta</span>
-                        </button>
+                        <?php if ($canCreate && !empty($currentPath)): ?>
+                            <button class="btn-create" onclick="createNewFolder()">
+                                <i data-feather="folder-plus"></i>
+                                <span>Nueva Carpeta</span>
+                            </button>
                         <?php endif; ?>
-                        
-                        <?php if($canCreate): ?>
-                        <a href="upload.php" class="btn-secondary">
-                            <i data-feather="upload"></i>
-                            <span>Subir Archivo</span>
-                        </a>
+
+                        <!-- BOTÓN NUEVO PARA CREAR CARPETAS DE DOCUMENTOS -->
+                        <?php if ($canCreate && count($pathParts) === 1 && is_numeric($pathParts[0])): ?>
+                            <button class="btn-create" onclick="createDocumentFolder()" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">
+                                <i data-feather="folder"></i>
+                                <span>Nueva Carpeta de Documentos</span>
+                            </button>
+                        <?php endif; ?>
+
+                        <?php if ($canCreate): ?>
+                            <a href="upload.php" class="btn-secondary">
+                                <i data-feather="upload"></i>
+                                <span>Subir Archivo</span>
+                            </a>
                         <?php endif; ?>
                     </div>
-                    
+
                     <div class="toolbar-right">
                         <div class="search-wrapper">
                             <i data-feather="search" class="search-icon"></i>
-                            <input type="text" class="search-input" placeholder="Buscar documentos..." 
-                                   value="<?= htmlspecialchars($searchTerm) ?>" 
-                                   onkeypress="if(event.key==='Enter') search(this.value)">
-                            <?php if($searchTerm): ?>
-                            <button class="search-clear" onclick="clearSearch()">
-                                <i data-feather="x"></i>
-                            </button>
+                            <input type="text" class="search-input" placeholder="Buscar documentos..."
+                                value="<?= htmlspecialchars($searchTerm) ?>"
+                                onkeypress="if(event.key==='Enter') search(this.value)">
+                            <?php if ($searchTerm): ?>
+                                <button class="search-clear" onclick="clearSearch()">
+                                    <i data-feather="x"></i>
+                                </button>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -455,29 +588,29 @@ try {
                 <div class="content-card">
                     <div class="content-header">
                         <h3>
-                            <?php if(empty($items)): ?>
+                            <?php if (empty($items)): ?>
                                 Carpeta vacía
                             <?php else: ?>
                                 <?= count($items) ?> elemento<?= count($items) !== 1 ? 's' : '' ?> encontrado<?= count($items) !== 1 ? 's' : '' ?>
                             <?php endif; ?>
                         </h3>
                     </div>
-                    
+
                     <div class="content-body">
-                        <?php if(empty($items)): ?>
+                        <?php if (empty($items)): ?>
                             <div class="empty-state">
                                 <div class="empty-icon">
                                     <i data-feather="folder"></i>
                                 </div>
                                 <h3>Carpeta vacía</h3>
-                                <p>No hay elementos para mostrar en esta ubicación. <?php if($canCreate): ?>Puede crear una nueva carpeta o subir archivos para comenzar.<?php endif; ?></p>
-                                <?php if($canCreate): ?>
+                                <p>No hay elementos para mostrar en esta ubicación. <?php if ($canCreate): ?>Puede crear una nueva carpeta o subir archivos para comenzar.<?php endif; ?></p>
+                                <?php if ($canCreate): ?>
                                     <div class="empty-actions">
-                                        <?php if(!empty($currentPath)): ?>
-                                        <button class="btn-create" onclick="createNewFolder()">
-                                            <i data-feather="folder-plus"></i>
-                                            <span>Crear Carpeta</span>
-                                        </button>
+                                        <?php if (!empty($currentPath)): ?>
+                                            <button class="btn-create" onclick="createNewFolder()">
+                                                <i data-feather="folder-plus"></i>
+                                                <span>Crear Carpeta</span>
+                                            </button>
                                         <?php endif; ?>
                                         <a href="upload.php" class="btn-secondary">
                                             <i data-feather="upload"></i>
@@ -488,48 +621,64 @@ try {
                             </div>
                         <?php else: ?>
                             <div class="items-grid">
-                                <?php foreach($items as $item): ?>
-                                    <div class="explorer-item" onclick="<?= $item['can_enter'] ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>">
-                                        <div class="item-icon <?= $item['type'] === 'company' ? 'company' : ($item['type'] === 'department' ? 'folder' : getFileTypeClass($item['original_name'] ?? '')) ?>">
-                                            <?php if($item['type'] === 'document' && strpos($item['mime_type'], 'image/') === 0): ?>
+                                <?php foreach ($items as $item): ?>
+                                    <div class="explorer-item <?= isset($item['draggable']) ? 'draggable-item' : '' ?> <?= isset($item['draggable_target']) ? 'drop-target' : '' ?>" 
+                                         onclick="<?= $item['can_enter'] ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>"
+                                         <?= isset($item['draggable']) ? 'draggable="true"' : '' ?>
+                                         data-item-type="<?= $item['type'] ?>"
+                                         data-item-id="<?= $item['id'] ?>"
+                                         data-folder-id="<?= $item['type'] === 'document_folder' ? $item['id'] : '' ?>">
+                                        
+                                        <div class="item-icon <?= $item['type'] === 'company' ? 'company' : ($item['type'] === 'department' ? 'folder' : ($item['type'] === 'document_folder' ? 'document-folder' : getFileTypeClass($item['original_name'] ?? ''))) ?>"
+                                             <?= isset($item['folder_color']) ? 'style="background: linear-gradient(135deg, ' . $item['folder_color'] . ', ' . adjustBrightness($item['folder_color'], -20) . ');"' : '' ?>>
+                                            <?php if ($item['type'] === 'document' && strpos($item['mime_type'], 'image/') === 0): ?>
                                                 <img src="<?= htmlspecialchars($item['file_path']) ?>" alt="Preview" class="item-preview">
                                             <?php else: ?>
                                                 <i data-feather="<?= $item['icon'] ?>"></i>
                                             <?php endif; ?>
                                         </div>
-                                        
+
                                         <div class="item-details">
                                             <div class="item-name" title="<?= htmlspecialchars($item['name']) ?>">
                                                 <?= htmlspecialchars($item['name']) ?>
                                             </div>
-                                            
+
                                             <div class="item-info">
-                                                <?php if($item['type'] === 'document'): ?>
+                                                <?php if ($item['type'] === 'document'): ?>
                                                     <span class="item-size"><?= formatBytes($item['file_size']) ?></span>
                                                     <span class="item-date"><?= formatDate($item['created_at']) ?></span>
-                                                <?php elseif($item['type'] === 'company'): ?>
+                                                    <?php if (isset($item['folder_name'])): ?>
+                                                        <span class="item-folder" style="color: <?= $item['folder_color'] ?? '#3498db' ?>;">
+                                                            <i data-feather="<?= $item['folder_icon'] ?? 'folder' ?>" style="width: 12px; height: 12px;"></i>
+                                                            <?= htmlspecialchars($item['folder_name']) ?>
+                                                        </span>
+                                                    <?php endif; ?>
+                                                <?php elseif ($item['type'] === 'company'): ?>
                                                     <span class="item-count"><?= $item['document_count'] ?> documentos</span>
                                                     <span class="item-count"><?= $item['subfolder_count'] ?> departamentos</span>
-                                                <?php elseif($item['type'] === 'department'): ?>
+                                                <?php elseif ($item['type'] === 'department'): ?>
                                                     <span class="item-count"><?= $item['document_count'] ?> documentos</span>
+                                                <?php elseif ($item['type'] === 'document_folder'): ?>
+                                                    <span class="item-count"><?= $item['document_count'] ?> documentos</span>
+                                                    <span class="item-folder-type">Carpeta de documentos</span>
                                                 <?php endif; ?>
                                             </div>
                                         </div>
-                                        
-                                        <?php if($item['type'] === 'document'): ?>
-                                        <div class="item-actions">
-                                            <?php if($canDownload): ?>
-                                            <button class="action-btn" onclick="event.stopPropagation(); downloadDocument('<?= $item['id'] ?>')" title="Descargar">
-                                                <i data-feather="download"></i>
-                                            </button>
-                                            <?php endif; ?>
-                                            
-                                            <?php if($canDelete || $currentUser['role'] === 'admin'): ?>
-                                            <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
-                                                <i data-feather="trash-2"></i>
-                                            </button>
-                                            <?php endif; ?>
-                                        </div>
+
+                                        <?php if ($item['type'] === 'document'): ?>
+                                            <div class="item-actions">
+                                                <?php if ($canDownload): ?>
+                                                    <button class="action-btn" onclick="event.stopPropagation(); downloadDocument('<?= $item['id'] ?>')" title="Descargar">
+                                                        <i data-feather="download"></i>
+                                                    </button>
+                                                <?php endif; ?>
+
+                                                <?php if ($canDelete || $currentUser['role'] === 'admin'): ?>
+                                                    <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
+                                                        <i data-feather="trash-2"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                            </div>
                                         <?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
@@ -541,6 +690,7 @@ try {
         </div>
     </main>
 
+    <!-- TU MODAL ORIGINAL PARA CARPETAS -->
     <div id="createFolderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -552,33 +702,33 @@ try {
                     <i data-feather="x"></i>
                 </button>
             </div>
-            
+
             <div class="modal-body">
                 <form id="createFolderForm" onsubmit="submitCreateFolder(event)">
                     <div class="form-group">
                         <label class="form-label">Tipo de carpeta</label>
                         <select name="folder_type" id="folderType" class="form-control" onchange="updateFolderForm()">
                             <option value="">Seleccione el tipo</option>
-                            <?php if(empty($currentPath)): ?>
-                            <option value="company">Nueva Empresa</option>
-                            <?php elseif(count(explode('/', trim($currentPath, '/'))) === 1): ?>
-                            <option value="department">Nuevo Departamento</option>
+                            <?php if (empty($currentPath)): ?>
+                                <option value="company">Nueva Empresa</option>
+                            <?php elseif (count($pathParts) === 1): ?>
+                                <option value="department">Nuevo Departamento</option>
                             <?php endif; ?>
                         </select>
                     </div>
-                    
+
                     <div class="form-group">
                         <label class="form-label">Nombre</label>
                         <input type="text" name="name" class="form-control" required placeholder="Ingrese el nombre de la carpeta">
                     </div>
-                    
+
                     <div class="form-group">
                         <label class="form-label">Descripción (opcional)</label>
                         <textarea name="description" class="form-control" rows="3" placeholder="Descripción de la carpeta"></textarea>
                     </div>
-                    
+
                     <input type="hidden" name="current_path" value="<?= htmlspecialchars($currentPath) ?>">
-                    
+
                     <div class="modal-actions">
                         <button type="button" class="btn-secondary" onclick="closeCreateModal()">
                             <span>Cancelar</span>
@@ -593,6 +743,79 @@ try {
         </div>
     </div>
 
+    <!-- NUEVO MODAL PARA CARPETAS DE DOCUMENTOS -->
+    <div id="createDocumentFolderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i data-feather="folder"></i>
+                    <span>Crear Carpeta de Documentos</span>
+                </h3>
+                <button class="modal-close" onclick="closeDocumentFolderModal()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <form id="createDocumentFolderForm" onsubmit="submitCreateDocumentFolder(event)">
+                    <div class="form-group">
+                        <label class="form-label">Nombre de la carpeta</label>
+                        <input type="text" name="name" class="form-control" required placeholder="Ej: Contratos, Reportes, Facturas">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Descripción</label>
+                        <textarea name="description" class="form-control" rows="3" placeholder="Descripción de la carpeta de documentos"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Departamento</label>
+                        <select name="department_id" class="form-control" required>
+                            <option value="">Seleccione un departamento</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Color de la carpeta</label>
+                        <div class="color-options">
+                            <label><input type="radio" name="folder_color" value="#e74c3c" checked><span style="background: #e74c3c;"></span></label>
+                            <label><input type="radio" name="folder_color" value="#3498db"><span style="background: #3498db;"></span></label>
+                            <label><input type="radio" name="folder_color" value="#2ecc71"><span style="background: #2ecc71;"></span></label>
+                            <label><input type="radio" name="folder_color" value="#f39c12"><span style="background: #f39c12;"></span></label>
+                            <label><input type="radio" name="folder_color" value="#9b59b6"><span style="background: #9b59b6;"></span></label>
+                            <label><input type="radio" name="folder_color" value="#34495e"><span style="background: #34495e;"></span></label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Icono</label>
+                        <div class="icon-options">
+                            <label><input type="radio" name="folder_icon" value="folder" checked><i data-feather="folder"></i></label>
+                            <label><input type="radio" name="folder_icon" value="file-text"><i data-feather="file-text"></i></label>
+                            <label><input type="radio" name="folder_icon" value="archive"><i data-feather="archive"></i></label>
+                            <label><input type="radio" name="folder_icon" value="briefcase"><i data-feather="briefcase"></i></label>
+                            <label><input type="radio" name="folder_icon" value="inbox"><i data-feather="inbox"></i></label>
+                            <label><input type="radio" name="folder_icon" value="layers"><i data-feather="layers"></i></label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="company_id" value="<?= htmlspecialchars($pathParts[0] ?? '') ?>">
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" onclick="closeDocumentFolderModal()">
+                            <span>Cancelar</span>
+                        </button>
+                        <button type="submit" class="btn-create">
+                            <i data-feather="plus"></i>
+                            <span>Crear Carpeta de Documentos</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- TUS ESTILOS ORIGINALES + AGREGADOS PARA CARPETAS -->
     <style>
         .container {
             padding: var(--spacing-8);
@@ -829,6 +1052,22 @@ try {
             border-color: var(--primary-color);
         }
 
+        /* NUEVOS ESTILOS PARA DRAG & DROP */
+        .explorer-item.draggable-item {
+            cursor: move;
+        }
+
+        .explorer-item.draggable-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg) scale(0.95);
+        }
+
+        .explorer-item.drop-target.drag-over {
+            border-color: #27ae60;
+            background: linear-gradient(135deg, rgba(39, 174, 96, 0.1), rgba(46, 204, 113, 0.1));
+            transform: scale(1.05);
+        }
+
         .item-icon {
             width: 64px;
             height: 64px;
@@ -850,6 +1089,12 @@ try {
             background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
             color: var(--text-light);
             box-shadow: 0 4px 6px -1px rgba(212, 175, 55, 0.4);
+        }
+
+        /* NUEVO: Estilos para carpetas de documentos */
+        .item-icon.document-folder {
+            color: var(--text-light);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
         }
 
         .item-icon.pdf {
@@ -922,6 +1167,20 @@ try {
             font-size: 0.75rem;
             color: var(--text-muted);
             text-align: center;
+        }
+
+        /* NUEVOS ESTILOS PARA INFORMACIÓN DE CARPETAS */
+        .item-folder {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .item-folder-type {
+            color: #666;
+            font-style: italic;
         }
 
         .item-actions {
@@ -1130,6 +1389,67 @@ try {
             border-top: 1px solid #e2e8f0;
         }
 
+        /* NUEVOS ESTILOS PARA SELECCIÓN DE COLORES E ICONOS */
+        .color-options {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .color-options label {
+            cursor: pointer;
+            position: relative;
+        }
+
+        .color-options input[type="radio"] {
+            display: none;
+        }
+
+        .color-options span {
+            display: block;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .color-options input[type="radio"]:checked + span {
+            border-color: #333;
+            transform: scale(1.2);
+        }
+
+        .icon-options {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .icon-options label {
+            cursor: pointer;
+            padding: 8px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .icon-options input[type="radio"] {
+            display: none;
+        }
+
+        .icon-options input[type="radio"]:checked + i {
+            color: var(--primary-color);
+        }
+
+        .icon-options label:has(input[type="radio"]:checked) {
+            border-color: var(--primary-color);
+        }
+
+        .icon-options label:hover {
+            border-color: var(--primary-color);
+            background: rgba(212, 175, 55, 0.1);
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: var(--spacing-4);
@@ -1165,12 +1485,11 @@ try {
         const canCreate = <?= $canCreate ? 'true' : 'false' ?>;
         const canDelete = <?= $canDelete ? 'true' : 'false' ?>;
         const currentPath = '<?= htmlspecialchars($currentPath) ?>';
-        
+
         function navigateTo(path) {
-            console.log('📁 Navegando a:', path);
             window.location.href = `?path=${encodeURIComponent(path)}`;
         }
-        
+
         function search(term) {
             const url = new URL(window.location);
             if (term.trim()) {
@@ -1180,117 +1499,118 @@ try {
             }
             window.location.href = url.toString();
         }
-        
+
         function clearSearch() {
             const url = new URL(window.location);
             url.searchParams.delete('search');
             window.location.href = url.toString();
         }
-        
+
         function viewDocument(documentId) {
             console.log('👁️ Ver documento:', documentId);
             window.location.href = `view.php?id=${documentId}`;
         }
-        
+
         function downloadDocument(documentId) {
             if (!canDownload) {
                 alert('No tienes permisos para descargar');
                 return;
             }
-            
+
             console.log('⬇️ Descargar documento:', documentId);
-            
+
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'download.php';
             form.style.display = 'none';
-            
+
             const input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'document_id';
             input.value = documentId;
-            
+
             form.appendChild(input);
             document.body.appendChild(form);
             form.submit();
-            
+
             setTimeout(() => {
                 if (document.body.contains(form)) {
                     document.body.removeChild(form);
                 }
             }, 2000);
         }
-        
+
         function deleteDocument(documentId, documentName) {
             if (!canDelete && currentUserRole !== 'admin') {
                 alert('No tienes permisos para eliminar');
                 return;
             }
-            
+
             if (!confirm(`¿Eliminar "${documentName}"?\n\n⚠️ Esta acción no se puede deshacer.`)) {
                 return;
             }
-            
+
             if (!confirm('¿Está completamente seguro? Esta es la última oportunidad.')) {
                 return;
             }
-            
+
             console.log('🗑️ Eliminar documento:', documentId);
-            
+
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'delete.php';
             form.style.display = 'none';
-            
+
             const input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'document_id';
             input.value = documentId;
-            
+
             form.appendChild(input);
             document.body.appendChild(form);
             form.submit();
         }
-        
+
+        // TU FUNCIÓN ORIGINAL PARA CREAR CARPETAS
         function createNewFolder() {
             if (!canCreate) {
                 alert('No tienes permisos para crear carpetas');
                 return;
             }
-            
+
             const modal = document.getElementById('createFolderModal');
             modal.classList.add('active');
             updateFolderForm();
-            
+
             setTimeout(() => {
                 const nameInput = document.querySelector('#createFolderModal input[name="name"]');
                 if (nameInput) nameInput.focus();
             }, 100);
         }
-        
+
         function closeCreateModal() {
             const modal = document.getElementById('createFolderModal');
             modal.classList.remove('active');
             document.getElementById('createFolderForm').reset();
         }
-        
+
         function updateFolderForm() {
             const folderType = document.getElementById('folderType').value;
             console.log('Tipo de carpeta seleccionado:', folderType);
         }
-        
+
         async function submitCreateFolder(event) {
             event.preventDefault();
-            
+
             const form = event.target;
             const formData = new FormData(form);
             const submitBtn = form.querySelector('button[type="submit"]');
             const originalText = submitBtn.innerHTML;
-            
+
             try {
                 submitBtn.innerHTML = '<i data-feather="loader"></i> <span>Creando...</span>';
                 submitBtn.disabled = true;
-                
+
                 const folderType = formData.get('folder_type');
                 if (folderType === 'company') {
                     formData.append('action', 'create_company');
@@ -1301,14 +1621,14 @@ try {
                         formData.append('company_id', pathParts[0]);
                     }
                 }
-                
+
                 const response = await fetch('folder_actions.php', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
                     alert('✅ Carpeta creada exitosamente');
                     closeCreateModal();
@@ -1316,7 +1636,7 @@ try {
                 } else {
                     alert('❌ ' + (data.message || 'Error al crear la carpeta'));
                 }
-                
+
             } catch (error) {
                 console.error('Error:', error);
                 alert('❌ Error de conexión al crear la carpeta');
@@ -1326,15 +1646,207 @@ try {
                 feather.replace();
             }
         }
-        
+
+        // NUEVA FUNCIÓN PARA CREAR CARPETAS DE DOCUMENTOS
+        function createDocumentFolder() {
+            if (!canCreate) {
+                alert('No tienes permisos para crear carpetas de documentos');
+                return;
+            }
+
+            const modal = document.getElementById('createDocumentFolderModal');
+            modal.classList.add('active');
+            
+            // Cargar departamentos de la empresa actual
+            loadDepartments();
+
+            setTimeout(() => {
+                const nameInput = document.querySelector('#createDocumentFolderModal input[name="name"]');
+                if (nameInput) nameInput.focus();
+            }, 100);
+        }
+
+        function closeDocumentFolderModal() {
+            const modal = document.getElementById('createDocumentFolderModal');
+            modal.classList.remove('active');
+            document.getElementById('createDocumentFolderForm').reset();
+        }
+
+        async function loadDepartments() {
+            const pathParts = currentPath.split('/');
+            const companyId = pathParts[0];
+            
+            if (!companyId) return;
+
+            try {
+                // Corregir ruta relativa desde inbox.php
+                const response = await fetch(`../departments/actions/get_departments.php?company_id=${companyId}`);
+                const data = await response.json();
+                
+                const select = document.querySelector('#createDocumentFolderModal select[name="department_id"]');
+                select.innerHTML = '<option value="">Seleccione un departamento</option>';
+                
+                if (data.success && data.departments) {
+                    data.departments.forEach(dept => {
+                        const option = document.createElement('option');
+                        option.value = dept.id;
+                        option.textContent = dept.name;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error cargando departamentos:', error);
+                // Fallback: cargar departamentos directamente con una consulta básica
+                alert('Error cargando departamentos. Verifique que existan departamentos en esta empresa.');
+            }
+        }
+
+        async function submitCreateDocumentFolder(event) {
+            event.preventDefault();
+
+            const form = event.target;
+            const formData = new FormData(form);
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+
+            try {
+                submitBtn.innerHTML = '<i data-feather="loader"></i> <span>Creando...</span>';
+                submitBtn.disabled = true;
+
+                // Corregir ruta relativa - desde modules/documents/ hasta modules/folders/api/
+                const response = await fetch('../folders/api/create_folder.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('✅ Carpeta de documentos creada exitosamente');
+                    closeDocumentFolderModal();
+                    window.location.reload();
+                } else {
+                    alert('❌ ' + (data.message || 'Error al crear la carpeta de documentos'));
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('❌ Error de conexión al crear la carpeta. Verifique que existe: modules/folders/api/create_folder.php');
+            } finally {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                feather.replace();
+            }
+        }
+
+        // SISTEMA DE DRAG & DROP PARA MOVER DOCUMENTOS A CARPETAS
+        class DocumentDragDrop {
+            constructor() {
+                this.draggedDocument = null;
+                this.init();
+            }
+
+            init() {
+                this.setupDraggers();
+                this.setupDropZones();
+                console.log('📁 Sistema de drag & drop inicializado');
+            }
+
+            setupDraggers() {
+                document.querySelectorAll('.draggable-item').forEach(item => {
+                    item.addEventListener('dragstart', (e) => {
+                        const docId = item.dataset.itemId;
+                        const docType = item.dataset.itemType;
+                        
+                        if (docType !== 'document') {
+                            e.preventDefault();
+                            return;
+                        }
+
+                        this.draggedDocument = { id: docId, element: item };
+                        item.classList.add('dragging');
+                        
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', docId);
+                    });
+
+                    item.addEventListener('dragend', () => {
+                        item.classList.remove('dragging');
+                    });
+                });
+            }
+
+            setupDropZones() {
+                document.querySelectorAll('.drop-target').forEach(target => {
+                    target.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                    });
+
+                    target.addEventListener('dragenter', (e) => {
+                        e.preventDefault();
+                        if (this.draggedDocument && target.dataset.itemType === 'document_folder') {
+                            target.classList.add('drag-over');
+                        }
+                    });
+
+                    target.addEventListener('dragleave', (e) => {
+                        if (!target.contains(e.relatedTarget)) {
+                            target.classList.remove('drag-over');
+                        }
+                    });
+
+                    target.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        target.classList.remove('drag-over');
+
+                        if (!this.draggedDocument || target.dataset.itemType !== 'document_folder') {
+                            return;
+                        }
+
+                        const folderId = target.dataset.folderId;
+                        const folderName = target.querySelector('.item-name').textContent;
+                        
+                        this.moveDocument(this.draggedDocument.id, folderId, folderName);
+                    });
+                });
+            }
+
+            async moveDocument(docId, folderId, folderName) {
+                try {
+                    // Corregir ruta relativa - desde modules/documents/ hasta modules/folders/api/
+                    const response = await fetch('../folders/api/move_document.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            document_id: parseInt(docId),
+                            folder_id: parseInt(folderId)
+                        })
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert(`✅ Documento movido a: ${folderName}`);
+                        window.location.reload();
+                    } else {
+                        alert(`❌ ${result.message}`);
+                    }
+                } catch (error) {
+                    alert('❌ Error de conexión. Verifique que existe: modules/folders/api/move_document.php');
+                    console.error('Error:', error);
+                }
+            }
+        }
+
         function showSettings() {
             alert('Configuración estará disponible próximamente');
         }
-        
+
         function toggleSidebar() {
             console.log('Toggle sidebar');
         }
-        
+
         function updateTime() {
             const now = new Date();
             const options = {
@@ -1349,12 +1861,13 @@ try {
             const element = document.getElementById('currentTime');
             if (element) element.textContent = timeString;
         }
-        
+
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeCreateModal();
+                closeDocumentFolderModal();
             }
-            
+
             if (e.ctrlKey && e.key === 'f') {
                 e.preventDefault();
                 const searchInput = document.querySelector('.search-input');
@@ -1363,7 +1876,7 @@ try {
                     searchInput.select();
                 }
             }
-            
+
             if (e.key === 'Backspace' && !e.target.matches('input, textarea')) {
                 e.preventDefault();
                 const breadcrumbs = document.querySelectorAll('.breadcrumb-item');
@@ -1372,25 +1885,39 @@ try {
                 }
             }
         });
-        
+
         document.addEventListener('click', (e) => {
-            const modal = document.getElementById('createFolderModal');
-            if (e.target === modal) {
+            const modal1 = document.getElementById('createFolderModal');
+            const modal2 = document.getElementById('createDocumentFolderModal');
+            if (e.target === modal1) {
                 closeCreateModal();
             }
+            if (e.target === modal2) {
+                closeDocumentFolderModal();
+            }
         });
-        
+
         document.addEventListener('DOMContentLoaded', () => {
             if (typeof feather !== 'undefined') {
                 feather.replace();
             }
             updateTime();
             setInterval(updateTime, 60000);
-            
+
+            // Inicializar drag & drop
+            if (document.querySelectorAll('.draggable-item, .drop-target').length > 0) {
+                new DocumentDragDrop();
+            }
+
             console.log('📁 Explorador visual iniciado');
             console.log('Ruta actual:', currentPath);
-            console.log('Permisos:', {canDownload, canCreate, canDelete});
+            console.log('Permisos:', {
+                canDownload,
+                canCreate,
+                canDelete
+            });
         });
     </script>
 </body>
+
 </html>
