@@ -1,10 +1,9 @@
 <?php
 // modules/documents/upload.php
-// Módulo para subir documentos - DMS2 con Sistema de Permisos Integrado
+// Módulo para subir documentos - DMS2 con Prioridad de Grupos
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
-require_once '../../includes/permission_functions.php'; // NUEVO: Sistema de permisos
 
 // Verificar que el usuario esté logueado
 SessionManager::requireLogin();
@@ -13,23 +12,226 @@ $currentUser = SessionManager::getCurrentUser();
 $error = '';
 $success = '';
 
-// NUEVO: Verificar permisos para crear documentos
-if (!hasUserPermission('create')) {
-    $error = 'No tienes permisos para subir documentos. Contacta con tu administrador.';
-    $canUpload = false;
-} else {
-    $canUpload = true;
+/**
+ * Obtener restricciones del usuario basadas en sus grupos
+ * Los grupos tienen PRIORIDAD sobre la empresa del usuario
+ */
+function getUserGroupRestrictions($userId) {
+    try {
+        // Verificar si el usuario está en algún grupo activo
+        $query = "SELECT ug.access_restrictions, ug.name as group_name
+                 FROM user_groups ug
+                 INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+                 WHERE ugm.user_id = :user_id AND ug.status = 'active'
+                 ORDER BY ugm.added_at ASC
+                 LIMIT 1";
+        
+        $result = fetchOne($query, ['user_id' => $userId]);
+        
+        if (!$result) {
+            return [
+                'has_group' => false,
+                'restrictions' => [],
+                'group_name' => null,
+                'message' => 'Sin grupo asignado - acceso según empresa del usuario'
+            ];
+        }
+        
+        $restrictions = [];
+        if (!empty($result['access_restrictions'])) {
+            $restrictions = json_decode($result['access_restrictions'], true) ?: [];
+        }
+        
+        return [
+            'has_group' => true,
+            'restrictions' => $restrictions,
+            'group_name' => $result['group_name'],
+            'message' => !empty($restrictions) 
+                ? "Restricciones aplicadas por grupo: {$result['group_name']}" 
+                : "Sin restricciones en grupo: {$result['group_name']}"
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Error obteniendo restricciones de grupo: " . $e->getMessage());
+        return [
+            'has_group' => false,
+            'restrictions' => [],
+            'group_name' => null,
+            'message' => 'Error - usando acceso por empresa del usuario'
+        ];
+    }
 }
 
-// NUEVO: Obtener datos con restricciones aplicadas
-$accessibleCompanies = $canUpload ? getAccessibleCompanies() : [];
-$accessibleDocumentTypes = $canUpload ? getAccessibleDocumentTypes() : [];
+/**
+ * Obtener empresas accesibles considerando grupos vs empresa del usuario
+ */
+function getAccessibleCompaniesForUser($currentUser) {
+    $groupInfo = getUserGroupRestrictions($currentUser['id']);
+    
+    // PRIORIDAD 1: Si tiene grupo con restricciones específicas
+    if ($groupInfo['has_group'] && !empty($groupInfo['restrictions']['companies'])) {
+        $allowedCompanies = $groupInfo['restrictions']['companies'];
+        $placeholders = str_repeat('?,', count($allowedCompanies) - 1) . '?';
+        $query = "SELECT * FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+        return fetchAll($query, $allowedCompanies) ?: [];
+    }
+    
+    // PRIORIDAD 2: Si es admin (con o sin grupo)
+    if ($currentUser['role'] === 'admin') {
+        return fetchAll("SELECT * FROM companies WHERE status = 'active' ORDER BY name") ?: [];
+    }
+    
+    // PRIORIDAD 3: Usuario normal - solo su empresa
+    if ($currentUser['company_id']) {
+        return fetchAll(
+            "SELECT * FROM companies WHERE id = :company_id AND status = 'active'",
+            ['company_id' => $currentUser['company_id']]
+        ) ?: [];
+    }
+    
+    return [];
+}
 
-// NUEVO: Mensaje informativo sobre restricciones
-$restrictionsMessage = $canUpload ? getRestrictionsMessage() : null;
+/**
+ * Obtener departamentos accesibles considerando grupos vs empresa del usuario
+ */
+function getAccessibleDepartmentsForUser($currentUser) {
+    $groupInfo = getUserGroupRestrictions($currentUser['id']);
+    
+    // PRIORIDAD 1: Si tiene grupo con restricciones específicas de departamentos
+    if ($groupInfo['has_group'] && !empty($groupInfo['restrictions']['departments'])) {
+        $allowedDepartments = $groupInfo['restrictions']['departments'];
+        $placeholders = str_repeat('?,', count($allowedDepartments) - 1) . '?';
+        $query = "SELECT d.*, c.name as company_name FROM departments d 
+                 LEFT JOIN companies c ON d.company_id = c.id 
+                 WHERE d.id IN ($placeholders) AND d.status = 'active' 
+                 ORDER BY c.name, d.name";
+        return fetchAll($query, $allowedDepartments) ?: [];
+    }
+    
+    // PRIORIDAD 2: Si tiene grupo pero sin restricciones de departamentos 
+    // (puede ver departamentos de las empresas permitidas)
+    if ($groupInfo['has_group'] && !empty($groupInfo['restrictions']['companies'])) {
+        $allowedCompanies = $groupInfo['restrictions']['companies'];
+        $placeholders = str_repeat('?,', count($allowedCompanies) - 1) . '?';
+        $query = "SELECT d.*, c.name as company_name FROM departments d 
+                 LEFT JOIN companies c ON d.company_id = c.id 
+                 WHERE d.company_id IN ($placeholders) AND d.status = 'active' 
+                 ORDER BY c.name, d.name";
+        return fetchAll($query, $allowedCompanies) ?: [];
+    }
+    
+    // PRIORIDAD 3: Si es admin (con o sin grupo)
+    if ($currentUser['role'] === 'admin') {
+        return fetchAll("SELECT d.*, c.name as company_name FROM departments d 
+                        LEFT JOIN companies c ON d.company_id = c.id 
+                        WHERE d.status = 'active' ORDER BY c.name, d.name") ?: [];
+    }
+    
+    // PRIORIDAD 4: Usuario normal - solo departamentos de su empresa
+    if ($currentUser['company_id']) {
+        return fetchAll(
+            "SELECT d.*, c.name as company_name FROM departments d 
+             LEFT JOIN companies c ON d.company_id = c.id 
+             WHERE d.company_id = :company_id AND d.status = 'active' 
+             ORDER BY d.name",
+            ['company_id' => $currentUser['company_id']]
+        ) ?: [];
+    }
+    
+    return [];
+}
+
+/**
+ * Obtener tipos de documento accesibles considerando grupos
+ */
+function getAccessibleDocumentTypesForUser($currentUser) {
+    $groupInfo = getUserGroupRestrictions($currentUser['id']);
+    
+    // Si tiene grupo con restricciones específicas de tipos de documento
+    if ($groupInfo['has_group'] && !empty($groupInfo['restrictions']['document_types'])) {
+        $allowedTypes = $groupInfo['restrictions']['document_types'];
+        $placeholders = str_repeat('?,', count($allowedTypes) - 1) . '?';
+        $query = "SELECT * FROM document_types WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+        return fetchAll($query, $allowedTypes) ?: [];
+    }
+    
+    // Sin restricciones específicas - todos los tipos
+    return fetchAll("SELECT * FROM document_types WHERE status = 'active' ORDER BY name") ?: [];
+}
+
+// Obtener datos usando el nuevo sistema de prioridades
+$groupInfo = getUserGroupRestrictions($currentUser['id']);
+$companies = getAccessibleCompaniesForUser($currentUser);
+$departments = getAccessibleDepartmentsForUser($currentUser);
+$documentTypes = getAccessibleDocumentTypesForUser($currentUser);
+
+// Debug: Mostrar información del sistema (con ?debug=1)
+if (isset($_GET['debug'])) {
+    echo "<div style='background: #f8f9fa; padding: 15px; margin: 10px; border: 1px solid #dee2e6; border-radius: 5px; font-family: monospace; font-size: 12px;'>";
+    echo "<strong>🔍 DEBUG - Sistema de Permisos con Prioridad de Grupos</strong><br><br>";
+    
+    echo "<strong>👤 USUARIO:</strong><br>";
+    echo "Usuario: {$currentUser['username']} (ID: {$currentUser['id']})<br>";
+    echo "Rol: {$currentUser['role']}<br>";
+    echo "Empresa del usuario: " . ($currentUser['company_id'] ?: 'N/A') . "<br><br>";
+    
+    echo "<strong>👥 INFORMACIÓN DE GRUPOS:</strong><br>";
+    echo "Tiene grupo: " . ($groupInfo['has_group'] ? 'SÍ' : 'NO') . "<br>";
+    if ($groupInfo['has_group']) {
+        echo "Nombre del grupo: {$groupInfo['group_name']}<br>";
+        echo "Restricciones activas: " . (!empty($groupInfo['restrictions']) ? 'SÍ' : 'NO') . "<br>";
+        if (!empty($groupInfo['restrictions'])) {
+            if (!empty($groupInfo['restrictions']['companies'])) {
+                echo "- Empresas restringidas a: " . implode(', ', $groupInfo['restrictions']['companies']) . "<br>";
+            }
+            if (!empty($groupInfo['restrictions']['departments'])) {
+                echo "- Departamentos restringidos a: " . implode(', ', $groupInfo['restrictions']['departments']) . "<br>";
+            }
+            if (!empty($groupInfo['restrictions']['document_types'])) {
+                echo "- Tipos doc restringidos a: " . implode(', ', $groupInfo['restrictions']['document_types']) . "<br>";
+            }
+        }
+    }
+    echo "Mensaje: {$groupInfo['message']}<br><br>";
+    
+    echo "<strong>📊 ACCESO RESULTANTE:</strong><br>";
+    echo "Empresas accesibles: " . count($companies) . "<br>";
+    echo "Departamentos accesibles: " . count($departments) . "<br>";
+    echo "Tipos de documento: " . count($documentTypes) . "<br><br>";
+    
+    if (count($companies) > 0) {
+        echo "<strong>🏢 EMPRESAS ACCESIBLES:</strong><br>";
+        foreach ($companies as $company) {
+            echo "- ID: {$company['id']}, Nombre: {$company['name']}<br>";
+        }
+        echo "<br>";
+    }
+    
+    if (count($departments) > 0) {
+        echo "<strong>🏪 DEPARTAMENTOS ACCESIBLES:</strong><br>";
+        foreach ($departments as $dept) {
+            echo "- ID: {$dept['id']}, Nombre: {$dept['name']}, Empresa: " . ($dept['company_name'] ?: 'N/A') . "<br>";
+        }
+        echo "<br>";
+    } else {
+        echo "<strong>⚠️ No se encontraron departamentos accesibles.</strong><br><br>";
+    }
+    
+    echo "<strong>🔄 LÓGICA APLICADA:</strong><br>";
+    if ($groupInfo['has_group'] && !empty($groupInfo['restrictions'])) {
+        echo "✅ PRIORIDAD 1: Restricciones de grupo aplicadas<br>";
+    } elseif ($currentUser['role'] === 'admin') {
+        echo "✅ PRIORIDAD 2: Acceso de administrador (todos los recursos)<br>";
+    } else {
+        echo "✅ PRIORIDAD 3: Usuario normal (solo su empresa)<br>";
+    }
+    
+    echo "</div>";
+}
 
 // Procesar subida de archivo
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document']) && $canUpload) {
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document'])) {
     $documentName = trim($_POST['document_name'] ?? '');
     $documentTypeId = $_POST['document_type_id'] ?? '';
     $companyId = $_POST['company_id'] ?? '';
@@ -47,23 +249,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_document']) && 
     } elseif (empty($_FILES['document_file']['name'])) {
         $error = 'Debe seleccionar un archivo';
     } else {
-        // NUEVO: Verificar permisos específicos para la empresa seleccionada
-        $userPerms = getUserPermissions();
-        if (!empty($userPerms['restrictions']['companies']) && 
-            !in_array($companyId, $userPerms['restrictions']['companies'])) {
-            $error = 'No tienes permisos para subir documentos a esta empresa';
+        // Verificar permisos usando el sistema de grupos
+        $hasPermission = true;
+        $permissionError = '';
+        
+        // Verificar acceso a empresa
+        $accessibleCompanyIds = array_column($companies, 'id');
+        if (!in_array($companyId, $accessibleCompanyIds)) {
+            $hasPermission = false;
+            $permissionError = 'No tienes permisos para subir documentos a esta empresa según las restricciones de tu grupo';
         }
-        // NUEVO: Verificar permisos para el departamento si se especificó
-        elseif ($departmentId && !empty($userPerms['restrictions']['departments']) && 
-                !in_array($departmentId, $userPerms['restrictions']['departments'])) {
-            $error = 'No tienes permisos para subir documentos a este departamento';
+        
+        // Verificar acceso a departamento (si se especificó)
+        if ($hasPermission && $departmentId) {
+            $accessibleDepartmentIds = array_column($departments, 'id');
+            if (!in_array($departmentId, $accessibleDepartmentIds)) {
+                $hasPermission = false;
+                $permissionError = 'No tienes permisos para subir documentos a este departamento según las restricciones de tu grupo';
+            }
         }
-        // NUEVO: Verificar permisos para el tipo de documento
-        elseif (!empty($userPerms['restrictions']['document_types']) && 
-                !in_array($documentTypeId, $userPerms['restrictions']['document_types'])) {
-            $error = 'No tienes permisos para subir documentos de este tipo';
+        
+        // Verificar acceso a tipo de documento
+        if ($hasPermission) {
+            $accessibleDocumentTypeIds = array_column($documentTypes, 'id');
+            if (!in_array($documentTypeId, $accessibleDocumentTypeIds)) {
+                $hasPermission = false;
+                $permissionError = 'No tienes permisos para subir documentos de este tipo según las restricciones de tu grupo';
+            }
+        }
+        
+        if (!$hasPermission) {
+            $error = $permissionError;
         } else {
-            // Verificar el archivo
+            // Procesar archivo (código existente...)
             $file = $_FILES['document_file'];
             $fileName = $file['name'];
             $fileTmpName = $file['tmp_name'];
@@ -202,6 +420,7 @@ function formatBytes($size, $precision = 2)
             </div>
         </header>
 
+        <!-- Contenido -->
         <div class="upload-content">
             <div class="upload-container">
                 <div class="upload-card">
@@ -210,140 +429,153 @@ function formatBytes($size, $precision = 2)
                         <p>Seleccione un archivo y complete la información requerida</p>
                     </div>
 
-                    <?php if (!$canUpload): ?>
+                    <!-- Mostrar información de permisos si es relevante -->
+                    <?php if ($groupInfo['has_group']): ?>
+                        <div class="alert alert-info">
+                            <i data-feather="users"></i>
+                            <strong>Permisos de grupo:</strong> <?php echo htmlspecialchars($groupInfo['message']); ?>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if ($error): ?>
                         <div class="alert alert-error">
                             <i data-feather="alert-circle"></i>
                             <?php echo htmlspecialchars($error); ?>
                         </div>
-                    <?php else: ?>
-                        
-                        <!-- NUEVO: Mostrar mensaje de restricciones si las hay -->
-                        <?php if ($restrictionsMessage): ?>
-                            <div class="alert alert-info">
-                                <i data-feather="info"></i>
-                                <strong>Restricciones activas:</strong> <?php echo htmlspecialchars($restrictionsMessage); ?>
-                            </div>
-                        <?php endif; ?>
-
-                        <?php if ($error): ?>
-                            <div class="alert alert-error">
-                                <i data-feather="alert-circle"></i>
-                                <?php echo htmlspecialchars($error); ?>
-                            </div>
-                        <?php endif; ?>
-
-                        <?php if ($success): ?>
-                            <div class="alert alert-success">
-                                <i data-feather="check-circle"></i>
-                                <?php echo htmlspecialchars($success); ?>
-                            </div>
-                        <?php endif; ?>
-
-                        <form method="POST" enctype="multipart/form-data" class="upload-form">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="document_name">Nombre del Documento <span class="text-danger">*</span></label>
-                                    <input type="text" id="document_name" name="document_name"
-                                        class="form-control" required
-                                        value="<?php echo htmlspecialchars($documentName ?? ''); ?>"
-                                        placeholder="Ej: Factura 001-2024">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="document_type_id">Tipo de Documento <span class="text-danger">*</span></label>
-                                    <select id="document_type_id" name="document_type_id" class="form-control" required>
-                                        <option value="">Seleccionar tipo...</option>
-                                        <?php foreach ($accessibleDocumentTypes as $type): ?>
-                                            <option value="<?php echo $type['id']; ?>">
-                                                <?php echo htmlspecialchars($type['name']); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <?php if (empty($accessibleDocumentTypes)): ?>
-                                        <small class="form-help text-muted">Sin tipos de documentos disponibles según tus permisos</small>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="company_id">Empresa <span class="text-danger">*</span></label>
-                                    <select id="company_id" name="company_id" class="form-control" required>
-                                        <option value="">Seleccionar empresa...</option>
-                                        <?php foreach ($accessibleCompanies as $company): ?>
-                                            <option value="<?php echo $company['id']; ?>">
-                                                <?php echo htmlspecialchars($company['name']); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <?php if (empty($accessibleCompanies)): ?>
-                                        <small class="form-help text-muted">Sin empresas disponibles según tus permisos</small>
-                                    <?php endif; ?>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="department_id">Departamento</label>
-                                    <select id="department_id" name="department_id" class="form-control">
-                                        <option value="">Seleccionar departamento...</option>
-                                    </select>
-                                    <small class="form-help">Opcional - Se carga según la empresa seleccionada</small>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="document_file">Archivo <span class="text-danger">*</span></label>
-                                <div class="file-upload-area" id="fileUploadArea">
-                                    <input type="file" name="document_file" id="document_file" 
-                                           class="file-input" required accept=".pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif">
-                                    
-                                    <div class="file-upload-content" id="fileUploadContent">
-                                        <i data-feather="upload-cloud"></i>
-                                        <p>Arrastra tu archivo aquí o <span class="file-browse">haz clic para seleccionar</span></p>
-                                        <small>Tamaño máximo: 20MB | Formatos: PDF, DOC, DOCX, XLSX, JPG, PNG, GIF</small>
-                                    </div>
-                                    
-                                    <div class="file-preview" id="filePreview" style="display: none;">
-                                        <div class="file-info">
-                                            <i data-feather="file"></i>
-                                            <div class="file-details">
-                                                <span class="file-name" id="fileName"></span>
-                                                <span class="file-size" id="fileSize"></span>
-                                            </div>
-                                        </div>
-                                        <button type="button" class="btn-remove" onclick="clearFile()">
-                                            <i data-feather="x"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="description">Descripción</label>
-                                <textarea id="description" name="description" class="form-control" rows="3" 
-                                          placeholder="Descripción opcional del documento"><?php echo htmlspecialchars($description ?? ''); ?></textarea>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="tags">Etiquetas</label>
-                                <input type="text" id="tags" name="tags" class="form-control" 
-                                       value="<?php echo htmlspecialchars($tags ?? ''); ?>"
-                                       placeholder="Ej: factura, 2024, cliente (separadas por comas)">
-                                <small class="form-help">Separa las etiquetas con comas para facilitar la búsqueda</small>
-                            </div>
-
-                            <div class="form-actions">
-                                <button type="submit" name="upload_document" class="btn btn-primary btn-upload" 
-                                        <?php echo (!$canUpload || empty($accessibleCompanies) || empty($accessibleDocumentTypes)) ? 'disabled' : ''; ?>>
-                                    <i data-feather="upload"></i>
-                                    Subir Documento
-                                </button>
-                                <a href="inbox.php" class="btn btn-secondary">
-                                    <i data-feather="arrow-left"></i>
-                                    Volver a la Bandeja
-                                </a>
-                            </div>
-                        </form>
                     <?php endif; ?>
+
+                    <?php if ($success): ?>
+                        <div class="alert alert-success">
+                            <i data-feather="check-circle"></i>
+                            <?php echo htmlspecialchars($success); ?>
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="POST" enctype="multipart/form-data" class="upload-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="document_name">Nombre del Documento *</label>
+                                <input type="text" id="document_name" name="document_name"
+                                    class="form-control" required
+                                    value="<?php echo htmlspecialchars($documentName ?? ''); ?>"
+                                    placeholder="Ej: Factura 001-2024">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="document_type_id">Tipo de Documento *</label>
+                                <select id="document_type_id" name="document_type_id" class="form-control" required>
+                                    <option value="">Seleccionar tipo</option>
+                                    <?php foreach ($documentTypes as $type): ?>
+                                        <option value="<?php echo $type['id']; ?>"
+                                            <?php echo (isset($documentTypeId) && $documentTypeId == $type['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($type['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <?php if (empty($documentTypes)): ?>
+                                    <small class="form-help text-muted">Sin tipos de documentos disponibles según tus permisos de grupo</small>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="company_id">Empresa *</label>
+                                <select id="company_id" name="company_id" class="form-control" required>
+                                    <option value="">Seleccionar empresa</option>
+                                    <?php foreach ($companies as $company): ?>
+                                        <option value="<?php echo $company['id']; ?>"
+                                            <?php echo (isset($companyId) && $companyId == $company['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($company['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <?php if (empty($companies)): ?>
+                                    <small class="form-help text-muted">Sin empresas disponibles según tus permisos de grupo</small>
+                                <?php endif; ?>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="department_id">Departamento</label>
+                                <select id="department_id" name="department_id" class="form-control">
+                                    <option value="">Seleccionar departamento (opcional)</option>
+                                    <?php if (is_array($departments) && count($departments) > 0): ?>
+                                        <?php foreach ($departments as $dept): ?>
+                                            <option value="<?php echo htmlspecialchars($dept['id']); ?>" 
+                                                    data-company="<?php echo htmlspecialchars($dept['company_id']); ?>"
+                                                    <?php echo (isset($departmentId) && $departmentId == $dept['id']) ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($dept['name']); ?>
+                                                <?php if ($currentUser['role'] === 'admin' && isset($dept['company_name'])): ?>
+                                                    (<?php echo htmlspecialchars($dept['company_name']); ?>)
+                                                <?php endif; ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <option value="" disabled>No hay departamentos disponibles</option>
+                                    <?php endif; ?>
+                                </select>
+                                <small class="form-help">
+                                    <?php if (count($departments) == 0): ?>
+                                        <span style="color: orange;">⚠️ No hay departamentos disponibles según tus permisos de grupo.</span>
+                                    <?php else: ?>
+                                        Los departamentos se filtran automáticamente según la empresa seleccionada
+                                    <?php endif; ?>
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="document_file">Archivo *</label>
+                            <div class="file-upload-area" id="fileUploadArea">
+                                <input type="file" id="document_file" name="document_file"
+                                    class="file-input" required accept=".pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif">
+                                <div class="file-upload-content">
+                                    <i data-feather="upload-cloud" class="icon-grande"></i>
+                                    <p style="font-size: 1.4rem; font-weight: 500; text-align: center;">Haz clic aquí para seleccionar un archivo<br><small style="font-size: 1.3rem; font-weight: 500; text-align: center;">o arrastra y suelta un archivo</small></p>
+                                    <small style="font-size: 0.8rem; font-weight: 500; text-align: center;">Tamaño máximo: <?php echo formatBytes(getSystemConfig('max_file_size') ?? 20971520); ?></small>
+                                </div>
+                                <div class="file-preview" id="filePreview" style="display: none;">
+                                    <div class="file-info">
+                                        <i data-feather="file"></i>
+                                        <div class="file-details">
+                                            <span class="file-name"></span>
+                                            <span class="file-size"></span>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="remove-file" onclick="removeFile()">
+                                        <i data-feather="x"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <small class="form-help">Haz clic en cualquier parte del área para cambiar el archivo</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="description">Descripción</label>
+                            <textarea id="description" name="description" class="form-control"
+                                rows="3" placeholder="Descripción opcional del documento"><?php echo htmlspecialchars($description ?? ''); ?></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="tags">Etiquetas</label>
+                            <input type="text" id="tags" name="tags" class="form-control"
+                                value="<?php echo htmlspecialchars($tags ?? ''); ?>"
+                                placeholder="Ej: factura, 2024, cliente (separadas por comas)">
+                            <small class="form-help">Separa las etiquetas con comas para facilitar la búsqueda</small>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" name="upload_document" class="btn btn-primary btn-upload"
+                                    <?php echo (empty($companies) || empty($documentTypes)) ? 'disabled' : ''; ?>>
+                                <i data-feather="upload"></i>
+                                Subir Documento
+                            </button>
+                            <a href="../../dashboard.php" class="btn btn-secondary">
+                                <i data-feather="arrow-left"></i>
+                                Volver al Dashboard
+                            </a>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -351,6 +583,8 @@ function formatBytes($size, $precision = 2)
 
     <!-- Scripts -->
     <script>
+        console.log('🚀 Iniciando upload con sistema de grupos...');
+
         // Actualizar hora
         function updateTime() {
             const now = new Date();
@@ -364,58 +598,114 @@ function formatBytes($size, $precision = 2)
 
         // Inicializar
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('📄 DOM cargado con sistema de prioridad de grupos');
+            
             feather.replace();
             updateTime();
             setInterval(updateTime, 60000);
             
             setupFileUpload();
-            setupDepartmentLoader();
+            setupDepartmentFilter();
+            
+            // Debug inicial
+            const deptSelect = document.getElementById('department_id');
+            if (deptSelect) {
+                const deptOptions = Array.from(deptSelect.options).filter(opt => opt.value !== '');
+                console.log(`📊 Departamentos cargados: ${deptOptions.length}`);
+                
+                if (deptOptions.length === 0) {
+                    console.warn('⚠️ No hay departamentos disponibles según permisos de grupo');
+                } else {
+                    console.log('📋 Departamentos disponibles según grupos:');
+                    deptOptions.forEach(option => {
+                        const name = option.textContent.trim();
+                        const company = option.getAttribute('data-company');
+                        console.log(`  • ${name} (empresa: ${company})`);
+                    });
+                }
+            }
+
+            // Verificar información de grupos
+            const groupAlert = document.querySelector('.alert-info');
+            if (groupAlert) {
+                console.log('👥 Sistema de grupos activo:', groupAlert.textContent.trim());
+            } else {
+                console.log('👤 Usuario sin grupo - usando acceso por empresa del usuario');
+            }
         });
 
-        // NUEVO: Configurar carga de departamentos con permisos
-        function setupDepartmentLoader() {
+        // Configurar filtro de departamentos
+        function setupDepartmentFilter() {
             const companySelect = document.getElementById('company_id');
             const departmentSelect = document.getElementById('department_id');
             
-            if (companySelect && departmentSelect) {
-                companySelect.addEventListener('change', function() {
-                    const companyId = this.value;
+            if (!companySelect || !departmentSelect) {
+                console.warn('⚠️ No se encontraron los selects de empresa o departamento');
+                return;
+            }
+            
+            console.log('🔧 Configurando filtro de departamentos con prioridad de grupos...');
+            
+            companySelect.addEventListener('change', function() {
+                const selectedCompany = this.value;
+                console.log(`🏢 Empresa seleccionada: ${selectedCompany}`);
+                filterDepartmentsByCompany(selectedCompany);
+            });
+            
+            // Aplicar filtro inicial si hay empresa pre-seleccionada
+            if (companySelect.value) {
+                console.log('🔄 Aplicando filtro inicial...');
+                filterDepartmentsByCompany(companySelect.value);
+            }
+        }
+
+        function filterDepartmentsByCompany(companyId) {
+            const departmentSelect = document.getElementById('department_id');
+            if (!departmentSelect) return;
+            
+            console.log(`🔄 Filtrando departamentos para empresa: ${companyId} (con restricciones de grupo)`);
+            
+            const options = Array.from(departmentSelect.options);
+            let visibleCount = 0;
+            let hiddenCount = 0;
+            
+            options.forEach(option => {
+                if (option.value === '') {
+                    // Opción vacía siempre visible
+                    option.style.display = 'block';
+                    option.disabled = false;
+                } else {
+                    const optionCompany = option.getAttribute('data-company');
                     
-                    // Limpiar opciones
-                    departmentSelect.innerHTML = '<option value="">Cargando...</option>';
-                    
-                    if (companyId) {
-                        // NUEVO: Usar API con permisos aplicados
-                        fetch('../../api/get_departments_with_permissions.php', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                company_id: companyId
-                            })
-                        })
-                        .then(response => response.json())
-                        .then(data => {
-                            departmentSelect.innerHTML = '<option value="">Seleccionar departamento...</option>';
-                            
-                            if (data.success && data.departments) {
-                                data.departments.forEach(dept => {
-                                    const option = document.createElement('option');
-                                    option.value = dept.id;
-                                    option.textContent = dept.name;
-                                    departmentSelect.appendChild(option);
-                                });
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            departmentSelect.innerHTML = '<option value="">Error cargando departamentos</option>';
-                        });
+                    if (!companyId || optionCompany === companyId) {
+                        // Mostrar departamentos de la empresa seleccionada
+                        // (ya filtrados por restricciones de grupo en PHP)
+                        option.style.display = 'block';
+                        option.disabled = false;
+                        visibleCount++;
                     } else {
-                        departmentSelect.innerHTML = '<option value="">Seleccionar departamento...</option>';
+                        // Ocultar departamentos de otras empresas
+                        option.style.display = 'none';
+                        option.disabled = true;
+                        hiddenCount++;
                     }
-                });
+                }
+            });
+            
+            console.log(`✅ Filtro aplicado: ${visibleCount} visibles, ${hiddenCount} ocultos`);
+            
+            // Resetear selección si la opción actual no es válida
+            const currentOption = departmentSelect.options[departmentSelect.selectedIndex];
+            if (currentOption && currentOption.value && 
+                currentOption.getAttribute('data-company') !== companyId) {
+                departmentSelect.value = '';
+                console.log('🔄 Selección de departamento reseteada');
+            }
+            
+            // Mostrar mensaje si no hay departamentos para esta empresa
+            if (visibleCount === 0 && companyId) {
+                console.log('⚠️ No hay departamentos disponibles para esta empresa según restricciones de grupo');
+                showMessage('No hay departamentos disponibles para esta empresa según tus permisos de grupo', 'info');
             }
         }
 
@@ -423,8 +713,6 @@ function formatBytes($size, $precision = 2)
         function setupFileUpload() {
             const fileInput = document.getElementById('document_file');
             const fileUploadArea = document.getElementById('fileUploadArea');
-            const fileUploadContent = document.getElementById('fileUploadContent');
-            const filePreview = document.getElementById('filePreview');
             
             if (!fileInput || !fileUploadArea) return;
 
@@ -470,9 +758,9 @@ function formatBytes($size, $precision = 2)
 
         function handleFileSelect(file) {
             const filePreview = document.getElementById('filePreview');
-            const fileUploadContent = document.getElementById('fileUploadContent');
-            const fileName = document.getElementById('fileName');
-            const fileSize = document.getElementById('fileSize');
+            const fileUploadContent = document.querySelector('.file-upload-content');
+            const fileName = document.querySelector('.file-name');
+            const fileSize = document.querySelector('.file-size');
 
             if (fileName) fileName.textContent = file.name;
             if (fileSize) fileSize.textContent = formatFileSize(file.size);
@@ -483,10 +771,10 @@ function formatBytes($size, $precision = 2)
             feather.replace();
         }
 
-        function clearFile() {
+        function removeFile() {
             const fileInput = document.getElementById('document_file');
             const filePreview = document.getElementById('filePreview');
-            const fileUploadContent = document.getElementById('fileUploadContent');
+            const fileUploadContent = document.querySelector('.file-upload-content');
 
             if (fileInput) fileInput.value = '';
             if (filePreview) filePreview.style.display = 'none';
@@ -507,6 +795,48 @@ function formatBytes($size, $precision = 2)
                 sidebar.classList.toggle('collapsed');
             }
         }
+
+        function showMessage(message, type = 'info') {
+            console.log(`${type.toUpperCase()}: ${message}`);
+            
+            // Crear alerta visual simple
+            const alertClass = type === 'error' ? 'alert-danger' : 
+                              type === 'success' ? 'alert-success' : 
+                              type === 'warning' ? 'alert-warning' : 'alert-info';
+            
+            // Buscar contenedor para el mensaje
+            let container = document.querySelector('.upload-card, .upload-container, .container');
+            if (!container) container = document.body;
+            
+            // Crear elemento de alerta
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert ${alertClass}`;
+            alertDiv.style.cssText = `
+                padding: 10px 15px;
+                margin: 10px 0;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                background-color: ${type === 'warning' ? '#fff3cd' : type === 'error' ? '#f8d7da' : '#d1ecf1'};
+                border-color: ${type === 'warning' ? '#ffeaa7' : type === 'error' ? '#f5c6cb' : '#bee5eb'};
+                color: ${type === 'warning' ? '#856404' : type === 'error' ? '#721c24' : '#0c5460'};
+            `;
+            alertDiv.innerHTML = `<i data-feather="${type === 'error' ? 'alert-circle' : 'info'}"></i> <strong>${type.toUpperCase()}:</strong> ${message}`;
+            
+            // Insertar al inicio del contenedor
+            container.insertBefore(alertDiv, container.firstChild);
+            
+            // Reinicializar iconos
+            feather.replace();
+            
+            // Auto-remover después de 5 segundos
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.parentNode.removeChild(alertDiv);
+                }
+            }, 5000);
+        }
+
+        console.log('✅ Sistema de upload con prioridad de grupos inicializado');
     </script>
 </body>
 </html>
