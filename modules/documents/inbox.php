@@ -61,7 +61,7 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
     $currentLevel = count($pathParts);
 
     if ($currentLevel === 0) {
-        // NIVEL 0: EMPRESAS (sin cambios)
+        // NIVEL 0: EMPRESAS
         $userPermissions = getUserPermissions($userId);
         $restrictions = $userPermissions['restrictions'];
 
@@ -115,7 +115,7 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
             ];
         }
     } elseif ($currentLevel === 1) {
-        // NIVEL 1: DEPARTAMENTOS + CARPETAS DE DOCUMENTOS (ACTUALIZADO)
+        // NIVEL 1: DEPARTAMENTOS + CARPETAS DE DOCUMENTOS
         $companyId = (int)$pathParts[0];
 
         $userPermissions = getUserPermissions($userId);
@@ -137,12 +137,14 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
             return [];
         }
 
-        // DEPARTAMENTOS (mantener como está)
+        // DEPARTAMENTOS
         $deptQuery = "
             SELECT d.id, d.name, d.description,
-                   COUNT(doc.id) as document_count
+                   COUNT(doc.id) as document_count,
+                   COUNT(DISTINCT f.id) as folder_count
             FROM departments d
             LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
+            LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
             WHERE d.company_id = ? AND d.status = 'active'
             GROUP BY d.id, d.name, d.description
             ORDER BY d.name
@@ -160,48 +162,14 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                 'description' => $dept['description'],
                 'path' => $companyId . '/' . $dept['id'],
                 'document_count' => $dept['document_count'],
-                'subfolder_count' => 0,
+                'subfolder_count' => $dept['folder_count'],
                 'icon' => 'folder',
                 'can_enter' => true,
-                'can_create_inside' => false
+                'can_create_inside' => true
             ];
         }
 
-        // CARPETAS DE DOCUMENTOS (NUEVO) - mostrar como items adicionales
-        $foldersQuery = "
-            SELECT f.id, f.name, f.description, f.folder_color, f.folder_icon,
-                   COUNT(doc.id) as document_count,
-                   d.name as department_name
-            FROM document_folders f
-            LEFT JOIN documents doc ON f.id = doc.folder_id AND doc.status = 'active'
-            LEFT JOIN departments d ON f.department_id = d.id
-            WHERE f.company_id = ? AND f.is_active = 1
-            GROUP BY f.id, f.name, f.description, f.folder_color, f.folder_icon, d.name
-            ORDER BY f.name
-        ";
-
-        $stmt = $pdo->prepare($foldersQuery);
-        $stmt->execute([$companyId]);
-        $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        foreach ($folders as $folder) {
-            $items[] = [
-                'type' => 'document_folder',
-                'id' => $folder['id'],
-                'name' => $folder['name'],
-                'description' => $folder['description'] . ' (' . $folder['department_name'] . ')',
-                'path' => $companyId . '/folder_' . $folder['id'],
-                'document_count' => $folder['document_count'],
-                'subfolder_count' => 0,
-                'icon' => $folder['folder_icon'] ?: 'folder',
-                'folder_color' => $folder['folder_color'] ?: '#3498db',
-                'can_enter' => true,
-                'can_create_inside' => false,
-                'draggable_target' => true
-            ];
-        }
-
-        // DOCUMENTOS SIN CARPETA (mantener como está)
+        // DOCUMENTOS SIN CARPETA NI DEPARTAMENTO
         $docQuery = "
             SELECT d.*, dt.name as document_type, u.first_name, u.last_name
             FROM documents d
@@ -235,13 +203,83 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
             ];
         }
     } elseif ($currentLevel === 2) {
-        // NIVEL 2: DOCUMENTOS (ACTUALIZADO para manejar carpetas de documentos)
+        // NIVEL 2: DENTRO DE DEPARTAMENTOS - CARPETAS + DOCUMENTOS
         $companyId = (int)$pathParts[0];
-        $secondPart = $pathParts[1];
+        $departmentId = (int)$pathParts[1];
 
-        if (strpos($secondPart, 'folder_') === 0) {
-            // ES UNA CARPETA DE DOCUMENTOS
-            $folderId = (int)substr($secondPart, 7); // remover "folder_"
+        // CARPETAS DEL DEPARTAMENTO
+        $foldersQuery = "
+            SELECT f.id, f.name, f.description, f.folder_color, f.folder_icon,
+                   COUNT(doc.id) as document_count
+            FROM document_folders f
+            LEFT JOIN documents doc ON f.id = doc.folder_id AND doc.status = 'active'
+            WHERE f.company_id = ? AND f.department_id = ? AND f.is_active = 1
+            GROUP BY f.id, f.name, f.description, f.folder_color, f.folder_icon
+            ORDER BY f.name
+        ";
+
+        $stmt = $pdo->prepare($foldersQuery);
+        $stmt->execute([$companyId, $departmentId]);
+        $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($folders as $folder) {
+            $items[] = [
+                'type' => 'document_folder',
+                'id' => $folder['id'],
+                'name' => $folder['name'],
+                'description' => $folder['description'],
+                'path' => $companyId . '/' . $departmentId . '/folder_' . $folder['id'],
+                'document_count' => $folder['document_count'],
+                'subfolder_count' => 0,
+                'icon' => $folder['folder_icon'] ?: 'folder',
+                'folder_color' => $folder['folder_color'] ?: '#3498db',
+                'can_enter' => true,
+                'can_create_inside' => false,
+                'draggable_target' => true
+            ];
+        }
+
+        // DOCUMENTOS DEL DEPARTAMENTO (SIN CARPETA)
+        $docQuery = "
+            SELECT d.*, dt.name as document_type, u.first_name, u.last_name
+            FROM documents d
+            LEFT JOIN document_types dt ON d.document_type_id = dt.id
+            LEFT JOIN users u ON d.user_id = u.id
+            WHERE d.company_id = ? AND d.department_id = ? AND d.folder_id IS NULL AND d.status = 'active'
+            ORDER BY d.name
+        ";
+
+        $stmt = $pdo->prepare($docQuery);
+        $stmt->execute([$companyId, $departmentId]);
+        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($documents as $doc) {
+            $items[] = [
+                'type' => 'document',
+                'id' => $doc['id'],
+                'name' => $doc['name'],
+                'description' => $doc['description'],
+                'path' => $companyId . '/' . $departmentId . '/doc_' . $doc['id'],
+                'file_size' => $doc['file_size'],
+                'mime_type' => $doc['mime_type'],
+                'original_name' => $doc['original_name'],
+                'file_path' => $doc['file_path'],
+                'created_at' => $doc['created_at'],
+                'document_type' => $doc['document_type'],
+                'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                'can_enter' => false,
+                'can_create_inside' => false,
+                'draggable' => true
+            ];
+        }
+    } elseif ($currentLevel === 3) {
+        // NIVEL 3: DENTRO DE CARPETAS
+        $companyId = (int)$pathParts[0];
+        $departmentId = (int)$pathParts[1];
+        $folderPart = $pathParts[2];
+
+        if (strpos($folderPart, 'folder_') === 0) {
+            $folderId = (int)substr($folderPart, 7);
             
             $docQuery = "
                 SELECT d.*, dt.name as document_type, u.first_name, u.last_name,
@@ -264,7 +302,7 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                     'id' => $doc['id'],
                     'name' => $doc['name'],
                     'description' => $doc['description'],
-                    'path' => $companyId . '/folder_' . $folderId . '/doc_' . $doc['id'],
+                    'path' => $companyId . '/' . $departmentId . '/folder_' . $folderId . '/doc_' . $doc['id'],
                     'file_size' => $doc['file_size'],
                     'mime_type' => $doc['mime_type'],
                     'original_name' => $doc['original_name'],
@@ -274,42 +312,6 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                     'folder_name' => $doc['folder_name'],
                     'folder_color' => $doc['folder_color'],
                     'folder_icon' => $doc['folder_icon'],
-                    'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
-                    'can_enter' => false,
-                    'can_create_inside' => false,
-                    'draggable' => true
-                ];
-            }
-        } else {
-            // ES UN DEPARTAMENTO (mantener como está)
-            $departmentId = (int)$secondPart;
-
-            $docQuery = "
-                SELECT d.*, dt.name as document_type, u.first_name, u.last_name
-                FROM documents d
-                LEFT JOIN document_types dt ON d.document_type_id = dt.id
-                LEFT JOIN users u ON d.user_id = u.id
-                WHERE d.company_id = ? AND d.department_id = ? AND d.status = 'active'
-                ORDER BY d.name
-            ";
-
-            $stmt = $pdo->prepare($docQuery);
-            $stmt->execute([$companyId, $departmentId]);
-            $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            foreach ($documents as $doc) {
-                $items[] = [
-                    'type' => 'document',
-                    'id' => $doc['id'],
-                    'name' => $doc['name'],
-                    'description' => $doc['description'],
-                    'path' => $companyId . '/' . $departmentId . '/doc_' . $doc['id'],
-                    'file_size' => $doc['file_size'],
-                    'mime_type' => $doc['mime_type'],
-                    'original_name' => $doc['original_name'],
-                    'file_path' => $doc['file_path'],
-                    'created_at' => $doc['created_at'],
-                    'document_type' => $doc['document_type'],
                     'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
                     'can_enter' => false,
                     'can_create_inside' => false,
@@ -349,12 +351,26 @@ function getBreadcrumbs($currentPath, $userId)
         }
     }
 
-    if (count($pathParts) >= 2) {
-        $secondPart = $pathParts[1];
+    if (count($pathParts) >= 2 && is_numeric($pathParts[1])) {
+        $departmentId = (int)$pathParts[1];
+        $stmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
+        $stmt->execute([$departmentId]);
+        $department = $stmt->fetch();
+
+        if ($department) {
+            $breadcrumbs[] = [
+                'name' => $department['name'],
+                'path' => $pathParts[0] . '/' . $departmentId,
+                'icon' => 'folder'
+            ];
+        }
+    }
+
+    if (count($pathParts) >= 3) {
+        $folderPart = $pathParts[2];
         
-        if (strpos($secondPart, 'folder_') === 0) {
-            // ES UNA CARPETA DE DOCUMENTOS
-            $folderId = (int)substr($secondPart, 7);
+        if (strpos($folderPart, 'folder_') === 0) {
+            $folderId = (int)substr($folderPart, 7);
             $stmt = $pdo->prepare("SELECT name, folder_icon FROM document_folders WHERE id = ?");
             $stmt->execute([$folderId]);
             $folder = $stmt->fetch();
@@ -362,22 +378,8 @@ function getBreadcrumbs($currentPath, $userId)
             if ($folder) {
                 $breadcrumbs[] = [
                     'name' => $folder['name'],
-                    'path' => $pathParts[0] . '/' . $secondPart,
+                    'path' => $pathParts[0] . '/' . $pathParts[1] . '/' . $folderPart,
                     'icon' => $folder['folder_icon'] ?: 'folder'
-                ];
-            }
-        } elseif (is_numeric($secondPart)) {
-            // ES UN DEPARTAMENTO
-            $departmentId = (int)$secondPart;
-            $stmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
-            $stmt->execute([$departmentId]);
-            $department = $stmt->fetch();
-
-            if ($department) {
-                $breadcrumbs[] = [
-                    'name' => $department['name'],
-                    'path' => $pathParts[0] . '/' . $departmentId,
-                    'icon' => 'folder'
                 ];
             }
         }
@@ -436,6 +438,172 @@ function adjustBrightness($color, $percent) {
     return sprintf("#%02x%02x%02x", $red, $green, $blue);
 }
 
+// ============================
+// BÚSQUEDA GLOBAL MEJORADA
+// ============================
+function searchItems($userId, $userRole, $searchTerm, $currentPath = '') {
+    if (empty($searchTerm)) {
+        return [];
+    }
+
+    $database = new Database();
+    $pdo = $database->getConnection();
+    $results = [];
+    
+    $userPermissions = getUserPermissions($userId);
+    $restrictions = $userPermissions['restrictions'];
+    
+    // Restricciones de empresa
+    $companyRestriction = '';
+    $params = ["%{$searchTerm}%", "%{$searchTerm}%"];
+    
+    if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
+        $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
+        $companyRestriction = " AND company_id IN ($placeholders)";
+        $params = array_merge($params, $restrictions['companies']);
+    }
+    
+    // BUSCAR EMPRESAS
+    $companiesQuery = "
+        SELECT 'company' as type, id, name, description, '' as path_info
+        FROM companies 
+        WHERE status = 'active' AND (name LIKE ? OR description LIKE ?) $companyRestriction
+        ORDER BY name
+    ";
+    $stmt = $pdo->prepare($companiesQuery);
+    $stmt->execute($params);
+    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($companies as $company) {
+        $results[] = [
+            'type' => 'company',
+            'id' => $company['id'],
+            'name' => $company['name'],
+            'description' => $company['description'],
+            'path' => $company['id'],
+            'icon' => 'building',
+            'location' => 'Empresa'
+        ];
+    }
+    
+    // BUSCAR DEPARTAMENTOS
+    $deptQuery = "
+        SELECT 'department' as type, d.id, d.name, d.description, d.company_id,
+               c.name as company_name
+        FROM departments d
+        INNER JOIN companies c ON d.company_id = c.id
+        WHERE d.status = 'active' AND c.status = 'active' 
+        AND (d.name LIKE ? OR d.description LIKE ?) $companyRestriction
+        ORDER BY d.name
+    ";
+    $stmt = $pdo->prepare($deptQuery);
+    $stmt->execute($params);
+    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($departments as $dept) {
+        $results[] = [
+            'type' => 'department',
+            'id' => $dept['id'],
+            'name' => $dept['name'],
+            'description' => $dept['description'],
+            'path' => $dept['company_id'] . '/' . $dept['id'],
+            'icon' => 'folder',
+            'location' => 'Departamento en ' . $dept['company_name']
+        ];
+    }
+    
+    // BUSCAR CARPETAS DE DOCUMENTOS
+    $foldersQuery = "
+        SELECT 'document_folder' as type, f.id, f.name, f.description, f.company_id, f.department_id,
+               f.folder_color, f.folder_icon, c.name as company_name, d.name as department_name
+        FROM document_folders f
+        INNER JOIN companies c ON f.company_id = c.id
+        INNER JOIN departments d ON f.department_id = d.id
+        WHERE f.is_active = 1 AND c.status = 'active' AND d.status = 'active'
+        AND (f.name LIKE ? OR f.description LIKE ?) $companyRestriction
+        ORDER BY f.name
+    ";
+    $stmt = $pdo->prepare($foldersQuery);
+    $stmt->execute($params);
+    $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($folders as $folder) {
+        $results[] = [
+            'type' => 'document_folder',
+            'id' => $folder['id'],
+            'name' => $folder['name'],
+            'description' => $folder['description'],
+            'path' => $folder['company_id'] . '/' . $folder['department_id'] . '/folder_' . $folder['id'],
+            'icon' => $folder['folder_icon'] ?: 'folder',
+            'folder_color' => $folder['folder_color'] ?: '#3498db',
+            'location' => 'Carpeta en ' . $folder['department_name'] . ' - ' . $folder['company_name'],
+            'can_enter' => true,
+            'draggable_target' => true
+        ];
+    }
+    
+    // BUSCAR DOCUMENTOS
+    $docsQuery = "
+        SELECT 'document' as type, doc.id, doc.name, doc.description, doc.company_id, doc.department_id, doc.folder_id,
+               doc.file_size, doc.mime_type, doc.original_name, doc.file_path, doc.created_at,
+               c.name as company_name, d.name as department_name, f.name as folder_name,
+               dt.name as document_type
+        FROM documents doc
+        INNER JOIN companies c ON doc.company_id = c.id
+        LEFT JOIN departments d ON doc.department_id = d.id
+        LEFT JOIN document_folders f ON doc.folder_id = f.id
+        LEFT JOIN document_types dt ON doc.document_type_id = dt.id
+        WHERE doc.status = 'active' AND c.status = 'active'
+        AND (doc.name LIKE ? OR doc.description LIKE ? OR doc.original_name LIKE ?) 
+        $companyRestriction
+        ORDER BY doc.name
+    ";
+    $searchParams = ["%{$searchTerm}%", "%{$searchTerm}%", "%{$searchTerm}%"];
+    if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
+        $searchParams = array_merge($searchParams, $restrictions['companies']);
+    }
+    
+    $stmt = $pdo->prepare($docsQuery);
+    $stmt->execute($searchParams);
+    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($documents as $doc) {
+        $locationParts = [$doc['company_name']];
+        $pathParts = [$doc['company_id']];
+        
+        if ($doc['department_name']) {
+            $locationParts[] = $doc['department_name'];
+            $pathParts[] = $doc['department_id'];
+        }
+        
+        if ($doc['folder_name']) {
+            $locationParts[] = $doc['folder_name'];
+            $pathParts[] = 'folder_' . $doc['folder_id'];
+        }
+        
+        $pathParts[] = 'doc_' . $doc['id'];
+        
+        $results[] = [
+            'type' => 'document',
+            'id' => $doc['id'],
+            'name' => $doc['name'],
+            'description' => $doc['description'],
+            'path' => implode('/', $pathParts),
+            'file_size' => $doc['file_size'],
+            'mime_type' => $doc['mime_type'],
+            'original_name' => $doc['original_name'],
+            'file_path' => $doc['file_path'],
+            'created_at' => $doc['created_at'],
+            'document_type' => $doc['document_type'],
+            'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+            'location' => 'Documento en ' . implode(' → ', $locationParts),
+            'draggable' => true
+        ];
+    }
+    
+    return $results;
+}
+
 try {
     $database = new Database();
     $pdo = $database->getConnection();
@@ -458,13 +626,10 @@ try {
     $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
     $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
 
-    $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
-
     if ($searchTerm) {
-        $items = array_filter($items, function ($item) use ($searchTerm) {
-            return stripos($item['name'], $searchTerm) !== false ||
-                stripos($item['description'] ?? '', $searchTerm) !== false;
-        });
+        $items = searchItems($currentUser['id'], $currentUser['role'], $searchTerm, $currentPath);
+    } else {
+        $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
     }
 
     $breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
@@ -545,22 +710,22 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             <div class="toolbar-section">
                 <div class="toolbar-card">
                     <div class="toolbar-left">
-                        <?php if ($canCreate && !empty($currentPath)): ?>
-                            <button class="btn-create" onclick="createNewFolder()">
+                        <?php if ($canCreate && count($pathParts) === 2 && is_numeric($pathParts[0]) && is_numeric($pathParts[1])): ?>
+                            <button class="btn-create" onclick="createDocumentFolder()">
                                 <i data-feather="folder-plus"></i>
                                 <span>Nueva Carpeta</span>
                             </button>
                         <?php endif; ?>
 
-                        <!-- BOTÓN NUEVO PARA CREAR CARPETAS DE DOCUMENTOS -->
-                        <?php if ($canCreate && count($pathParts) === 1 && is_numeric($pathParts[0])): ?>
-                            <button class="btn-create" onclick="createDocumentFolder()" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">
-                                <i data-feather="folder"></i>
-                                <span>Nueva Carpeta de Documentos</span>
-                            </button>
-                        <?php endif; ?>
-
-                        <?php if ($canCreate): ?>
+                        <?php if ($canCreate && !empty($currentPath)): ?>
+                            <?php 
+                            $uploadUrl = 'upload.php?path=' . urlencode($currentPath);
+                            ?>
+                            <a href="<?= $uploadUrl ?>" class="btn-secondary">
+                                <i data-feather="upload"></i>
+                                <span>Subir Archivo</span>
+                            </a>
+                        <?php else: ?>
                             <a href="upload.php" class="btn-secondary">
                                 <i data-feather="upload"></i>
                                 <span>Subir Archivo</span>
@@ -571,9 +736,10 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                     <div class="toolbar-right">
                         <div class="search-wrapper">
                             <i data-feather="search" class="search-icon"></i>
-                            <input type="text" class="search-input" placeholder="Buscar documentos..."
+                            <input type="text" class="search-input" placeholder="Buscar documentos, carpetas..."
                                 value="<?= htmlspecialchars($searchTerm) ?>"
-                                onkeypress="if(event.key==='Enter') search(this.value)">
+                                onkeypress="if(event.key==='Enter') search(this.value)"
+                                oninput="handleSearchInput(this.value)">
                             <?php if ($searchTerm): ?>
                                 <button class="search-clear" onclick="clearSearch()">
                                     <i data-feather="x"></i>
@@ -584,12 +750,21 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 </div>
             </div>
 
+            <?php if ($searchTerm): ?>
+            <div class="search-results-info">
+                <div class="search-info-card">
+                    <i data-feather="search"></i>
+                    <span>Mostrando <?= count($items) ?> resultado<?= count($items) !== 1 ? 's' : '' ?> para "<strong><?= htmlspecialchars($searchTerm) ?></strong>"</span>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <div class="content-section">
                 <div class="content-card">
                     <div class="content-header">
                         <h3>
                             <?php if (empty($items)): ?>
-                                Carpeta vacía
+                                <?= $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?>
                             <?php else: ?>
                                 <?= count($items) ?> elemento<?= count($items) !== 1 ? 's' : '' ?> encontrado<?= count($items) !== 1 ? 's' : '' ?>
                             <?php endif; ?>
@@ -600,19 +775,28 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                         <?php if (empty($items)): ?>
                             <div class="empty-state">
                                 <div class="empty-icon">
-                                    <i data-feather="folder"></i>
+                                    <i data-feather="<?= $searchTerm ? 'search' : 'folder' ?>"></i>
                                 </div>
-                                <h3>Carpeta vacía</h3>
-                                <p>No hay elementos para mostrar en esta ubicación. <?php if ($canCreate): ?>Puede crear una nueva carpeta o subir archivos para comenzar.<?php endif; ?></p>
-                                <?php if ($canCreate): ?>
+                                <h3><?= $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?></h3>
+                                <p>
+                                    <?php if ($searchTerm): ?>
+                                        No se encontraron elementos que coincidan con "<?= htmlspecialchars($searchTerm) ?>". Intente con otros términos de búsqueda.
+                                    <?php else: ?>
+                                        No hay elementos para mostrar en esta ubicación. <?php if ($canCreate): ?>Puede crear una nueva carpeta o subir archivos para comenzar.<?php endif; ?>
+                                    <?php endif; ?>
+                                </p>
+                                <?php if ($canCreate && !$searchTerm): ?>
                                     <div class="empty-actions">
-                                        <?php if (!empty($currentPath)): ?>
-                                            <button class="btn-create" onclick="createNewFolder()">
+                                        <?php if (count($pathParts) === 2 && is_numeric($pathParts[1])): ?>
+                                            <button class="btn-create" onclick="createDocumentFolder()">
                                                 <i data-feather="folder-plus"></i>
                                                 <span>Crear Carpeta</span>
                                             </button>
                                         <?php endif; ?>
-                                        <a href="upload.php" class="btn-secondary">
+                                        <?php 
+                                        $uploadUrl = !empty($currentPath) ? 'upload.php?path=' . urlencode($currentPath) : 'upload.php';
+                                        ?>
+                                        <a href="<?= $uploadUrl ?>" class="btn-secondary">
                                             <i data-feather="upload"></i>
                                             <span>Subir Archivo</span>
                                         </a>
@@ -623,7 +807,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                             <div class="items-grid">
                                 <?php foreach ($items as $item): ?>
                                     <div class="explorer-item <?= isset($item['draggable']) ? 'draggable-item' : '' ?> <?= isset($item['draggable_target']) ? 'drop-target' : '' ?>" 
-                                         onclick="<?= $item['can_enter'] ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>"
+                                         onclick="<?= $item['can_enter'] ?? false ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>"
                                          <?= isset($item['draggable']) ? 'draggable="true"' : '' ?>
                                          data-item-type="<?= $item['type'] ?>"
                                          data-item-id="<?= $item['id'] ?>"
@@ -658,9 +842,17 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                                                     <span class="item-count"><?= $item['subfolder_count'] ?> departamentos</span>
                                                 <?php elseif ($item['type'] === 'department'): ?>
                                                     <span class="item-count"><?= $item['document_count'] ?> documentos</span>
+                                                    <span class="item-count"><?= $item['subfolder_count'] ?> carpetas</span>
                                                 <?php elseif ($item['type'] === 'document_folder'): ?>
                                                     <span class="item-count"><?= $item['document_count'] ?> documentos</span>
                                                     <span class="item-folder-type">Carpeta de documentos</span>
+                                                <?php endif; ?>
+                                                
+                                                <?php if ($searchTerm && isset($item['location'])): ?>
+                                                    <span class="item-location">
+                                                        <i data-feather="map-pin" style="width: 12px; height: 12px;"></i>
+                                                        <?= htmlspecialchars($item['location']) ?>
+                                                    </span>
                                                 <?php endif; ?>
                                             </div>
                                         </div>
@@ -690,65 +882,12 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         </div>
     </main>
 
-    <!-- TU MODAL ORIGINAL PARA CARPETAS -->
-    <div id="createFolderModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>
-                    <i data-feather="folder-plus"></i>
-                    <span>Crear Nueva Carpeta</span>
-                </h3>
-                <button class="modal-close" onclick="closeCreateModal()">
-                    <i data-feather="x"></i>
-                </button>
-            </div>
-
-            <div class="modal-body">
-                <form id="createFolderForm" onsubmit="submitCreateFolder(event)">
-                    <div class="form-group">
-                        <label class="form-label">Tipo de carpeta</label>
-                        <select name="folder_type" id="folderType" class="form-control" onchange="updateFolderForm()">
-                            <option value="">Seleccione el tipo</option>
-                            <?php if (empty($currentPath)): ?>
-                                <option value="company">Nueva Empresa</option>
-                            <?php elseif (count($pathParts) === 1): ?>
-                                <option value="department">Nuevo Departamento</option>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Nombre</label>
-                        <input type="text" name="name" class="form-control" required placeholder="Ingrese el nombre de la carpeta">
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Descripción (opcional)</label>
-                        <textarea name="description" class="form-control" rows="3" placeholder="Descripción de la carpeta"></textarea>
-                    </div>
-
-                    <input type="hidden" name="current_path" value="<?= htmlspecialchars($currentPath) ?>">
-
-                    <div class="modal-actions">
-                        <button type="button" class="btn-secondary" onclick="closeCreateModal()">
-                            <span>Cancelar</span>
-                        </button>
-                        <button type="submit" class="btn-create">
-                            <i data-feather="plus"></i>
-                            <span>Crear Carpeta</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- NUEVO MODAL PARA CARPETAS DE DOCUMENTOS -->
+    <!-- MODAL PARA CREAR CARPETAS DE DOCUMENTOS -->
     <div id="createDocumentFolderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>
-                    <i data-feather="folder"></i>
+                    <i data-feather="folder-plus"></i>
                     <span>Crear Carpeta de Documentos</span>
                 </h3>
                 <button class="modal-close" onclick="closeDocumentFolderModal()">
@@ -766,13 +905,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                     <div class="form-group">
                         <label class="form-label">Descripción</label>
                         <textarea name="description" class="form-control" rows="3" placeholder="Descripción de la carpeta de documentos"></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Departamento</label>
-                        <select name="department_id" class="form-control" required>
-                            <option value="">Seleccione un departamento</option>
-                        </select>
                     </div>
 
                     <div class="form-group">
@@ -800,6 +932,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                     </div>
 
                     <input type="hidden" name="company_id" value="<?= htmlspecialchars($pathParts[0] ?? '') ?>">
+                    <input type="hidden" name="department_id" value="<?= htmlspecialchars($pathParts[1] ?? '') ?>">
 
                     <div class="modal-actions">
                         <button type="button" class="btn-secondary" onclick="closeDocumentFolderModal()">
@@ -807,7 +940,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                         </button>
                         <button type="submit" class="btn-create">
                             <i data-feather="plus"></i>
-                            <span>Crear Carpeta de Documentos</span>
+                            <span>Crear Carpeta</span>
                         </button>
                     </div>
                 </form>
@@ -815,7 +948,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         </div>
     </div>
 
-    <!-- TUS ESTILOS ORIGINALES + AGREGADOS PARA CARPETAS -->
+    <!-- ESTILOS -->
     <style>
         .container {
             padding: var(--spacing-8);
@@ -840,18 +973,33 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
         .breadcrumb-section,
         .toolbar-section,
-        .content-section {
+        .content-section,
+        .search-results-info {
             margin-bottom: var(--spacing-8);
         }
 
         .breadcrumb-card,
         .toolbar-card,
-        .content-card {
+        .content-card,
+        .search-info-card {
             background: var(--bg-primary);
             border-radius: var(--radius-xl);
             border: 1px solid #e2e8f0;
             box-shadow: var(--card-shadow);
             overflow: hidden;
+        }
+
+        .search-info-card {
+            padding: var(--spacing-4) var(--spacing-6);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-3);
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .search-info-card i {
+            color: var(--primary-color);
         }
 
         .breadcrumb-card {
@@ -1052,7 +1200,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             border-color: var(--primary-color);
         }
 
-        /* NUEVOS ESTILOS PARA DRAG & DROP */
         .explorer-item.draggable-item {
             cursor: move;
         }
@@ -1091,7 +1238,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             box-shadow: 0 4px 6px -1px rgba(212, 175, 55, 0.4);
         }
 
-        /* NUEVO: Estilos para carpetas de documentos */
         .item-icon.document-folder {
             color: var(--text-light);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
@@ -1169,7 +1315,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             text-align: center;
         }
 
-        /* NUEVOS ESTILOS PARA INFORMACIÓN DE CARPETAS */
         .item-folder {
             display: flex;
             align-items: center;
@@ -1180,6 +1325,15 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
         .item-folder-type {
             color: #666;
+            font-style: italic;
+        }
+
+        .item-location {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+            color: #6b7280;
             font-style: italic;
         }
 
@@ -1389,7 +1543,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             border-top: 1px solid #e2e8f0;
         }
 
-        /* NUEVOS ESTILOS PARA SELECCIÓN DE COLORES E ICONOS */
         .color-options {
             display: flex;
             gap: 10px;
@@ -1486,6 +1639,8 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         const canDelete = <?= $canDelete ? 'true' : 'false' ?>;
         const currentPath = '<?= htmlspecialchars($currentPath) ?>';
 
+        let searchTimeout;
+
         function navigateTo(path) {
             window.location.href = `?path=${encodeURIComponent(path)}`;
         }
@@ -1497,7 +1652,17 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             } else {
                 url.searchParams.delete('search');
             }
+            url.searchParams.delete('path'); // Limpiar path en búsquedas
             window.location.href = url.toString();
+        }
+
+        function handleSearchInput(term) {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                if (term.length >= 2) {
+                    search(term);
+                }
+            }, 500);
         }
 
         function clearSearch() {
@@ -1571,94 +1736,20 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             form.submit();
         }
 
-        // TU FUNCIÓN ORIGINAL PARA CREAR CARPETAS
-        function createNewFolder() {
-            if (!canCreate) {
-                alert('No tienes permisos para crear carpetas');
-                return;
-            }
-
-            const modal = document.getElementById('createFolderModal');
-            modal.classList.add('active');
-            updateFolderForm();
-
-            setTimeout(() => {
-                const nameInput = document.querySelector('#createFolderModal input[name="name"]');
-                if (nameInput) nameInput.focus();
-            }, 100);
-        }
-
-        function closeCreateModal() {
-            const modal = document.getElementById('createFolderModal');
-            modal.classList.remove('active');
-            document.getElementById('createFolderForm').reset();
-        }
-
-        function updateFolderForm() {
-            const folderType = document.getElementById('folderType').value;
-            console.log('Tipo de carpeta seleccionado:', folderType);
-        }
-
-        async function submitCreateFolder(event) {
-            event.preventDefault();
-
-            const form = event.target;
-            const formData = new FormData(form);
-            const submitBtn = form.querySelector('button[type="submit"]');
-            const originalText = submitBtn.innerHTML;
-
-            try {
-                submitBtn.innerHTML = '<i data-feather="loader"></i> <span>Creando...</span>';
-                submitBtn.disabled = true;
-
-                const folderType = formData.get('folder_type');
-                if (folderType === 'company') {
-                    formData.append('action', 'create_company');
-                } else if (folderType === 'department') {
-                    formData.append('action', 'create_department');
-                    const pathParts = currentPath.split('/');
-                    if (pathParts.length >= 1 && pathParts[0]) {
-                        formData.append('company_id', pathParts[0]);
-                    }
-                }
-
-                const response = await fetch('folder_actions.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    alert('✅ Carpeta creada exitosamente');
-                    closeCreateModal();
-                    window.location.reload();
-                } else {
-                    alert('❌ ' + (data.message || 'Error al crear la carpeta'));
-                }
-
-            } catch (error) {
-                console.error('Error:', error);
-                alert('❌ Error de conexión al crear la carpeta');
-            } finally {
-                submitBtn.innerHTML = originalText;
-                submitBtn.disabled = false;
-                feather.replace();
-            }
-        }
-
-        // NUEVA FUNCIÓN PARA CREAR CARPETAS DE DOCUMENTOS
         function createDocumentFolder() {
             if (!canCreate) {
                 alert('No tienes permisos para crear carpetas de documentos');
                 return;
             }
 
+            const pathParts = currentPath.split('/');
+            if (pathParts.length !== 2 || !pathParts[0] || !pathParts[1]) {
+                alert('Solo se pueden crear carpetas dentro de un departamento');
+                return;
+            }
+
             const modal = document.getElementById('createDocumentFolderModal');
             modal.classList.add('active');
-            
-            // Cargar departamentos de la empresa actual
-            loadDepartments();
 
             setTimeout(() => {
                 const nameInput = document.querySelector('#createDocumentFolderModal input[name="name"]');
@@ -1670,35 +1761,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             const modal = document.getElementById('createDocumentFolderModal');
             modal.classList.remove('active');
             document.getElementById('createDocumentFolderForm').reset();
-        }
-
-        async function loadDepartments() {
-            const pathParts = currentPath.split('/');
-            const companyId = pathParts[0];
-            
-            if (!companyId) return;
-
-            try {
-                // Corregir ruta relativa desde inbox.php
-                const response = await fetch(`../departments/actions/get_departments.php?company_id=${companyId}`);
-                const data = await response.json();
-                
-                const select = document.querySelector('#createDocumentFolderModal select[name="department_id"]');
-                select.innerHTML = '<option value="">Seleccione un departamento</option>';
-                
-                if (data.success && data.departments) {
-                    data.departments.forEach(dept => {
-                        const option = document.createElement('option');
-                        option.value = dept.id;
-                        option.textContent = dept.name;
-                        select.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Error cargando departamentos:', error);
-                // Fallback: cargar departamentos directamente con una consulta básica
-                alert('Error cargando departamentos. Verifique que existan departamentos en esta empresa.');
-            }
         }
 
         async function submitCreateDocumentFolder(event) {
@@ -1713,8 +1775,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 submitBtn.innerHTML = '<i data-feather="loader"></i> <span>Creando...</span>';
                 submitBtn.disabled = true;
 
-                // Corregir ruta relativa - desde modules/documents/ hasta modules/folders/api/
-                const response = await fetch('../folders/api/create_folder.php', {
+                const response = await fetch('create_folder.php', {
                     method: 'POST',
                     body: formData
                 });
@@ -1731,7 +1792,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
             } catch (error) {
                 console.error('Error:', error);
-                alert('❌ Error de conexión al crear la carpeta. Verifique que existe: modules/folders/api/create_folder.php');
+                alert('❌ Error de conexión al crear la carpeta');
             } finally {
                 submitBtn.innerHTML = originalText;
                 submitBtn.disabled = false;
@@ -1814,8 +1875,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
             async moveDocument(docId, folderId, folderName) {
                 try {
-                    // Corregir ruta relativa - desde modules/documents/ hasta modules/folders/api/
-                    const response = await fetch('../folders/api/move_document.php', {
+                    const response = await fetch('move_document.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1833,7 +1893,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                         alert(`❌ ${result.message}`);
                     }
                 } catch (error) {
-                    alert('❌ Error de conexión. Verifique que existe: modules/folders/api/move_document.php');
+                    alert('❌ Error de conexión al mover documento');
                     console.error('Error:', error);
                 }
             }
@@ -1864,7 +1924,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                closeCreateModal();
                 closeDocumentFolderModal();
             }
 
@@ -1887,12 +1946,8 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         });
 
         document.addEventListener('click', (e) => {
-            const modal1 = document.getElementById('createFolderModal');
-            const modal2 = document.getElementById('createDocumentFolderModal');
-            if (e.target === modal1) {
-                closeCreateModal();
-            }
-            if (e.target === modal2) {
+            const modal = document.getElementById('createDocumentFolderModal');
+            if (e.target === modal) {
                 closeDocumentFolderModal();
             }
         });
@@ -1909,7 +1964,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 new DocumentDragDrop();
             }
 
-            console.log('📁 Explorador visual iniciado');
+            console.log('📁 Explorador visual mejorado iniciado');
             console.log('Ruta actual:', currentPath);
             console.log('Permisos:', {
                 canDownload,
