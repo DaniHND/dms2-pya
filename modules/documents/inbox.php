@@ -613,6 +613,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/inbox-visual.css">
     
+    
     <!-- Feather Icons -->
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
@@ -706,22 +707,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                                 <span>Subir Archivo</span>
                             </a>
                         <?php endif; ?>
-                        
-                        <!-- INDICADOR DE PERMISOS -->
-                        <div class="permissions-indicator">
-                            <span class="permission-item <?= $canView ? 'active' : 'inactive' ?>">
-                                <i data-feather="eye"></i> Ver
-                            </span>
-                            <span class="permission-item <?= $canDownload ? 'active' : 'inactive' ?>">
-                                <i data-feather="download"></i> Descargar
-                            </span>
-                            <span class="permission-item <?= $canCreate ? 'active' : 'inactive' ?>">
-                                <i data-feather="plus"></i> Crear
-                            </span>
-                            <span class="permission-item <?= $canEdit ? 'active' : 'inactive' ?>">
-                                <i data-feather="move"></i> Mover
-                            </span>
-                        </div>
+                      
                     </div>
 
                     <div class="toolbar-right">

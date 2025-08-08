@@ -1,7 +1,7 @@
 <?php
 /*
  * includes/PermissionManager.php
- * Sistema de verificación automática de permisos basado en grupos
+ * Sistema de verificación automática de permisos basado en grupos - VERSIÓN SIMPLIFICADA
  */
 
 class PermissionManager {
@@ -33,6 +33,30 @@ class PermissionManager {
      */
     private function loadUserPermissions() {
         try {
+            // Verificar si el usuario es admin
+            $userQuery = "SELECT role FROM users WHERE id = ?";
+            $userStmt = $this->pdo->prepare($userQuery);
+            $userStmt->execute([$this->userId]);
+            $userInfo = $userStmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Si es admin, dar todos los permisos
+            if ($userInfo && $userInfo['role'] === 'admin') {
+                $this->userPermissions = [
+                    'view' => true,
+                    'download' => true,
+                    'create' => true,
+                    'edit' => true,
+                    'delete' => true
+                ];
+                $this->userRestrictions = [
+                    'companies' => [],
+                    'departments' => [],
+                    'document_types' => []
+                ];
+                $this->dailyLimits = ['download' => null, 'upload' => null];
+                return;
+            }
+            
             $query = "
                 SELECT 
                     ug.module_permissions,
@@ -49,23 +73,43 @@ class PermissionManager {
             $stmt->execute([$this->userId]);
             $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            // Combinar permisos de todos los grupos (el más permisivo gana)
-            $combinedPermissions = [];
+            // Permisos básicos simplificados
+            $combinedPermissions = [
+                'view' => false,
+                'download' => false,
+                'create' => false,
+                'edit' => false,
+                'delete' => false
+            ];
+            
             $combinedRestrictions = [
                 'companies' => [],
                 'departments' => [],
                 'document_types' => []
             ];
+            
             $minDownloadLimit = null;
             $minUploadLimit = null;
             
             foreach ($groups as $group) {
                 // Combinar permisos (OR lógico - el más permisivo gana)
                 $groupPerms = json_decode($group['module_permissions'] ?: '{}', true);
-                foreach ($groupPerms as $perm => $value) {
-                    if ($value === true) {
-                        $combinedPermissions[$perm] = true;
-                    }
+                
+                // Mapear permisos específicos a nuestros permisos básicos
+                if (isset($groupPerms['documents_view']) && $groupPerms['documents_view'] === true) {
+                    $combinedPermissions['view'] = true;
+                }
+                if (isset($groupPerms['documents_download']) && $groupPerms['documents_download'] === true) {
+                    $combinedPermissions['download'] = true;
+                }
+                if (isset($groupPerms['documents_create']) && $groupPerms['documents_create'] === true) {
+                    $combinedPermissions['create'] = true;
+                }
+                if (isset($groupPerms['documents_edit']) && $groupPerms['documents_edit'] === true) {
+                    $combinedPermissions['edit'] = true;
+                }
+                if (isset($groupPerms['documents_delete']) && $groupPerms['documents_delete'] === true) {
+                    $combinedPermissions['delete'] = true;
                 }
                 
                 // Combinar restricciones (Union de todas las restricciones)
@@ -102,7 +146,13 @@ class PermissionManager {
             
         } catch (Exception $e) {
             error_log('Error cargando permisos de usuario: ' . $e->getMessage());
-            $this->userPermissions = [];
+            $this->userPermissions = [
+                'view' => false,
+                'download' => false,
+                'create' => false,
+                'edit' => false,
+                'delete' => false
+            ];
             $this->userRestrictions = ['companies' => [], 'departments' => [], 'document_types' => []];
             $this->dailyLimits = ['download' => null, 'upload' => null];
         }
@@ -164,7 +214,7 @@ class PermissionManager {
             }
             
             // Verificar estado del documento
-            if ($document['status'] === 'deleted' && !$this->hasPermission('delete_permanent')) {
+            if ($document['status'] === 'deleted' && !$this->hasPermission('delete')) {
                 return false;
             }
             
@@ -198,7 +248,7 @@ class PermissionManager {
     }
     
     /**
-     * Obtener documentos accesibles para el usuario
+     * Obtener documentos accesibles para el usuario con restricciones aplicadas
      */
     public function getAccessibleDocuments($additionalFilters = []) {
         try {
@@ -283,6 +333,80 @@ class PermissionManager {
     }
     
     /**
+     * Obtener empresas accesibles según restricciones
+     */
+    public function getAccessibleCompanies() {
+        try {
+            $query = "SELECT id, name FROM companies WHERE status = 'active'";
+            $params = [];
+            
+            // Si hay restricciones de empresa, aplicarlas
+            if (!empty($this->userRestrictions['companies'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['companies']) - 1) . '?';
+                $query .= " AND id IN ($placeholders)";
+                $params = $this->userRestrictions['companies'];
+            }
+            
+            $query .= " ORDER BY name";
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+        } catch (Exception $e) {
+            error_log('Error obteniendo empresas accesibles: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Obtener departamentos accesibles según restricciones
+     */
+    public function getAccessibleDepartments($companyId = null) {
+        try {
+            $query = "
+                SELECT d.id, d.name, c.name as company_name, d.company_id
+                FROM departments d 
+                LEFT JOIN companies c ON d.company_id = c.id 
+                WHERE d.status = 'active' AND c.status = 'active'
+            ";
+            $params = [];
+            
+            // Filtrar por empresa si se especifica
+            if ($companyId) {
+                $query .= " AND d.company_id = ?";
+                $params[] = $companyId;
+            }
+            
+            // Si hay restricciones de empresa, aplicarlas
+            if (!empty($this->userRestrictions['companies'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['companies']) - 1) . '?';
+                $query .= " AND d.company_id IN ($placeholders)";
+                $params = array_merge($params, $this->userRestrictions['companies']);
+            }
+            
+            // Si hay restricciones de departamento, aplicarlas
+            if (!empty($this->userRestrictions['departments'])) {
+                $placeholders = str_repeat('?,', count($this->userRestrictions['departments']) - 1) . '?';
+                $query .= " AND d.id IN ($placeholders)";
+                $params = array_merge($params, $this->userRestrictions['departments']);
+            }
+            
+            $query .= " ORDER BY c.name, d.name";
+            
+            $stmt = $this->pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+        } catch (Exception $e) {
+            error_log('Error obteniendo departamentos accesibles: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
      * Verificar límites diarios
      */
     public function checkDownloadLimit() {
@@ -337,40 +461,6 @@ class PermissionManager {
     }
     
     /**
-     * Obtener información de límites
-     */
-    public function getLimitsInfo() {
-        return [
-            'download' => [
-                'limit' => $this->dailyLimits['download'],
-                'used' => $this->getCurrentUsage('download'),
-                'remaining' => $this->dailyLimits['download'] ? 
-                    max(0, $this->dailyLimits['download'] - $this->getCurrentUsage('download')) : null
-            ],
-            'upload' => [
-                'limit' => $this->dailyLimits['upload'],
-                'used' => $this->getCurrentUsage('upload'),
-                'remaining' => $this->dailyLimits['upload'] ? 
-                    max(0, $this->dailyLimits['upload'] - $this->getCurrentUsage('upload')) : null
-            ]
-        ];
-    }
-    
-    /**
-     * Obtener todos los permisos del usuario
-     */
-    public function getAllPermissions() {
-        return $this->userPermissions;
-    }
-    
-    /**
-     * Obtener todas las restricciones del usuario
-     */
-    public function getAllRestrictions() {
-        return $this->userRestrictions;
-    }
-    
-    /**
      * Verificar si el usuario puede acceder a una empresa específica
      */
     public function canAccessCompany($companyId) {
@@ -393,14 +483,17 @@ class PermissionManager {
     }
     
     /**
-     * Verificar si el usuario puede acceder a un tipo de documento específico
+     * Obtener todas las restricciones del usuario
      */
-    public function canAccessDocumentType($documentTypeId) {
-        if (empty($this->userRestrictions['document_types'])) {
-            return true; // Sin restricciones = acceso a todos
-        }
-        
-        return in_array($documentTypeId, $this->userRestrictions['document_types']);
+    public function getAllRestrictions() {
+        return $this->userRestrictions;
+    }
+    
+    /**
+     * Obtener todos los permisos del usuario
+     */
+    public function getAllPermissions() {
+        return $this->userPermissions;
     }
 }
 
@@ -451,4 +544,4 @@ function getAccessibleDocuments($filters = [], $userId = null) {
         return [];
     }
 }
-?>
+?>s
