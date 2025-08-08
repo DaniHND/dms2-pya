@@ -327,12 +327,12 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
 function getBreadcrumbs($currentPath, $userId)
 {
     if (empty($currentPath)) {
-        return [['name' => 'Inicio', 'path' => '', 'icon' => 'home']];
+        return [['name' => 'Inicio', 'path' => '', 'icon' => 'home', 'drop_target' => true]];
     }
 
     $database = new Database();
     $pdo = $database->getConnection();
-    $breadcrumbs = [['name' => 'Inicio', 'path' => '', 'icon' => 'home']];
+    $breadcrumbs = [['name' => 'Inicio', 'path' => '', 'icon' => 'home', 'drop_target' => true]];
 
     $pathParts = explode('/', trim($currentPath, '/'));
 
@@ -346,7 +346,8 @@ function getBreadcrumbs($currentPath, $userId)
             $breadcrumbs[] = [
                 'name' => $company['name'],
                 'path' => $companyId,
-                'icon' => 'building'
+                'icon' => 'building',
+                'drop_target' => true
             ];
         }
     }
@@ -361,7 +362,8 @@ function getBreadcrumbs($currentPath, $userId)
             $breadcrumbs[] = [
                 'name' => $department['name'],
                 'path' => $pathParts[0] . '/' . $departmentId,
-                'icon' => 'folder'
+                'icon' => 'folder',
+                'drop_target' => true
             ];
         }
     }
@@ -379,7 +381,8 @@ function getBreadcrumbs($currentPath, $userId)
                 $breadcrumbs[] = [
                     'name' => $folder['name'],
                     'path' => $pathParts[0] . '/' . $pathParts[1] . '/' . $folderPart,
-                    'icon' => $folder['folder_icon'] ?: 'folder'
+                    'icon' => $folder['folder_icon'] ?: 'folder',
+                    'drop_target' => true
                 ];
             }
         }
@@ -438,9 +441,6 @@ function adjustBrightness($color, $percent) {
     return sprintf("#%02x%02x%02x", $red, $green, $blue);
 }
 
-// ============================
-// BÚSQUEDA GLOBAL MEJORADA
-// ============================
 function searchItems($userId, $userRole, $searchTerm, $currentPath = '') {
     if (empty($searchTerm)) {
         return [];
@@ -453,7 +453,6 @@ function searchItems($userId, $userRole, $searchTerm, $currentPath = '') {
     $userPermissions = getUserPermissions($userId);
     $restrictions = $userPermissions['restrictions'];
     
-    // Restricciones de empresa
     $companyRestriction = '';
     $params = ["%{$searchTerm}%", "%{$searchTerm}%"];
     
@@ -461,85 +460,6 @@ function searchItems($userId, $userRole, $searchTerm, $currentPath = '') {
         $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
         $companyRestriction = " AND company_id IN ($placeholders)";
         $params = array_merge($params, $restrictions['companies']);
-    }
-    
-    // BUSCAR EMPRESAS
-    $companiesQuery = "
-        SELECT 'company' as type, id, name, description, '' as path_info
-        FROM companies 
-        WHERE status = 'active' AND (name LIKE ? OR description LIKE ?) $companyRestriction
-        ORDER BY name
-    ";
-    $stmt = $pdo->prepare($companiesQuery);
-    $stmt->execute($params);
-    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($companies as $company) {
-        $results[] = [
-            'type' => 'company',
-            'id' => $company['id'],
-            'name' => $company['name'],
-            'description' => $company['description'],
-            'path' => $company['id'],
-            'icon' => 'building',
-            'location' => 'Empresa'
-        ];
-    }
-    
-    // BUSCAR DEPARTAMENTOS
-    $deptQuery = "
-        SELECT 'department' as type, d.id, d.name, d.description, d.company_id,
-               c.name as company_name
-        FROM departments d
-        INNER JOIN companies c ON d.company_id = c.id
-        WHERE d.status = 'active' AND c.status = 'active' 
-        AND (d.name LIKE ? OR d.description LIKE ?) $companyRestriction
-        ORDER BY d.name
-    ";
-    $stmt = $pdo->prepare($deptQuery);
-    $stmt->execute($params);
-    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($departments as $dept) {
-        $results[] = [
-            'type' => 'department',
-            'id' => $dept['id'],
-            'name' => $dept['name'],
-            'description' => $dept['description'],
-            'path' => $dept['company_id'] . '/' . $dept['id'],
-            'icon' => 'folder',
-            'location' => 'Departamento en ' . $dept['company_name']
-        ];
-    }
-    
-    // BUSCAR CARPETAS DE DOCUMENTOS
-    $foldersQuery = "
-        SELECT 'document_folder' as type, f.id, f.name, f.description, f.company_id, f.department_id,
-               f.folder_color, f.folder_icon, c.name as company_name, d.name as department_name
-        FROM document_folders f
-        INNER JOIN companies c ON f.company_id = c.id
-        INNER JOIN departments d ON f.department_id = d.id
-        WHERE f.is_active = 1 AND c.status = 'active' AND d.status = 'active'
-        AND (f.name LIKE ? OR f.description LIKE ?) $companyRestriction
-        ORDER BY f.name
-    ";
-    $stmt = $pdo->prepare($foldersQuery);
-    $stmt->execute($params);
-    $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($folders as $folder) {
-        $results[] = [
-            'type' => 'document_folder',
-            'id' => $folder['id'],
-            'name' => $folder['name'],
-            'description' => $folder['description'],
-            'path' => $folder['company_id'] . '/' . $folder['department_id'] . '/folder_' . $folder['id'],
-            'icon' => $folder['folder_icon'] ?: 'folder',
-            'folder_color' => $folder['folder_color'] ?: '#3498db',
-            'location' => 'Carpeta en ' . $folder['department_name'] . ' - ' . $folder['company_name'],
-            'can_enter' => true,
-            'draggable_target' => true
-        ];
     }
     
     // BUSCAR DOCUMENTOS
@@ -647,7 +567,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -690,6 +609,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 <p class="page-subtitle">Navegue y gestione sus documentos organizados por empresas y departamentos</p>
             </div>
 
+            <!-- BREADCRUMB CON DROP TARGET -->
             <div class="breadcrumb-section">
                 <div class="breadcrumb-card">
                     <?php foreach ($breadcrumbs as $index => $crumb): ?>
@@ -699,7 +619,8 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                             </span>
                         <?php endif; ?>
                         <a href="?path=<?= urlencode($crumb['path']) ?>"
-                            class="breadcrumb-item <?= $index === count($breadcrumbs) - 1 ? 'current' : '' ?>">
+                            class="breadcrumb-item <?= $index === count($breadcrumbs) - 1 ? 'current' : '' ?> <?= isset($crumb['drop_target']) ? 'breadcrumb-drop-target' : '' ?>"
+                            data-breadcrumb-path="<?= htmlspecialchars($crumb['path']) ?>">
                             <i data-feather="<?= $crumb['icon'] ?>"></i>
                             <span><?= htmlspecialchars($crumb['name']) ?></span>
                         </a>
@@ -707,9 +628,20 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 </div>
             </div>
 
+            <!-- TOOLBAR CON VISTA -->
             <div class="toolbar-section">
                 <div class="toolbar-card">
                     <div class="toolbar-left">
+                        <!-- BOTONES DE VISTA -->
+                        <div class="view-toggle">
+                            <button class="view-btn active" onclick="changeView('grid')" data-view="grid" title="Vista en cuadrícula">
+                                <i data-feather="grid"></i>
+                            </button>
+                            <button class="view-btn" onclick="changeView('list')" data-view="list" title="Vista en lista">
+                                <i data-feather="list"></i>
+                            </button>
+                        </div>
+
                         <?php if ($canCreate && count($pathParts) === 2 && is_numeric($pathParts[0]) && is_numeric($pathParts[1])): ?>
                             <button class="btn-create" onclick="createDocumentFolder()">
                                 <i data-feather="folder-plus"></i>
@@ -718,10 +650,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                         <?php endif; ?>
 
                         <?php if ($canCreate && !empty($currentPath)): ?>
-                            <?php 
-                            $uploadUrl = 'upload.php?path=' . urlencode($currentPath);
-                            ?>
-                            <a href="<?= $uploadUrl ?>" class="btn-secondary">
+                            <a href="upload.php?path=<?= urlencode($currentPath) ?>" class="btn-secondary">
                                 <i data-feather="upload"></i>
                                 <span>Subir Archivo</span>
                             </a>
@@ -793,10 +722,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                                                 <span>Crear Carpeta</span>
                                             </button>
                                         <?php endif; ?>
-                                        <?php 
-                                        $uploadUrl = !empty($currentPath) ? 'upload.php?path=' . urlencode($currentPath) : 'upload.php';
-                                        ?>
-                                        <a href="<?= $uploadUrl ?>" class="btn-secondary">
+                                        <a href="<?= !empty($currentPath) ? 'upload.php?path=' . urlencode($currentPath) : 'upload.php' ?>" class="btn-secondary">
                                             <i data-feather="upload"></i>
                                             <span>Subir Archivo</span>
                                         </a>
@@ -804,7 +730,8 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                                 <?php endif; ?>
                             </div>
                         <?php else: ?>
-                            <div class="items-grid">
+                            <!-- VISTA EN CUADRÍCULA -->
+                            <div class="items-grid" id="gridView">
                                 <?php foreach ($items as $item): ?>
                                     <div class="explorer-item <?= isset($item['draggable']) ? 'draggable-item' : '' ?> <?= isset($item['draggable_target']) ? 'drop-target' : '' ?>" 
                                          onclick="<?= $item['can_enter'] ?? false ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>"
@@ -831,12 +758,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                                                 <?php if ($item['type'] === 'document'): ?>
                                                     <span class="item-size"><?= formatBytes($item['file_size']) ?></span>
                                                     <span class="item-date"><?= formatDate($item['created_at']) ?></span>
-                                                    <?php if (isset($item['folder_name'])): ?>
-                                                        <span class="item-folder" style="color: <?= $item['folder_color'] ?? '#3498db' ?>;">
-                                                            <i data-feather="<?= $item['folder_icon'] ?? 'folder' ?>" style="width: 12px; height: 12px;"></i>
-                                                            <?= htmlspecialchars($item['folder_name']) ?>
-                                                        </span>
-                                                    <?php endif; ?>
                                                 <?php elseif ($item['type'] === 'company'): ?>
                                                     <span class="item-count"><?= $item['document_count'] ?> documentos</span>
                                                     <span class="item-count"><?= $item['subfolder_count'] ?> departamentos</span>
@@ -859,12 +780,17 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
                                         <?php if ($item['type'] === 'document'): ?>
                                             <div class="item-actions">
+                                                <button class="action-btn" onclick="event.stopPropagation(); viewDocument('<?= $item['id'] ?>')" title="Ver">
+                                                    <i data-feather="eye"></i>
+                                                </button>
+                                                <button class="action-btn cut-btn" onclick="event.stopPropagation(); cutDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Cortar">
+                                                    <i data-feather="scissors"></i>
+                                                </button>
                                                 <?php if ($canDownload): ?>
                                                     <button class="action-btn" onclick="event.stopPropagation(); downloadDocument('<?= $item['id'] ?>')" title="Descargar">
                                                         <i data-feather="download"></i>
                                                     </button>
                                                 <?php endif; ?>
-
                                                 <?php if ($canDelete || $currentUser['role'] === 'admin'): ?>
                                                     <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
                                                         <i data-feather="trash-2"></i>
@@ -875,6 +801,93 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                                     </div>
                                 <?php endforeach; ?>
                             </div>
+
+                            <!-- VISTA EN LISTA -->
+                            <div class="items-list" id="listView" style="display: none;">
+                                <div class="list-header">
+                                    <div class="list-col col-name">Nombre</div>
+                                    <div class="list-col col-type">Tipo</div>
+                                    <div class="list-col col-size">Tamaño</div>
+                                    <div class="list-col col-date">Fecha</div>
+                                    <div class="list-col col-actions">Acciones</div>
+                                </div>
+                                
+                                <?php foreach ($items as $item): ?>
+                                    <div class="list-item <?= isset($item['draggable']) ? 'draggable-item' : '' ?> <?= isset($item['draggable_target']) ? 'drop-target' : '' ?>"
+                                         onclick="<?= $item['can_enter'] ?? false ? "navigateTo('{$item['path']}')" : ($item['type'] === 'document' ? "viewDocument('{$item['id']}')" : '') ?>"
+                                         <?= isset($item['draggable']) ? 'draggable="true"' : '' ?>
+                                         data-item-type="<?= $item['type'] ?>"
+                                         data-item-id="<?= $item['id'] ?>"
+                                         data-folder-id="<?= $item['type'] === 'document_folder' ? $item['id'] : '' ?>">
+                                        
+                                        <div class="list-col col-name">
+                                            <div class="list-item-icon <?= $item['type'] === 'company' ? 'company' : ($item['type'] === 'department' ? 'folder' : ($item['type'] === 'document_folder' ? 'document-folder' : getFileTypeClass($item['original_name'] ?? ''))) ?>"
+                                                 <?= isset($item['folder_color']) ? 'style="background: linear-gradient(135deg, ' . $item['folder_color'] . ', ' . adjustBrightness($item['folder_color'], -20) . ');"' : '' ?>>
+                                                <?php if ($item['type'] === 'document' && strpos($item['mime_type'], 'image/') === 0): ?>
+                                                    <img src="<?= htmlspecialchars($item['file_path']) ?>" alt="Preview" class="list-preview">
+                                                <?php else: ?>
+                                                    <i data-feather="<?= $item['icon'] ?>"></i>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="list-item-name">
+                                                <div class="name-text"><?= htmlspecialchars($item['name']) ?></div>
+                                                <?php if ($searchTerm && isset($item['location'])): ?>
+                                                    <div class="location-text"><?= htmlspecialchars($item['location']) ?></div>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="list-col col-type">
+                                            <?php if ($item['type'] === 'document'): ?>
+                                                <?= htmlspecialchars($item['document_type'] ?: 'Documento') ?>
+                                            <?php elseif ($item['type'] === 'company'): ?>
+                                                Empresa
+                                            <?php elseif ($item['type'] === 'department'): ?>
+                                                Departamento
+                                            <?php elseif ($item['type'] === 'document_folder'): ?>
+                                                Carpeta
+                                            <?php endif; ?>
+                                        </div>
+                                        
+                                        <div class="list-col col-size">
+                                            <?php if ($item['type'] === 'document'): ?>
+                                                <?= formatBytes($item['file_size']) ?>
+                                            <?php else: ?>
+                                                <?= $item['document_count'] ?> elementos
+                                            <?php endif; ?>
+                                        </div>
+                                        
+                                        <div class="list-col col-date">
+                                            <?php if ($item['type'] === 'document'): ?>
+                                                <?= formatDate($item['created_at']) ?>
+                                            <?php else: ?>
+                                                -
+                                            <?php endif; ?>
+                                        </div>
+                                        
+                                        <div class="list-col col-actions">
+                                            <?php if ($item['type'] === 'document'): ?>
+                                                <button class="list-action-btn" onclick="event.stopPropagation(); viewDocument('<?= $item['id'] ?>')" title="Ver">
+                                                    <i data-feather="eye"></i>
+                                                </button>
+                                                <button class="list-action-btn cut-btn" onclick="event.stopPropagation(); cutDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Cortar">
+                                                    <i data-feather="scissors"></i>
+                                                </button>
+                                                <?php if ($canDownload): ?>
+                                                    <button class="list-action-btn" onclick="event.stopPropagation(); downloadDocument('<?= $item['id'] ?>')" title="Descargar">
+                                                        <i data-feather="download"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                                <?php if ($canDelete || $currentUser['role'] === 'admin'): ?>
+                                                    <button class="list-action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
+                                                        <i data-feather="trash-2"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -882,7 +895,24 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         </div>
     </main>
 
-    <!-- MODAL PARA CREAR CARPETAS DE DOCUMENTOS -->
+    <!-- MODALES -->
+    <div id="previewModal" class="modal">
+        <div class="modal-content preview-modal-content">
+            <div class="modal-header">
+                <h3 id="previewTitle">
+                    <i data-feather="eye"></i>
+                    <span>Vista Previa</span>
+                </h3>
+                <button class="modal-close" onclick="closePreviewModal()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body preview-modal-body">
+                <div id="previewContent"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="createDocumentFolderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -948,7 +978,24 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         </div>
     </div>
 
-    <!-- ESTILOS -->
+    <div id="clipboardIndicator" class="clipboard-indicator" style="display: none;">
+        <div class="clipboard-content">
+            <i data-feather="scissors"></i>
+            <span>Archivo cortado: <strong id="clipboardName"></strong></span>
+            <div class="clipboard-actions">
+                <button onclick="pasteDocument()" class="clipboard-btn paste-btn">
+                    <i data-feather="corner-down-left"></i>
+                    Pegar
+                </button>
+                <button onclick="cancelCut()" class="clipboard-btn cancel-btn">
+                    <i data-feather="x"></i>
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSS ESTILOS -->
     <style>
         .container {
             padding: var(--spacing-8);
@@ -957,13 +1004,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
         .page-header {
             margin-bottom: var(--spacing-8);
-        }
-
-        .page-header h1 {
-            color: var(--text-primary);
-            font-size: 1.875rem;
-            font-weight: 700;
-            margin: 0 0 var(--spacing-2) 0;
         }
 
         .page-subtitle {
@@ -1040,6 +1080,13 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             margin: 0 var(--spacing-1);
         }
 
+        .breadcrumb-drop-target.drag-over {
+            background: #27ae60 !important;
+            color: white !important;
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(39, 174, 96, 0.3);
+        }
+
         .toolbar-card {
             padding: var(--spacing-5) var(--spacing-6);
             display: flex;
@@ -1059,6 +1106,38 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             display: flex;
             align-items: center;
             gap: var(--spacing-3);
+        }
+
+        .view-toggle {
+            display: flex;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-lg);
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .view-btn {
+            padding: var(--spacing-2) var(--spacing-3);
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .view-btn:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .view-btn.active {
+            background: var(--primary-color);
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .btn-create {
@@ -1215,6 +1294,144 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             transform: scale(1.05);
         }
 
+        .items-list {
+            background: var(--bg-primary);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .list-header {
+            display: grid;
+            grid-template-columns: 2fr 1fr 100px 150px 120px;
+            gap: var(--spacing-4);
+            padding: var(--spacing-4) var(--spacing-6);
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .list-item {
+            display: grid;
+            grid-template-columns: 2fr 1fr 100px 150px 120px;
+            gap: var(--spacing-4);
+            padding: var(--spacing-4) var(--spacing-6);
+            border-bottom: 1px solid #f1f5f9;
+            cursor: pointer;
+            transition: var(--transition);
+            align-items: center;
+        }
+
+        .list-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-item.draggable-item {
+            cursor: move;
+        }
+
+        .list-item.draggable-item.dragging {
+            opacity: 0.5;
+            background: rgba(212, 175, 55, 0.1);
+        }
+
+        .list-item.drop-target.drag-over {
+            background: linear-gradient(135deg, rgba(39, 174, 96, 0.1), rgba(46, 204, 113, 0.1));
+            border-color: #27ae60;
+        }
+
+        .col-name {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-3);
+        }
+
+        .list-item-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .list-preview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: var(--radius-sm);
+        }
+
+        .list-item-name {
+            overflow: hidden;
+        }
+
+        .name-text {
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .location-text {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .col-type, .col-size, .col-date {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .col-actions {
+            display: flex;
+            gap: var(--spacing-1);
+            justify-content: flex-end;
+        }
+
+        .list-action-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            border: 1px solid transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: var(--text-muted);
+            transition: var(--transition);
+        }
+
+        .list-action-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: #e2e8f0;
+        }
+
+        .list-action-btn.delete-btn:hover {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        .list-action-btn.cut-btn:hover {
+            background: #f59e0b;
+            color: white;
+            border-color: #f59e0b;
+        }
+
         .item-icon {
             width: 64px;
             height: 64px;
@@ -1273,8 +1490,51 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             box-shadow: 0 4px 6px -1px rgba(100, 116, 139, 0.4);
         }
 
+        .list-item-icon.folder {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: var(--text-light);
+        }
+
+        .list-item-icon.company {
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+            color: var(--text-light);
+        }
+
+        .list-item-icon.document-folder {
+            color: var(--text-light);
+        }
+
+        .list-item-icon.pdf {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: var(--text-light);
+        }
+
+        .list-item-icon.word {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: var(--text-light);
+        }
+
+        .list-item-icon.excel {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: var(--text-light);
+        }
+
+        .list-item-icon.image {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            color: var(--text-light);
+        }
+
+        .list-item-icon.file {
+            background: linear-gradient(135deg, #64748b, #475569);
+            color: var(--text-light);
+        }
+
         .item-icon i {
             font-size: 28px;
+        }
+
+        .list-item-icon i {
+            font-size: 16px;
         }
 
         .item-preview {
@@ -1379,6 +1639,12 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             border-color: #ef4444;
         }
 
+        .action-btn.cut-btn:hover {
+            background: #f59e0b;
+            color: var(--text-light);
+            border-color: #f59e0b;
+        }
+
         .empty-state {
             display: flex;
             flex-direction: column;
@@ -1463,6 +1729,12 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             transform: scale(1) translateY(0);
         }
 
+        .preview-modal-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            width: auto;
+        }
+
         .modal-header {
             padding: var(--spacing-6) var(--spacing-6) var(--spacing-4);
             border-bottom: 1px solid #e2e8f0;
@@ -1503,6 +1775,12 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
         .modal-body {
             padding: var(--spacing-6);
+        }
+
+        .preview-modal-body {
+            padding: 0;
+            max-height: calc(90vh - 80px);
+            overflow: auto;
         }
 
         .form-group {
@@ -1603,6 +1881,77 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             background: rgba(212, 175, 55, 0.1);
         }
 
+        .clipboard-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-primary);
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-xl);
+            box-shadow: var(--card-shadow-hover);
+            padding: var(--spacing-4) var(--spacing-5);
+            z-index: 1000;
+            max-width: 300px;
+            animation: slideInUp 0.3s ease;
+        }
+
+        .clipboard-content {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-3);
+        }
+
+        .clipboard-content > span {
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-2);
+        }
+
+        .clipboard-actions {
+            display: flex;
+            gap: var(--spacing-2);
+        }
+
+        .clipboard-btn {
+            padding: var(--spacing-2) var(--spacing-3);
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-1);
+        }
+
+        .paste-btn:hover {
+            background: #10b981;
+            color: white;
+            border-color: #10b981;
+        }
+
+        .cancel-btn:hover {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        @keyframes slideInUp {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: var(--spacing-4);
@@ -1625,8 +1974,25 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             }
 
             .modal-content {
-                margin: var(--spacing-5);
-                width: calc(100% - var(--spacing-10));
+                margin: var(--spacing-5);width: calc(100% - var(--spacing-10));
+            }
+
+            .list-header {
+                grid-template-columns: 2fr 1fr 80px;
+            }
+
+            .list-item {
+                grid-template-columns: 2fr 1fr 80px;
+            }
+
+            .col-size, .col-date {
+                display: none;
+            }
+
+            .clipboard-indicator {
+                left: 20px;
+                right: 20px;
+                max-width: none;
             }
         }
     </style>
@@ -1640,6 +2006,8 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         const currentPath = '<?= htmlspecialchars($currentPath) ?>';
 
         let searchTimeout;
+        let cutDocumentData = null;
+        let currentView = 'grid';
 
         function navigateTo(path) {
             window.location.href = `?path=${encodeURIComponent(path)}`;
@@ -1652,7 +2020,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             } else {
                 url.searchParams.delete('search');
             }
-            url.searchParams.delete('path'); // Limpiar path en búsquedas
+            url.searchParams.delete('path'); 
             window.location.href = url.toString();
         }
 
@@ -1671,18 +2039,100 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             window.location.href = url.toString();
         }
 
+        function changeView(view) {
+            currentView = view;
+            const gridView = document.getElementById('gridView');
+            const listView = document.getElementById('listView');
+            const buttons = document.querySelectorAll('.view-btn');
+
+            buttons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.view === view);
+            });
+
+            if (view === 'grid') {
+                gridView.style.display = 'grid';
+                listView.style.display = 'none';
+            } else {
+                gridView.style.display = 'none';
+                listView.style.display = 'block';
+            }
+
+            localStorage.setItem('explorer_view', view);
+        }
+
         function viewDocument(documentId) {
-            console.log('👁️ Ver documento:', documentId);
-            window.location.href = `view.php?id=${documentId}`;
+            showPreviewModal(documentId);
+        }
+
+        async function showPreviewModal(documentId) {
+            const modal = document.getElementById('previewModal');
+            const title = document.getElementById('previewTitle');
+            const content = document.getElementById('previewContent');
+
+            try {
+                const response = await fetch(`view.php?id=${documentId}&preview=1`);
+                const data = await response.json();
+
+                if (data.success) {
+                    title.querySelector('span').textContent = `Vista Previa - ${data.document.name}`;
+                    
+                    if (data.document.mime_type.startsWith('image/')) {
+                        content.innerHTML = `<img src="${data.document.file_path}" alt="Preview" style="max-width: 100%; height: auto; border-radius: 8px;">`;
+                    } else if (data.document.mime_type === 'application/pdf') {
+                        content.innerHTML = `<iframe src="${data.document.file_path}" style="width: 100%; height: 600px; border: none; border-radius: 8px;"></iframe>`;
+                    } else {
+                        content.innerHTML = `
+                            <div style="text-align: center; padding: 40px;">
+                                <i data-feather="file" style="width: 64px; height: 64px; color: #64748b; margin-bottom: 16px;"></i>
+                                <h3>${data.document.name}</h3>
+                                <p>Tipo: ${data.document.document_type || 'Documento'}</p>
+                                <p>Tamaño: ${formatBytes(data.document.file_size)}</p>
+                                <p>Fecha: ${formatDate(data.document.created_at)}</p>
+                                <a href="view.php?id=${documentId}" class="btn-create" style="margin-top: 16px;">
+                                    <i data-feather="external-link"></i>
+                                    Abrir Documento
+                                </a>
+                            </div>
+                        `;
+                    }
+                    
+                    modal.classList.add('active');
+                    if (typeof feather !== 'undefined') {
+                        feather.replace();
+                    }
+                } else {
+                    showNotification('❌ Error al cargar vista previa', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <i data-feather="alert-circle" style="width: 64px; height: 64px; color: #ef4444; margin-bottom: 16px;"></i>
+                        <h3>Error al cargar vista previa</h3>
+                        <p>No se pudo cargar la vista previa del documento.</p>
+                        <a href="view.php?id=${documentId}" class="btn-create" style="margin-top: 16px;">
+                            <i data-feather="external-link"></i>
+                            Abrir Documento
+                        </a>
+                    </div>
+                `;
+                modal.classList.add('active');
+                if (typeof feather !== 'undefined') {
+                    feather.replace();
+                }
+            }
+        }
+
+        function closePreviewModal() {
+            const modal = document.getElementById('previewModal');
+            modal.classList.remove('active');
         }
 
         function downloadDocument(documentId) {
             if (!canDownload) {
-                alert('No tienes permisos para descargar');
+                showNotification('❌ No tienes permisos para descargar', 'error');
                 return;
             }
-
-            console.log('⬇️ Descargar documento:', documentId);
 
             const form = document.createElement('form');
             form.method = 'POST';
@@ -1705,9 +2155,75 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             }, 2000);
         }
 
+        function cutDocument(docId, docName) {
+            cutDocumentData = { 
+                id: docId, 
+                name: docName, 
+                path: currentPath 
+            };
+            
+            const indicator = document.getElementById('clipboardIndicator');
+            const nameElement = document.getElementById('clipboardName');
+            nameElement.textContent = docName;
+            indicator.style.display = 'block';
+            
+            showNotification(`✂️ "${docName}" cortado. Usa Ctrl+V para pegar.`, 'info', 3000);
+        }
+
+        function pasteDocument() {
+            if (!cutDocumentData) {
+                showNotification('❌ No hay ningún archivo cortado', 'error');
+                return;
+            }
+
+            if (cutDocumentData.path === currentPath) {
+                showNotification('ℹ️ El archivo ya está en esta ubicación', 'warning');
+                return;
+            }
+
+            moveDocumentToPath(cutDocumentData.id, currentPath, cutDocumentData.name);
+        }
+
+        function cancelCut() {
+            cutDocumentData = null;
+            const indicator = document.getElementById('clipboardIndicator');
+            indicator.style.display = 'none';
+            showNotification('❌ Operación de corte cancelada', 'info');
+        }
+
+        async function moveDocumentToPath(docId, targetPath, docName) {
+            try {
+                const response = await fetch('move_document.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        document_id: parseInt(docId),
+                        target_path: targetPath
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showNotification(`✅ "${docName}" movido exitosamente`, 'success');
+                    cutDocumentData = null;
+                    const indicator = document.getElementById('clipboardIndicator');
+                    indicator.style.display = 'none';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotification(`❌ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showNotification('❌ Error de conexión al mover documento', 'error');
+                console.error('Error:', error);
+            }
+        }
+
         function deleteDocument(documentId, documentName) {
             if (!canDelete && currentUserRole !== 'admin') {
-                alert('No tienes permisos para eliminar');
+                showNotification('❌ No tienes permisos para eliminar', 'error');
                 return;
             }
 
@@ -1718,7 +2234,6 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             if (!confirm('¿Está completamente seguro? Esta es la última oportunidad.')) {
                 return;
             }
-
             console.log('🗑️ Eliminar documento:', documentId);
 
             const form = document.createElement('form');
@@ -1735,16 +2250,16 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             document.body.appendChild(form);
             form.submit();
         }
-
+        // FUNCIONES DE CARPETAS
         function createDocumentFolder() {
             if (!canCreate) {
-                alert('No tienes permisos para crear carpetas de documentos');
+                showNotification('❌ No tienes permisos para crear carpetas de documentos', 'error');
                 return;
             }
 
             const pathParts = currentPath.split('/');
             if (pathParts.length !== 2 || !pathParts[0] || !pathParts[1]) {
-                alert('Solo se pueden crear carpetas dentro de un departamento');
+                showNotification('❌ Solo se pueden crear carpetas dentro de un departamento', 'error');
                 return;
             }
 
@@ -1783,16 +2298,16 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 const data = await response.json();
 
                 if (data.success) {
-                    alert('✅ Carpeta de documentos creada exitosamente');
+                    showNotification('✅ Carpeta de documentos creada exitosamente', 'success');
                     closeDocumentFolderModal();
                     window.location.reload();
                 } else {
-                    alert('❌ ' + (data.message || 'Error al crear la carpeta de documentos'));
+                    showNotification('❌ ' + (data.message || 'Error al crear la carpeta de documentos'), 'error');
                 }
 
             } catch (error) {
                 console.error('Error:', error);
-                alert('❌ Error de conexión al crear la carpeta');
+                showNotification('❌ Error de conexión al crear la carpeta', 'error');
             } finally {
                 submitBtn.innerHTML = originalText;
                 submitBtn.disabled = false;
@@ -1800,7 +2315,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             }
         }
 
-        // SISTEMA DE DRAG & DROP PARA MOVER DOCUMENTOS A CARPETAS
+        // SISTEMA DE DRAG & DROP
         class DocumentDragDrop {
             constructor() {
                 this.draggedDocument = null;
@@ -1810,6 +2325,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             init() {
                 this.setupDraggers();
                 this.setupDropZones();
+                this.setupBreadcrumbDrops();
                 console.log('📁 Sistema de drag & drop inicializado');
             }
 
@@ -1824,7 +2340,11 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                             return;
                         }
 
-                        this.draggedDocument = { id: docId, element: item };
+                        this.draggedDocument = { 
+                            id: docId, 
+                            element: item,
+                            name: item.querySelector('.item-name, .name-text')?.textContent || 'Documento'
+                        };
                         item.classList.add('dragging');
                         
                         e.dataTransfer.effectAllowed = 'move';
@@ -1866,14 +2386,50 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                         }
 
                         const folderId = target.dataset.folderId;
-                        const folderName = target.querySelector('.item-name').textContent;
+                        const folderName = target.querySelector('.item-name, .name-text')?.textContent || 'Carpeta';
                         
-                        this.moveDocument(this.draggedDocument.id, folderId, folderName);
+                        this.moveDocumentToFolder(this.draggedDocument.id, folderId, folderName);
                     });
                 });
             }
 
-            async moveDocument(docId, folderId, folderName) {
+            setupBreadcrumbDrops() {
+                document.querySelectorAll('.breadcrumb-drop-target').forEach(breadcrumb => {
+                    breadcrumb.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                    });
+
+                    breadcrumb.addEventListener('dragenter', (e) => {
+                        e.preventDefault();
+                        if (this.draggedDocument) {
+                            breadcrumb.classList.add('drag-over');
+                        }
+                    });
+
+                    breadcrumb.addEventListener('dragleave', (e) => {
+                        if (!breadcrumb.contains(e.relatedTarget)) {
+                            breadcrumb.classList.remove('drag-over');
+                        }
+                    });
+
+                    breadcrumb.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        breadcrumb.classList.remove('drag-over');
+
+                        if (!this.draggedDocument) {
+                            return;
+                        }
+
+                        const targetPath = breadcrumb.dataset.breadcrumbPath;
+                        const locationName = breadcrumb.querySelector('span')?.textContent || 'Ubicación';
+                        
+                        this.moveDocumentToPath(this.draggedDocument.id, targetPath, locationName);
+                    });
+                });
+            }
+
+            async moveDocumentToFolder(docId, folderId, folderName) {
                 try {
                     const response = await fetch('move_document.php', {
                         method: 'POST',
@@ -1887,20 +2443,127 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                     const result = await response.json();
                     
                     if (result.success) {
-                        alert(`✅ Documento movido a: ${folderName}`);
+                        showNotification(`✅ Documento movido a: ${folderName}`, 'success');
                         window.location.reload();
                     } else {
-                        alert(`❌ ${result.message}`);
+                        showNotification(`❌ ${result.message}`, 'error');
                     }
                 } catch (error) {
-                    alert('❌ Error de conexión al mover documento');
+                    showNotification('❌ Error de conexión al mover documento', 'error');
+                    console.error('Error:', error);
+                }
+            }
+
+            async moveDocumentToPath(docId, targetPath, locationName) {
+                try {
+                    const response = await fetch('move_document.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            document_id: parseInt(docId),
+                            target_path: targetPath
+                        })
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showNotification(`✅ Documento movido a: ${locationName}`, 'success');
+                        window.location.reload();
+                    } else {
+                        showNotification(`❌ ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    showNotification('❌ Error de conexión al mover documento', 'error');
                     console.error('Error:', error);
                 }
             }
         }
 
+        // SISTEMA DE NOTIFICACIONES
+        function showNotification(message, type = 'info', duration = 5000) {
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.innerHTML = `
+                <div class="notification-content">
+                    <span>${message}</span>
+                    <button onclick="this.parentElement.parentElement.remove()" class="notification-close">×</button>
+                </div>
+            `;
+
+            if (!document.querySelector('#notification-styles')) {
+                const styles = document.createElement('style');
+                styles.id = 'notification-styles';
+                styles.textContent = `
+                    .notification {
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: white;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                        padding: 12px 16px;
+                        z-index: 10000;
+                        max-width: 400px;
+                        animation: slideInRight 0.3s ease;
+                    }
+                    .notification-success { border-left: 4px solid #10b981; }
+                    .notification-error { border-left: 4px solid #ef4444; }
+                    .notification-warning { border-left: 4px solid #f59e0b; }
+                    .notification-info { border-left: 4px solid #3b82f6; }
+                    .notification-content {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        gap: 12px;
+                    }
+                    .notification-close {
+                        background: none;
+                        border: none;
+                        font-size: 18px;
+                        cursor: pointer;
+                        color: #6b7280;
+                    }
+                    @keyframes slideInRight {
+                        from { transform: translateX(100%); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                `;
+                document.head.appendChild(styles);
+            }
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, duration);
+        }
+
+        // FUNCIONES AUXILIARES
+        function formatBytes(bytes) {
+            if (bytes == 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            const pow = Math.floor(Math.log(bytes) / Math.log(1024));
+            return Math.round(bytes / Math.pow(1024, pow) * 10) / 10 + ' ' + units[pow];
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
         function showSettings() {
-            alert('Configuración estará disponible próximamente');
+            showNotification('⚙️ Configuración estará disponible próximamente', 'info');
         }
 
         function toggleSidebar() {
@@ -1922,9 +2585,11 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             if (element) element.textContent = timeString;
         }
 
+        // EVENTOS DE TECLADO
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeDocumentFolderModal();
+                closePreviewModal();
             }
 
             if (e.ctrlKey && e.key === 'f') {
@@ -1933,6 +2598,13 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
                 if (searchInput) {
                     searchInput.focus();
                     searchInput.select();
+                }
+            }
+
+            if (e.ctrlKey && e.key === 'v') {
+                e.preventDefault();
+                if (cutDocument) {
+                    pasteDocument();
                 }
             }
 
@@ -1945,26 +2617,40 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
             }
         });
 
+        // EVENTOS DE CLIC EN MODALES
         document.addEventListener('click', (e) => {
-            const modal = document.getElementById('createDocumentFolderModal');
-            if (e.target === modal) {
+            const folderModal = document.getElementById('createDocumentFolderModal');
+            const previewModal = document.getElementById('previewModal');
+            
+            if (e.target === folderModal) {
                 closeDocumentFolderModal();
+            }
+            if (e.target === previewModal) {
+                closePreviewModal();
             }
         });
 
+        // INICIALIZACIÓN
         document.addEventListener('DOMContentLoaded', () => {
+            // Inicializar iconos Feather
             if (typeof feather !== 'undefined') {
                 feather.replace();
             }
+            
+            // Inicializar reloj
             updateTime();
             setInterval(updateTime, 60000);
 
+            // Restaurar vista preferida
+            const savedView = localStorage.getItem('explorer_view') || 'grid';
+            changeView(savedView);
+
             // Inicializar drag & drop
-            if (document.querySelectorAll('.draggable-item, .drop-target').length > 0) {
+            if (document.querySelectorAll('.draggable-item, .drop-target, .breadcrumb-drop-target').length > 0) {
                 new DocumentDragDrop();
             }
 
-            console.log('📁 Explorador visual mejorado iniciado');
+            console.log('📁 Explorador visual iniciado');
             console.log('Ruta actual:', currentPath);
             console.log('Permisos:', {
                 canDownload,
@@ -1974,5 +2660,4 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         });
     </script>
 </body>
-
 </html>
