@@ -1,26 +1,21 @@
 <?php
 /**
- * permission_functions.php - Sistema de permisos reparado
- * Versión corregida para manejar administradores y usuarios correctamente
+ * includes/permission_functions.php
+ * Funciones de validación de permisos mejoradas para el sistema de grupos
+ * Prioriza la seguridad de grupos sobre permisos individuales
  */
-
-require_once __DIR__ . '/../config/database.php';
 
 /**
- * Obtener permisos completos de un usuario
+ * Obtiene los permisos efectivos de un usuario basado en sus grupos
+ * PRIORIDAD: Grupos > Permisos individuales
+ * 
+ * @param int $userId ID del usuario
+ * @return array Permisos y restricciones efectivas
  */
-function getUserPermissions($userId = null) {
+function getUserEffectivePermissions($userId) {
     static $cache = [];
     
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    if (!$userId) {
-        return getDefaultPermissions();
-    }
-    
-    // Usar cache para evitar consultas repetidas
+    // Cache para evitar consultas repetidas
     if (isset($cache[$userId])) {
         return $cache[$userId];
     }
@@ -30,60 +25,43 @@ function getUserPermissions($userId = null) {
         $pdo = $database->getConnection();
         
         // Obtener información básica del usuario
-        $userQuery = "SELECT role, company_id, department_id FROM users WHERE id = ? AND status = 'active'";
+        $userQuery = "SELECT id, username, role, company_id, department_id, status FROM users WHERE id = ?";
         $userStmt = $pdo->prepare($userQuery);
         $userStmt->execute([$userId]);
         $user = $userStmt->fetch(PDO::FETCH_ASSOC);
         
-        if (!$user) {
-            return getDefaultPermissions();
-        }
-        
-        // SI ES ADMIN = ACCESO TOTAL
-        if ($user['role'] === 'admin') {
-            $adminPermissions = [
-                'permissions' => [
-                    'view' => true,
-                    'view_reports' => true,
-                    'download' => true,
-                    'export' => true,
-                    'create' => true,
-                    'edit' => true,
-                    'delete' => true,
-                    'delete_permanent' => true,
-                    'manage_users' => true,
-                    'system_config' => true
-                ],
-                'restrictions' => [
-                    'companies' => [],      // Vacío = acceso a todas
-                    'departments' => [],    // Vacío = acceso a todos
-                    'document_types' => []  // Vacío = acceso a todos
-                ],
-                'limits' => [
-                    'download_daily' => null,
-                    'upload_daily' => null
-                ]
+        if (!$user || $user['status'] !== 'active') {
+            return [
+                'permissions' => [],
+                'restrictions' => ['companies' => [], 'departments' => [], 'document_types' => []],
+                'has_groups' => false
             ];
-            
-            $cache[$userId] = $adminPermissions;
-            return $adminPermissions;
         }
         
-        // PARA USUARIOS NORMALES: Combinar permisos de grupos
-        $permissions = [
-            'view' => false,
-            'view_reports' => false,  // Solo hasta reportes
-            'download' => false,
-            'export' => false,
-            'create' => false,
-            'edit' => false,
-            'delete' => false,
-            'delete_permanent' => false,
-            'manage_users' => false,  // No pueden gestionar usuarios
-            'system_config' => false // No pueden configurar sistema
+        // Obtener grupos activos del usuario
+        $groupQuery = "
+            SELECT ug.id, ug.name, ug.module_permissions, ug.access_restrictions,
+                   ug.download_limit_daily, ug.upload_limit_daily
+            FROM user_groups ug
+            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+            WHERE ugm.user_id = ? AND ug.status = 'active'
+            ORDER BY ug.is_system_group ASC, ug.created_at ASC
+        ";
+        
+        $groupStmt = $pdo->prepare($groupQuery);
+        $groupStmt->execute([$userId]);
+        $groups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Permisos específicos del nuevo sistema (5 opciones principales)
+        $finalPermissions = [
+            'upload_files' => false,      // 1. Subir archivo
+            'view_files' => false,        // 2. Ver archivos
+            'create_folders' => false,    // 3. Crear carpetas
+            'download_files' => false,    // 4. Descargar
+            'delete_files' => false       // 5. Eliminar archivo o documento
         ];
         
-        $restrictions = [
+        $finalRestrictions = [
             'companies' => [],
             'departments' => [],
             'document_types' => []
@@ -94,36 +72,24 @@ function getUserPermissions($userId = null) {
             'upload_daily' => null
         ];
         
-        // Obtener permisos de grupos del usuario
-        $groupQuery = "
-            SELECT ug.module_permissions, ug.access_restrictions, 
-                   ug.download_limit_daily, ug.upload_limit_daily
-            FROM user_groups ug
-            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-        
-        $groupStmt = $pdo->prepare($groupQuery);
-        $groupStmt->execute([$userId]);
-        $groups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Si tiene grupos, combinar permisos
         if (!empty($groups)) {
+            // El usuario tiene grupos - PRIORIDAD ABSOLUTA
             foreach ($groups as $group) {
-                // Combinar permisos (OR lógico)
+                // Combinar permisos (OR lógico - el más permisivo gana)
                 $groupPerms = json_decode($group['module_permissions'] ?: '{}', true);
-                foreach ($permissions as $key => $current) {
+                
+                foreach ($finalPermissions as $key => $current) {
                     if (isset($groupPerms[$key]) && $groupPerms[$key] === true) {
-                        $permissions[$key] = true;
+                        $finalPermissions[$key] = true;
                     }
                 }
                 
-                // Combinar restricciones (UNION)
+                // Combinar restricciones (UNION de todas las permitidas)
                 $groupRestrictions = json_decode($group['access_restrictions'] ?: '{}', true);
                 foreach (['companies', 'departments', 'document_types'] as $type) {
-                    if (!empty($groupRestrictions[$type])) {
-                        $restrictions[$type] = array_unique(array_merge(
-                            $restrictions[$type], 
+                    if (isset($groupRestrictions[$type]) && is_array($groupRestrictions[$type])) {
+                        $finalRestrictions[$type] = array_unique(array_merge(
+                            $finalRestrictions[$type], 
                             $groupRestrictions[$type]
                         ));
                     }
@@ -131,345 +97,385 @@ function getUserPermissions($userId = null) {
                 
                 // Aplicar límites más restrictivos
                 if ($group['download_limit_daily'] !== null) {
-                    $limits['download_daily'] = min(
-                        $limits['download_daily'] ?: PHP_INT_MAX,
-                        $group['download_limit_daily']
-                    );
+                    $limits['download_daily'] = $limits['download_daily'] === null ? 
+                        $group['download_limit_daily'] : 
+                        min($limits['download_daily'], $group['download_limit_daily']);
                 }
                 
                 if ($group['upload_limit_daily'] !== null) {
-                    $limits['upload_daily'] = min(
-                        $limits['upload_daily'] ?: PHP_INT_MAX,
-                        $group['upload_limit_daily']
-                    );
+                    $limits['upload_daily'] = $limits['upload_daily'] === null ? 
+                        $group['upload_limit_daily'] : 
+                        min($limits['upload_daily'], $group['upload_limit_daily']);
                 }
             }
         } else {
-            // Si no tiene grupos, permisos mínimos + restricción a su empresa
-            $permissions['view'] = true;
-            $permissions['view_reports'] = true; // Solo hasta reportes
-            $permissions['download'] = true;
+            // Usuario sin grupos - permisos mínimos y restricción a su contexto
+            if ($user['role'] === 'admin') {
+                // Administradores sin grupos tienen acceso completo
+                foreach ($finalPermissions as $key => $value) {
+                    $finalPermissions[$key] = true;
+                }
+            } else {
+                // Usuarios normales sin grupos: solo lectura básica
+                $finalPermissions['view_files'] = true;
+                $finalPermissions['download_files'] = true;
+            }
             
+            // Restricción automática a su empresa/departamento
             if ($user['company_id']) {
-                $restrictions['companies'] = [$user['company_id']];
+                $finalRestrictions['companies'] = [(int)$user['company_id']];
             }
             if ($user['department_id']) {
-                $restrictions['departments'] = [$user['department_id']];
+                $finalRestrictions['departments'] = [(int)$user['department_id']];
             }
         }
         
         $result = [
-            'permissions' => $permissions,
-            'restrictions' => $restrictions,
-            'limits' => $limits
+            'permissions' => $finalPermissions,
+            'restrictions' => $finalRestrictions,
+            'limits' => $limits,
+            'has_groups' => !empty($groups),
+            'group_count' => count($groups),
+            'user_role' => $user['role']
         ];
         
         $cache[$userId] = $result;
         return $result;
         
     } catch (Exception $e) {
-        error_log('Error getting user permissions: ' . $e->getMessage());
-        return getDefaultPermissions();
-    }
-}
-
-/**
- * Permisos por defecto para usuarios sin configuración
- */
-function getDefaultPermissions() {
-    return [
-        'permissions' => [
-            'view' => true,
-            'view_reports' => true,
-            'download' => true,
-            'export' => false,
-            'create' => false,
-            'edit' => false,
-            'delete' => false,
-            'delete_permanent' => false,
-            'manage_users' => false,
-            'system_config' => false
-        ],
-        'restrictions' => [
-            'companies' => [],
-            'departments' => [],
-            'document_types' => []
-        ],
-        'limits' => [
-            'download_daily' => null,
-            'upload_daily' => null
-        ]
-    ];
-}
-
-/**
- * Verificar si el usuario tiene un permiso específico
- */
-function hasUserPermission($permission, $userId = null) {
-    $perms = getUserPermissions($userId);
-    return isset($perms['permissions'][$permission]) && $perms['permissions'][$permission] === true;
-}
-
-/**
- * Verificar acceso a empresa
- */
-function canAccessCompany($companyId, $userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    // Admin puede acceder a todo
-    if (SessionManager::isAdmin()) {
-        return true;
-    }
-    
-    $perms = getUserPermissions($userId);
-    
-    // Si no hay restricciones de empresa, puede acceder a todas
-    if (empty($perms['restrictions']['companies'])) {
-        return true;
-    }
-    
-    // Verificar si está en la lista permitida
-    return in_array($companyId, $perms['restrictions']['companies']);
-}
-
-/**
- * Verificar acceso a departamento
- */
-function canAccessDepartment($departmentId, $userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    // Admin puede acceder a todo
-    if (SessionManager::isAdmin()) {
-        return true;
-    }
-    
-    $perms = getUserPermissions($userId);
-    
-    // Si no hay restricciones de departamento, puede acceder a todos
-    if (empty($perms['restrictions']['departments'])) {
-        return true;
-    }
-    
-    // Verificar si está en la lista permitida
-    return in_array($departmentId, $perms['restrictions']['departments']);
-}
-
-/**
- * Verificar acceso a tipo de documento
- */
-function canAccessDocumentType($documentTypeId, $userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    // Admin puede acceder a todo
-    if (SessionManager::isAdmin()) {
-        return true;
-    }
-    
-    $perms = getUserPermissions($userId);
-    
-    // Si no hay restricciones de tipo, puede acceder a todos
-    if (empty($perms['restrictions']['document_types'])) {
-        return true;
-    }
-    
-    // Verificar si está en la lista permitida
-    return in_array($documentTypeId, $perms['restrictions']['document_types']);
-}
-
-/**
- * Construir condiciones WHERE para consultas SQL con restricciones
- */
-function buildAccessConditions($tableAlias = 'd', $userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    // Admin no tiene restricciones
-    if (SessionManager::isAdmin()) {
+        error_log('Error getting user effective permissions: ' . $e->getMessage());
+        
+        // En caso de error, retornar permisos mínimos por seguridad
         return [
-            'conditions' => [],
-            'params' => []
+            'permissions' => ['view_files' => false],
+            'restrictions' => ['companies' => [], 'departments' => [], 'document_types' => []],
+            'has_groups' => false,
+            'error' => true
         ];
     }
+}
+
+/**
+ * Verifica si un usuario tiene un permiso específico
+ * 
+ * @param int $userId ID del usuario
+ * @param string $permission Permiso a verificar
+ * @return bool
+ */
+function userHasPermission($userId, $permission) {
+    $userPerms = getUserEffectivePermissions($userId);
+    return isset($userPerms['permissions'][$permission]) && $userPerms['permissions'][$permission] === true;
+}
+
+/**
+ * Verifica si un usuario puede acceder a un recurso específico
+ * 
+ * @param int $userId ID del usuario
+ * @param string $resourceType Tipo de recurso (company, department, document_type)
+ * @param int $resourceId ID del recurso
+ * @return bool
+ */
+function userCanAccessResource($userId, $resourceType, $resourceId) {
+    $userPerms = getUserEffectivePermissions($userId);
+    $restrictions = $userPerms['restrictions'];
     
-    $perms = getUserPermissions($userId);
+    // Mapear tipos de recursos
+    $restrictionKey = $resourceType === 'company' ? 'companies' :
+                     ($resourceType === 'department' ? 'departments' : 'document_types');
+    
+    // Si no hay restricciones definidas para este tipo, denegar acceso por seguridad
+    if (!isset($restrictions[$restrictionKey]) || empty($restrictions[$restrictionKey])) {
+        return false;
+    }
+    
+    // Verificar si el recurso está en la lista de permitidos
+    return in_array((int)$resourceId, $restrictions[$restrictionKey]);
+}
+
+/**
+ * Obtiene la lista de empresas accesibles para un usuario
+ * 
+ * @param int $userId ID del usuario
+ * @return array IDs de empresas accesibles
+ */
+function getUserAccessibleCompanies($userId) {
+    $userPerms = getUserEffectivePermissions($userId);
+    return $userPerms['restrictions']['companies'] ?? [];
+}
+
+/**
+ * Obtiene la lista de departamentos accesibles para un usuario
+ * 
+ * @param int $userId ID del usuario
+ * @return array IDs de departamentos accesibles
+ */
+function getUserAccessibleDepartments($userId) {
+    $userPerms = getUserEffectivePermissions($userId);
+    return $userPerms['restrictions']['departments'] ?? [];
+}
+
+/**
+ * Obtiene la lista de tipos de documentos accesibles para un usuario
+ * 
+ * @param int $userId ID del usuario
+ * @return array IDs de tipos de documentos accesibles
+ */
+function getUserAccessibleDocumentTypes($userId) {
+    $userPerms = getUserEffectivePermissions($userId);
+    return $userPerms['restrictions']['document_types'] ?? [];
+}
+
+/**
+ * Verifica múltiples permisos a la vez
+ * 
+ * @param int $userId ID del usuario
+ * @param array $permissions Array de permisos a verificar
+ * @param bool $requireAll Si requiere todos los permisos (AND) o al menos uno (OR)
+ * @return bool
+ */
+function userHasPermissions($userId, $permissions, $requireAll = true) {
+    $userPerms = getUserEffectivePermissions($userId);
+    $userPermissions = $userPerms['permissions'];
+    
+    if ($requireAll) {
+        // Requiere TODOS los permisos
+        foreach ($permissions as $permission) {
+            if (!isset($userPermissions[$permission]) || !$userPermissions[$permission]) {
+                return false;
+            }
+        }
+        return true;
+    } else {
+        // Requiere AL MENOS UNO de los permisos
+        foreach ($permissions as $permission) {
+            if (isset($userPermissions[$permission]) && $userPermissions[$permission]) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+/**
+ * Construye una cláusula WHERE SQL para filtrar por restricciones de usuario
+ * 
+ * @param int $userId ID del usuario
+ * @param string $tableAlias Alias de la tabla principal
+ * @return array ['where' => string, 'params' => array]
+ */
+function buildUserRestrictionsSQL($userId, $tableAlias = 'd') {
+    $userPerms = getUserEffectivePermissions($userId);
+    $restrictions = $userPerms['restrictions'];
+    
     $conditions = [];
     $params = [];
     
-    // Aplicar restricciones de empresa
-    if (!empty($perms['restrictions']['companies'])) {
-        $placeholders = str_repeat('?,', count($perms['restrictions']['companies']) - 1) . '?';
+    // Restricción de empresas
+    if (!empty($restrictions['companies'])) {
+        $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
         $conditions[] = "{$tableAlias}.company_id IN ($placeholders)";
-        $params = array_merge($params, $perms['restrictions']['companies']);
+        $params = array_merge($params, $restrictions['companies']);
+    } else {
+        // Sin empresas permitidas = sin acceso
+        $conditions[] = "1 = 0";
     }
     
-    // Aplicar restricciones de departamento
-    if (!empty($perms['restrictions']['departments'])) {
-        $placeholders = str_repeat('?,', count($perms['restrictions']['departments']) - 1) . '?';
+    // Restricción de departamentos
+    if (!empty($restrictions['departments'])) {
+        $placeholders = str_repeat('?,', count($restrictions['departments']) - 1) . '?';
         $conditions[] = "{$tableAlias}.department_id IN ($placeholders)";
-        $params = array_merge($params, $perms['restrictions']['departments']);
+        $params = array_merge($params, $restrictions['departments']);
+    } else {
+        // Sin departamentos permitidos = sin acceso
+        $conditions[] = "1 = 0";
     }
     
-    // Aplicar restricciones de tipo de documento
-    if (!empty($perms['restrictions']['document_types'])) {
-        $placeholders = str_repeat('?,', count($perms['restrictions']['document_types']) - 1) . '?';
+    // Restricción de tipos de documentos (si aplica)
+    if (!empty($restrictions['document_types']) && strpos($tableAlias, 'doc') !== false) {
+        $placeholders = str_repeat('?,', count($restrictions['document_types']) - 1) . '?';
         $conditions[] = "{$tableAlias}.document_type_id IN ($placeholders)";
-        $params = array_merge($params, $perms['restrictions']['document_types']);
+        $params = array_merge($params, $restrictions['document_types']);
     }
+    
+    $whereClause = empty($conditions) ? "1 = 0" : implode(' AND ', $conditions);
     
     return [
-        'conditions' => $conditions,
+        'where' => $whereClause,
         'params' => $params
     ];
 }
 
 /**
- * Obtener empresas accesibles para el usuario
+ * Valida si un usuario puede realizar una acción específica en un documento
+ * 
+ * @param int $userId ID del usuario
+ * @param string $action Acción a realizar
+ * @param array $documentInfo Información del documento
+ * @return bool
  */
-function getAccessibleCompanies($userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
+function canUserPerformDocumentAction($userId, $action, $documentInfo) {
+    $userPerms = getUserEffectivePermissions($userId);
+    
+    // Verificar permiso básico
+    $permissionMap = [
+        'view' => 'view_files',
+        'download' => 'download_files',
+        'upload' => 'upload_files',
+        'create_folder' => 'create_folders',
+        'delete' => 'delete_files',
+        'edit' => 'delete_files' // Reutilizamos delete_files para edición
+    ];
+    
+    if (!isset($permissionMap[$action])) {
+        return false;
     }
     
-    try {
-        $database = new Database();
-        $pdo = $database->getConnection();
-        
-        // Admin ve todas las empresas
-        if (SessionManager::isAdmin()) {
-            $query = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
-            $stmt = $pdo->prepare($query);
-            $stmt->execute();
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $requiredPermission = $permissionMap[$action];
+    if (!userHasPermission($userId, $requiredPermission)) {
+        return false;
+    }
+    
+    // Verificar restricciones de acceso
+    if (isset($documentInfo['company_id']) && 
+        !userCanAccessResource($userId, 'company', $documentInfo['company_id'])) {
+        return false;
+    }
+    
+    if (isset($documentInfo['department_id']) && 
+        !userCanAccessResource($userId, 'department', $documentInfo['department_id'])) {
+        return false;
+    }
+    
+    if (isset($documentInfo['document_type_id']) && 
+        !userCanAccessResource($userId, 'document_type', $documentInfo['document_type_id'])) {
+        return false;
+    }
+    
+    // Para eliminación, verificar si es el propietario (en reportes)
+    if ($action === 'delete' && isset($documentInfo['user_id'])) {
+        // Solo puede eliminar sus propios documentos, a menos que sea admin
+        $userInfo = getUserEffectivePermissions($userId);
+        if ($userInfo['user_role'] !== 'admin' && $documentInfo['user_id'] != $userId) {
+            return false;
         }
-        
-        $perms = getUserPermissions($userId);
-        
-        // Si no hay restricciones, ve todas
-        if (empty($perms['restrictions']['companies'])) {
-            $query = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
-            $stmt = $pdo->prepare($query);
-            $stmt->execute();
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        }
-        
-        // Solo empresas permitidas
-        $placeholders = str_repeat('?,', count($perms['restrictions']['companies']) - 1) . '?';
-        $query = "SELECT id, name FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute($perms['restrictions']['companies']);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-    } catch (Exception $e) {
-        error_log('Error getting accessible companies: ' . $e->getMessage());
-        return [];
+    }
+    
+    return true;
+}
+
+/**
+ * Obtiene estadísticas de permisos para un usuario
+ * 
+ * @param int $userId ID del usuario
+ * @return array Estadísticas detalladas
+ */
+function getUserPermissionStats($userId) {
+    $userPerms = getUserEffectivePermissions($userId);
+    
+    $activePermissions = array_filter($userPerms['permissions']);
+    $restrictions = $userPerms['restrictions'];
+    
+    return [
+        'has_groups' => $userPerms['has_groups'],
+        'group_count' => $userPerms['group_count'] ?? 0,
+        'active_permissions_count' => count($activePermissions),
+        'active_permissions' => array_keys($activePermissions),
+        'restricted_companies' => count($restrictions['companies'] ?? []),
+        'restricted_departments' => count($restrictions['departments'] ?? []),
+        'restricted_document_types' => count($restrictions['document_types'] ?? []),
+        'security_level' => calculateUserSecurityLevel($userPerms),
+        'limits' => $userPerms['limits'] ?? []
+    ];
+}
+
+/**
+ * Calcula el nivel de seguridad de un usuario
+ * 
+ * @param array $userPerms Permisos del usuario
+ * @return string Nivel de seguridad
+ */
+function calculateUserSecurityLevel($userPerms) {
+    $permissions = $userPerms['permissions'];
+    $restrictions = $userPerms['restrictions'];
+    
+    $activePerms = count(array_filter($permissions));
+    $totalRestrictions = count($restrictions['companies'] ?? []) + 
+                        count($restrictions['departments'] ?? []) + 
+                        count($restrictions['document_types'] ?? []);
+    
+    if (!$userPerms['has_groups']) {
+        return 'default'; // Usuario sin grupos
+    }
+    
+    if ($activePerms === 0) {
+        return 'maximum'; // Sin permisos activos
+    } elseif ($activePerms <= 2 && $totalRestrictions > 5) {
+        return 'high'; // Pocos permisos, muchas restricciones
+    } elseif ($activePerms <= 3 && $totalRestrictions > 2) {
+        return 'medium'; // Permisos moderados
+    } elseif ($totalRestrictions === 0) {
+        return 'low'; // Sin restricciones
+    } else {
+        return 'medium'; // Caso general
     }
 }
 
 /**
- * Obtener departamentos accesibles para el usuario
+ * Limpia la caché de permisos para un usuario específico
+ * 
+ * @param int $userId ID del usuario
  */
-function getAccessibleDepartments($companyId = null, $userId = null) {
-    if ($userId === null) {
-        $userId = SessionManager::getUserId();
-    }
-    
-    try {
-        $database = new Database();
-        $pdo = $database->getConnection();
-        
-        $conditions = ["status = 'active'"];
-        $params = [];
-        
-        // Filtro por empresa si se especifica
-        if ($companyId) {
-            $conditions[] = "company_id = ?";
-            $params[] = $companyId;
-        }
-        
-        // Admin ve todos los departamentos
-        if (SessionManager::isAdmin()) {
-            $whereClause = implode(' AND ', $conditions);
-            $query = "SELECT id, name, company_id FROM departments WHERE $whereClause ORDER BY name";
-            $stmt = $pdo->prepare($query);
-            $stmt->execute($params);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        }
-        
-        $perms = getUserPermissions($userId);
-        
-        // Aplicar restricciones de departamento
-        if (!empty($perms['restrictions']['departments'])) {
-            $placeholders = str_repeat('?,', count($perms['restrictions']['departments']) - 1) . '?';
-            $conditions[] = "id IN ($placeholders)";
-            $params = array_merge($params, $perms['restrictions']['departments']);
-        }
-        
-        // Aplicar restricciones de empresa
-        if (!empty($perms['restrictions']['companies'])) {
-            $placeholders = str_repeat('?,', count($perms['restrictions']['companies']) - 1) . '?';
-            $conditions[] = "company_id IN ($placeholders)";
-            $params = array_merge($params, $perms['restrictions']['companies']);
-        }
-        
-        $whereClause = implode(' AND ', $conditions);
-        $query = "SELECT id, name, company_id FROM departments WHERE $whereClause ORDER BY name";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-    } catch (Exception $e) {
-        error_log('Error getting accessible departments: ' . $e->getMessage());
-        return [];
-    }
-}
-
-/**
- * Limpiar cache de permisos
- */
-function clearPermissionsCache($userId = null) {
+function clearUserPermissionsCache($userId = null) {
     static $cache = [];
     
-    if ($userId) {
-        unset($cache[$userId]);
+    if ($userId === null) {
+        $cache = []; // Limpiar toda la caché
     } else {
-        $cache = [];
+        unset($cache[$userId]); // Limpiar caché específica
     }
 }
 
 /**
- * Generar mensaje informativo sobre las restricciones del usuario
+ * Middleware para verificar permisos en controladores
+ * 
+ * @param int $userId ID del usuario
+ * @param string $requiredPermission Permiso requerido
+ * @param array $resourceInfo Información del recurso (opcional)
+ * @throws Exception Si no tiene permisos
  */
-function getRestrictionsMessage($userId = null) {
-    if (SessionManager::isAdmin()) {
-        return null;
+function requirePermission($userId, $requiredPermission, $resourceInfo = []) {
+    if (!userHasPermission($userId, $requiredPermission)) {
+        throw new Exception("Acceso denegado: permiso '$requiredPermission' requerido");
     }
     
-    $perms = getUserPermissions($userId);
-    $messages = [];
-    
-    if (!empty($perms['restrictions']['companies'])) {
-        $count = count($perms['restrictions']['companies']);
-        $messages[] = "Limitado a $count empresa(s)";
+    // Verificar restricciones de recurso si se proporcionan
+    foreach (['company_id', 'department_id', 'document_type_id'] as $field) {
+        if (isset($resourceInfo[$field])) {
+            $resourceType = str_replace('_id', '', $field);
+            if (!userCanAccessResource($userId, $resourceType, $resourceInfo[$field])) {
+                throw new Exception("Acceso denegado: sin permisos para este $resourceType");
+            }
+        }
     }
-    
-    if (!empty($perms['restrictions']['departments'])) {
-        $count = count($perms['restrictions']['departments']);
-        $messages[] = "Limitado a $count departamento(s)";
-    }
-    
-    if (!empty($perms['restrictions']['document_types'])) {
-        $count = count($perms['restrictions']['document_types']);
-        $messages[] = "Limitado a $count tipo(s) de documento";
-    }
-    
-    return !empty($messages) ? implode(', ', $messages) : null;
 }
 
+/**
+ * Función auxiliar para logging de accesos
+ * 
+ * @param int $userId ID del usuario
+ * @param string $action Acción realizada
+ * @param string $resource Recurso accedido
+ * @param bool $success Si la acción fue exitosa
+ */
+function logPermissionAccess($userId, $action, $resource, $success = true) {
+    try {
+        if (function_exists('logActivity')) {
+            $message = $success ? "Acceso permitido: $action en $resource" : "Acceso denegado: $action en $resource";
+            logActivity($userId, 'permission_check', 'security', null, $message);
+        }
+    } catch (Exception $e) {
+        // No interrumpir el flujo por errores de logging
+        error_log('Error logging permission access: ' . $e->getMessage());
+    }
+}
 ?>

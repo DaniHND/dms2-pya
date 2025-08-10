@@ -2,7 +2,7 @@
 require_once '../../bootstrap.php';
 /*
  * modules/groups/permissions.php
- * Sistema de permisos - Versión limpia sin diagnósticos
+ * Sistema de permisos - manteniendo estructura original de miembros
  */
 
 $projectRoot = dirname(dirname(__DIR__));
@@ -47,6 +47,21 @@ try {
     $permissions = json_decode($group['module_permissions'] ?: '{}', true);
     $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
     
+    // Normalizar permisos para las 5 opciones específicas
+    $defaultPermissions = [
+        'upload_files' => false,      // 1. Subir archivo
+        'view_files' => false,        // 2. Ver archivos
+        'create_folders' => false,    // 3. Crear carpetas
+        'download_files' => false,    // 4. Descargar
+        'delete_files' => false       // 5. Eliminar archivo o documento
+    ];
+    
+    foreach ($defaultPermissions as $key => $defaultValue) {
+        if (!isset($permissions[$key])) {
+            $permissions[$key] = $defaultValue;
+        }
+    }
+    
     // Obtener miembros actuales
     $membersQuery = "
         SELECT u.id, u.username, u.first_name, u.last_name, u.email,
@@ -63,27 +78,54 @@ try {
     $stmt->execute([$groupId]);
     $members = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Obtener recursos para restricciones
-    $companies = $pdo->query("SELECT id, name FROM companies WHERE status = 'active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $departments = $pdo->query("SELECT d.id, d.name, c.name as company_name FROM departments d LEFT JOIN companies c ON d.company_id = c.id WHERE d.status = 'active' ORDER BY c.name, d.name")->fetchAll(PDO::FETCH_ASSOC);
-    $documentTypes = $pdo->query("SELECT id, name FROM document_types WHERE status = 'active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Obtener todos los usuarios activos para agregar
-    $allUsersQuery = "
+    // Obtener usuarios disponibles para agregar
+    $availableUsersQuery = "
         SELECT u.id, u.username, u.first_name, u.last_name, u.email,
                c.name as company_name, d.name as department_name
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.id
         LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.status = 'active'
+        WHERE u.status = 'active' 
+        AND u.id NOT IN (
+            SELECT user_id FROM user_group_members WHERE group_id = ?
+        )
         ORDER BY u.first_name, u.last_name
     ";
-    $allUsers = $pdo->query($allUsersQuery)->fetchAll(PDO::FETCH_ASSOC);
+    
+    $stmt = $pdo->prepare($availableUsersQuery);
+    $stmt->execute([$groupId]);
+    $availableUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Obtener datos para restricciones
+    $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
+    $stmt = $pdo->prepare($companiesQuery);
+    $stmt->execute();
+    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $departmentsQuery = "
+        SELECT d.id, d.name, c.name as company_name 
+        FROM departments d 
+        INNER JOIN companies c ON d.company_id = c.id 
+        WHERE d.status = 'active' AND c.status = 'active'
+        ORDER BY c.name, d.name
+    ";
+    $stmt = $pdo->prepare($departmentsQuery);
+    $stmt->execute();
+    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $docTypesQuery = "SELECT id, name, description FROM document_types WHERE status = 'active' ORDER BY name";
+    $stmt = $pdo->prepare($docTypesQuery);
+    $stmt->execute();
+    $documentTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
 } catch (Exception $e) {
-    error_log('Error en permisos: ' . $e->getMessage());
-    header('Location: index.php');
+    error_log("Error en permissions.php: " . $e->getMessage());
+    header('Location: index.php?error=database');
     exit;
+}
+
+function isRestricted($type, $id, $restrictions) {
+    return isset($restrictions[$type]) && is_array($restrictions[$type]) && in_array((int)$id, $restrictions[$type]);
 }
 ?>
 
@@ -92,921 +134,1051 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Permisos de Grupo - DMS2</title>
-    
-    <link rel="stylesheet" href="../../assets/css/main.css">
-    <link rel="stylesheet" href="../../assets/css/dashboard.css">
-    <link rel="stylesheet" href="../../assets/css/sidebar.css">
-    <link rel="stylesheet" href="../../assets/css/modal.css">
-    
-    <script src="https://unpkg.com/feather-icons"></script>
-    
+    <title>Permisos del Grupo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="../../assets/css/dashboard.css" rel="stylesheet">
     <style>
-    /* Header igual a grupos */
-    .content-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0 24px;
-        height: 80px;
-        background: white;
-        border-bottom: 1px solid #e2e8f0;
-        margin-bottom: 24px;
-    }
-    
-    .header-left { display: flex; align-items: center; gap: 16px; }
-    .header-left h1 { font-size: 1.5rem; font-weight: 600; color: #1e293b; margin: 0; }
-    .mobile-menu-toggle { display: none; background: none; border: none; cursor: pointer; padding: 8px; }
-    .header-right { display: flex; align-items: center; gap: 16px; }
-    .header-info { text-align: right; }
-    .user-name-header { font-weight: 600; color: #374151; font-size: 14px; }
-    .current-time { font-size: 12px; color: #64748b; }
-    .header-actions { display: flex; align-items: center; gap: 8px; }
-    
-    .btn-icon {
-        background: transparent; border: none; padding: 8px; border-radius: 6px;
-        cursor: pointer; transition: all 0.2s ease; color: #64748b;
-        display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
-    }
-    .btn-icon:hover { background: #f1f5f9; color: #374151; }
-    .logout-btn { color: #ef4444; }
-    .logout-btn:hover { background: rgba(239, 68, 68, 0.1); color: #dc2626; }
-
-    /* Container y estilos básicos */
-    .container { padding: 0 24px; }
-    
-    .btn-back {
-        background: #8B4513; color: white; border: none; padding: 12px 20px; border-radius: 8px;
-        font-weight: 600; cursor: pointer; transition: all 0.2s ease; display: inline-flex;
-        align-items: center; gap: 8px; text-decoration: none; margin-bottom: 24px;
-    }
-    .btn-back:hover { background: #654321; color: white; }
-
-    .group-info-section {
-        background: white; border-radius: 12px; padding: 24px; margin-bottom: 32px;
-        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    
-    .group-info-title { font-size: 1.5rem; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; }
-    .group-info-description { color: #64748b; margin: 0 0 20px 0; }
-    
-    .group-stats {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px;
-    }
-    .stat-item { text-align: center; padding: 16px; background: #f8fafc; border-radius: 8px; }
-    .stat-value { font-size: 2rem; font-weight: 700; color: #8B4513; }
-    .stat-label { font-size: 0.875rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    /* Tabs */
-    .tabs-nav {
-        display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 32px;
-        background: white; border-radius: 8px 8px 0 0; overflow: hidden;
-    }
-    .tab-btn {
-        padding: 16px 24px; background: none; border: none; cursor: pointer; transition: all 0.2s ease;
-        font-weight: 500; color: #64748b; display: flex; align-items: center; gap: 8px;
-        text-decoration: none; border-bottom: 3px solid transparent;
-    }
-    .tab-btn:hover { background: #f8fafc; color: #1e293b; }
-    .tab-btn.active { background: #f8fafc; color: #8B4513; border-bottom-color: #8B4513; }
-
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-
-    /* Secciones */
-    .permissions-section, .members-section {
-        background: white; border-radius: 12px; padding: 24px;
-        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); margin-bottom: 24px;
-    }
-    
-    .section-title {
-        font-size: 1.25rem; font-weight: 600; color: #1e293b; margin: 0 0 20px 0;
-        display: flex; align-items: center; gap: 8px;
-    }
-
-    /* Selección de miembros */
-    .selection-container {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;
-    }
-    
-    .selection-box {
-        border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: white;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    
-    .selection-header {
-        background: #f8fafc; padding: 16px; border-bottom: 1px solid #e2e8f0;
-        display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    }
-    
-    .selection-title {
-        font-weight: 600; color: #1e293b; flex: 1;
-    }
-    
-    .selection-count {
-        background: #8B4513; color: white; padding: 4px 8px; border-radius: 12px;
-        font-size: 0.75rem; font-weight: 600; min-width: 20px; text-align: center;
-    }
-    
-    .selection-search {
-        width: 100%; padding: 12px; border: none; border-bottom: 1px solid #e2e8f0;
-        font-size: 0.875rem; outline: none;
-    }
-    .selection-search:focus { border-bottom-color: #8B4513; }
-    
-    .selection-list {
-        max-height: 400px; overflow-y: auto;
-    }
-    
-    .selection-item {
-        padding: 12px 16px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
-        transition: all 0.2s ease; display: flex; align-items: center; gap: 12px;
-    }
-    .selection-item:hover { background: #f8fafc; }
-    .selection-item.selected {
-        background: rgba(139, 69, 19, 0.1); border-left: 3px solid #8B4513;
-    }
-    
-    .item-checkbox {
-        appearance: none; width: 18px; height: 18px; border: 2px solid #e2e8f0;
-        border-radius: 3px; cursor: pointer; position: relative; transition: all 0.2s ease;
-    }
-    .item-checkbox:checked {
-        background: #8B4513; border-color: #8B4513;
-    }
-    .item-checkbox:checked::after {
-        content: '✓'; position: absolute; top: -2px; left: 2px; color: white;
-        font-size: 12px; font-weight: bold;
-    }
-    
-    .user-avatar {
-        width: 36px; height: 36px; background: #8B4513; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center; color: white;
-        font-weight: 600; font-size: 0.875rem; flex-shrink: 0;
-    }
-    
-    .item-info { flex: 1; min-width: 0; }
-    .item-name { font-weight: 600; color: #1e293b; margin-bottom: 2px; }
-    .item-meta { font-size: 0.75rem; color: #64748b; }
-
-    /* Permisos */
-    .permissions-grid { 
-        display: grid; 
-        grid-template-columns: 1fr 1fr; 
-        gap: 24px; 
-    }
-    .permission-group { background: #f8fafc; border-radius: 8px; padding: 20px; border: 1px solid #e2e8f0; }
-    .permission-group h4 { margin: 0 0 16px 0; color: #1e293b; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
-    
-    .permission-item {
-        display: flex; align-items: center; justify-content: space-between; padding: 12px 0;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .permission-item:last-child { border-bottom: none; }
-    
-    .permission-label { display: flex; flex-direction: column; gap: 4px; }
-    .permission-name { font-weight: 500; color: #1e293b; }
-    .permission-description { font-size: 0.875rem; color: #64748b; }
-
-    .toggle-switch {
-        position: relative; width: 50px; height: 24px; background: #cbd5e1;
-        border-radius: 12px; cursor: pointer; transition: all 0.3s ease;
-    }
-    .toggle-switch.active { background: #10b981; }
-    .toggle-switch::after {
-        content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
-        background: white; border-radius: 50%; transition: all 0.3s ease;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    }
-    .toggle-switch.active::after { transform: translateX(26px); }
-
-    /* Restricciones */
-    .restrictions-grid {
-        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px;
-    }
-    
-    .restriction-group {
-        background: #f8fafc; border-radius: 8px; padding: 20px; border: 1px solid #e2e8f0;
-    }
-    
-    .restriction-group h4 {
-        margin: 0 0 16px 0; color: #1e293b; font-size: 1rem; display: flex; align-items: center; gap: 8px;
-    }
-    
-    .restriction-item {
-        display: flex; align-items: center; justify-content: space-between; padding: 8px 0;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .restriction-item:last-child { border-bottom: none; }
-    
-    .restriction-label { font-size: 0.875rem; color: #1e293b; }
-    
-    .restriction-checkbox {
-        width: 18px; height: 18px; accent-color: #8B4513;
-    }
-
-    /* Botones */
-    .btn {
-        display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px;
-        border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
-        transition: all 0.2s ease; text-decoration: none; font-size: 0.875rem;
-    }
-    .btn-primary { background: #8B4513; color: white; }
-    .btn-primary:hover { background: #654321; transform: translateY(-1px); }
-    .btn-success { background: #10b981; color: white; }
-    .btn-success:hover { background: #059669; }
-    .btn-remove { background: #ef4444; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; font-size: 0.875rem; }
-    .btn-remove:hover { background: #dc2626; }
-
-    .actions-bar {
-        display: flex; justify-content: center; gap: 16px; padding: 24px;
-        background: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e2e8f0;
-    }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-        .container { padding: 0 16px; }
-        .permissions-grid { grid-template-columns: 1fr; }
-        .restrictions-grid { grid-template-columns: 1fr; }
-        .selection-container { grid-template-columns: 1fr; }
-        .group-stats { grid-template-columns: repeat(2, 1fr); }
-        .content-header { padding: 0 16px; }
-    }
+        /* Estilos para las nuevas tabs de permisos y restricciones */
+        .permission-card {
+            background: linear-gradient(135deg, #f8f9fa, #ffffff);
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            margin-bottom: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .permission-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .permission-card.active {
+            background: linear-gradient(135deg, #d4edda, #f8fff9);
+            border-color: #28a745;
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.2);
+        }
+        
+        .permission-card .icon {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+            color: #6c757d;
+            transition: color 0.3s ease;
+        }
+        
+        .permission-card.active .icon {
+            color: #28a745;
+        }
+        
+        .permission-toggle {
+            transform: scale(1.4);
+        }
+        
+        .restriction-section {
+            background: linear-gradient(135deg, #ffffff, #f8f9fa);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border-left: 4px solid #007bff;
+        }
+        
+        .restriction-section h5 {
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .restriction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        .restriction-item {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1rem;
+            transition: all 0.2s ease;
+        }
+        
+        .restriction-item:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.1);
+        }
+        
+        .restriction-item.selected {
+            background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+            border-color: #007bff;
+        }
+        
+        .company-header {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0 1rem 0;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+        }
+        
+        .department-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.8rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .department-item {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 0.8rem;
+            transition: all 0.2s ease;
+        }
+        
+        .department-item:hover {
+            border-color: #007bff;
+            background: #f8f9fa;
+        }
+        
+        .document-type-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        .document-type-item {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1.2rem;
+            transition: all 0.2s ease;
+        }
+        
+        .document-type-item:hover {
+            border-color: #28a745;
+            box-shadow: 0 2px 8px rgba(40,167,69,0.1);
+        }
+        
+        .document-type-item.selected {
+            background: linear-gradient(135deg, #d4edda, #f8fff9);
+            border-color: #28a745;
+        }
+        
+        .security-alert {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            border: none;
+            border-left: 5px solid #ffc107;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(255,193,7,0.2);
+        }
+        
+        .header-content {
+            background: linear-gradient(135deg, #ffffff, #f8f9fa);
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid #e9ecef;
+            margin-bottom: 2rem;
+            border-radius: 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .header-content h3 {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        
+        .btn-outline-secondary {
+            border-color: #6c757d;
+            color: #6c757d;
+            border-radius: 6px;
+        }
+        
+        .btn-outline-secondary:hover {
+            background-color: #6c757d;
+            border-color: #6c757d;
+        }
+        
+        .btn-outline-danger {
+            border-color: #dc3545;
+            color: #dc3545;
+            border-radius: 6px;
+        }
+        
+        .btn-outline-danger:hover {
+            background-color: #dc3545;
+            border-color: #dc3545;
+        }
+        
+        .dropdown-menu {
+            border: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 8px;
+        }
+        
+        .stats-counter {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 0.5rem;
+        }
+        
+        .form-check-input:checked {
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        
+        .form-check-input:focus {
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
+        }
+        
+        .section-divider {
+            height: 2px;
+            background: linear-gradient(90deg, #007bff, transparent);
+            margin: 2rem 0;
+            border-radius: 1px;
+        }
     </style>
 </head>
 
-<body class="dashboard-layout">
+<body>
     <?php include '../../includes/sidebar.php'; ?>
     
-    <main class="main-content">
-        <!-- Header igual a grupos -->
-        <header class="content-header">
-            <div class="header-left">
-                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
-                    <i data-feather="menu"></i>
-                </button>
-                <h1>Permisos de Grupo</h1>
-            </div>
-
-            <div class="header-right">
-                <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']); ?></div>
-                    <div class="current-time" id="currentTime"></div>
+    <div class="main-content">
+        <!-- Header completo del módulo -->
+        <div class="header-content">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3 class="mb-1"><i class="fas fa-shield-alt me-2"></i>Permisos del Grupo</h3>
+                    <p class="text-muted mb-0"><?= htmlspecialchars($group['name']) ?> - <?= htmlspecialchars($group['description']) ?></p>
                 </div>
-                <div class="header-actions">
-                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
-                        <i data-feather="settings"></i>
+                <div class="d-flex align-items-center">
+                    <div class="me-3 text-end">
+                        <div class="fw-semibold text-dark"><?= htmlspecialchars($currentUser['first_name'] . ' ' . $currentUser['last_name']) ?></div>
+                        <small class="text-muted"><?= ucfirst($currentUser['role']) ?> • <?= date('d/m/Y H:i') ?></small>
+                    </div>
+                    <button type="button" class="btn btn-outline-secondary me-2" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-cog"></i>
                     </button>
-                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                        <i data-feather="log-out"></i>
-                    </a>
-                </div>
-            </div>
-        </header>
-
-        <!-- Contenido del módulo -->
-        <div class="container">
-            <!-- Botón volver -->
-            <a href="index.php" class="btn-back">
-                <i data-feather="arrow-left"></i>
-                Volver a Grupos
-            </a>
-            
-            <!-- Información del grupo -->
-            <div class="group-info-section">
-                <h2 class="group-info-title"><?php echo htmlspecialchars($group['name']); ?></h2>
-                <p class="group-info-description"><?php echo htmlspecialchars($group['description'] ?: 'Sin descripción'); ?></p>
-                
-                <div class="group-stats">
-                    <div class="stat-item">
-                        <div class="stat-value"><?php echo count($members); ?></div>
-                        <div class="stat-label">Miembros</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value"><?php echo $group['status'] === 'active' ? 'Activo' : 'Inactivo'; ?></div>
-                        <div class="stat-label">Estado</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value"><?php echo $group['is_system_group'] ? 'Sistema' : 'Personalizado'; ?></div>
-                        <div class="stat-label">Tipo</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value"><?php echo date('d/m/Y', strtotime($group['created_at'])); ?></div>
-                        <div class="stat-label">Creado</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Navegación de tabs -->
-            <div class="tabs-nav">
-                <a href="?group=<?php echo $groupId; ?>&tab=members" class="tab-btn <?php echo $activeTab === 'members' ? 'active' : ''; ?>">
-                    <i data-feather="users"></i>
-                    Miembros (<?php echo count($members); ?>)
-                </a>
-                <a href="?group=<?php echo $groupId; ?>&tab=permissions" class="tab-btn <?php echo $activeTab === 'permissions' ? 'active' : ''; ?>">
-                    <i data-feather="shield"></i>
-                    Permisos y Restricciones
-                </a>
-            </div>
-            
-            <!-- Tab Miembros -->
-            <div class="tab-content <?php echo $activeTab === 'members' ? 'active' : ''; ?>" id="members-tab">
-                <div class="selection-container">
-                    <!-- Usuarios disponibles -->
-                    <div class="selection-box">
-                        <div class="selection-header">
-                            <span class="selection-title">Todos los Usuarios</span>
-                            <span class="selection-count" id="totalUsersCount"><?php echo count($allUsers); ?></span>
-                        </div>
-                        
-                        <input type="text" class="selection-search" id="searchAllUsers" placeholder="Buscar usuarios...">
-                        
-                        <div class="selection-list" id="allUsersList">
-                            <?php if (empty($allUsers)): ?>
-                                <div class="selection-item" style="text-align: center; color: #64748b; font-style: italic;">
-                                    No hay usuarios disponibles
-                                </div>
-                            <?php else: ?>
-                                <?php 
-                                $currentMemberIds = array_column($members, 'id');
-                                foreach ($allUsers as $user): 
-                                    $isMember = in_array($user['id'], $currentMemberIds);
-                                ?>
-                                    <div class="selection-item <?php echo $isMember ? 'selected' : ''; ?>" data-user-id="<?php echo $user['id']; ?>">
-                                        <input type="checkbox" class="item-checkbox" <?php echo $isMember ? 'checked' : ''; ?> 
-                                               onchange="toggleUserMembership(<?php echo $user['id']; ?>, this.checked)">
-                                        <div class="user-avatar">
-                                            <?php echo strtoupper(substr($user['first_name'], 0, 1) . substr($user['last_name'], 0, 1)); ?>
-                                        </div>
-                                        <div class="item-info">
-                                            <div class="item-name"><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></div>
-                                            <div class="item-meta">
-                                                <?php echo htmlspecialchars($user['username']); ?> • 
-                                                <?php echo htmlspecialchars($user['company_name'] ?: 'Sin empresa'); ?>
-                                                <?php if ($user['department_name']): ?>
-                                                    • <?php echo htmlspecialchars($user['department_name']); ?>
-                                                <?php endif; ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                    
-                    <!-- Miembros seleccionados -->
-                    <div class="selection-box">
-                        <div class="selection-header">
-                            <span class="selection-title">Miembros del Grupo</span>
-                            <span class="selection-count" id="membersCount"><?php echo count($members); ?></span>
-                        </div>
-                        
-                        <input type="text" class="selection-search" id="searchMembers" placeholder="Buscar miembros...">
-                        
-                        <div class="selection-list" id="membersList">
-                            <?php if (empty($members)): ?>
-                                <div class="selection-item" style="text-align: center; color: #64748b; font-style: italic;">
-                                    No hay miembros en este grupo
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($members as $member): ?>
-                                    <div class="selection-item selected" data-user-id="<?php echo $member['id']; ?>">
-                                        <div class="user-avatar">
-                                            <?php echo strtoupper(substr($member['first_name'], 0, 1) . substr($member['last_name'], 0, 1)); ?>
-                                        </div>
-                                        <div class="item-info">
-                                            <div class="item-name"><?php echo htmlspecialchars($member['first_name'] . ' ' . $member['last_name']); ?></div>
-                                            <div class="item-meta">
-                                                <?php echo htmlspecialchars($member['username']); ?> • 
-                                                <?php echo htmlspecialchars($member['company_name'] ?: 'Sin empresa'); ?>
-                                                <?php if ($member['department_name']): ?>
-                                                    • <?php echo htmlspecialchars($member['department_name']); ?>
-                                                <?php endif; ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Botón para guardar miembros -->
-                <div class="actions-bar">
-                    <button class="btn btn-success" onclick="saveMembers()">
-                        <i data-feather="save"></i>
-                        Guardar Miembros
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Tab Permisos -->
-            <div class="tab-content <?php echo $activeTab === 'permissions' ? 'active' : ''; ?>" id="permissions-tab">
-                <!-- Permisos de Acciones -->
-                <div class="permissions-section">
-                    <h3 class="section-title">
-                        <i data-feather="key"></i>
-                        Permisos de Acciones
-                    </h3>
-                    
-                    <div class="permissions-grid">
-                        <!-- Permisos básicos -->
-                        <div class="permission-group">
-                            <h4><i data-feather="file-text"></i> Documentos y Visualización</h4>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Ver documentos</div>
-                                    <div class="permission-description">Permite visualizar documentos</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['view']) && $permissions['view'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('view')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Ver reportes</div>
-                                    <div class="permission-description">Acceso a módulo de reportes</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['view_reports']) && $permissions['view_reports'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('view_reports')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Descargar</div>
-                                    <div class="permission-description">Descargar documentos</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['download']) && $permissions['download'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('download')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Exportar</div>
-                                    <div class="permission-description">Exportar reportes y datos</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['export']) && $permissions['export'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('export')"></div>
-                            </div>
-                        </div>
-                        
-                        <!-- Permisos de gestión -->
-                        <div class="permission-group">
-                            <h4><i data-feather="edit"></i> Gestión y Administración</h4>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Crear documentos</div>
-                                    <div class="permission-description">Subir nuevos documentos</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['create']) && $permissions['create'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('create')"></div>
-                            </div>
-                            
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Eliminar documentos</div>
-                                    <div class="permission-description">Eliminar documentos (papelera)</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['delete']) && $permissions['delete'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('delete')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Eliminación permanente</div>
-                                    <div class="permission-description">Eliminar permanentemente</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['delete_permanent']) && $permissions['delete_permanent'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('delete_permanent')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Gestionar usuarios</div>
-                                    <div class="permission-description">Crear y modificar usuarios</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['manage_users']) && $permissions['manage_users'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('manage_users')"></div>
-                            </div>
-                            
-                            <div class="permission-item">
-                                <div class="permission-label">
-                                    <div class="permission-name">Configuración del sistema</div>
-                                    <div class="permission-description">Acceso a configuración</div>
-                                </div>
-                                <div class="toggle-switch <?php echo isset($permissions['system_config']) && $permissions['system_config'] ? 'active' : ''; ?>" 
-                                     onclick="togglePermission('system_config')"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Restricciones por acceso -->
-                <div class="permissions-section">
-                    <h3 class="section-title">
-                        <i data-feather="filter"></i>
-                        Restricciones de Acceso
-                    </h3>
-                    
-                    <div class="restrictions-grid">
-                        <!-- Restricciones por empresa -->
-                        <div class="restriction-group">
-                            <h4><i data-feather="briefcase"></i> Empresas permitidas</h4>
-                            
-                            <?php if (empty($companies)): ?>
-                                <p style="color: #64748b; font-style: italic;">No hay empresas disponibles</p>
-                            <?php else: ?>
-                                <div style="max-height: 200px; overflow-y: auto;">
-                                    <?php foreach ($companies as $company): ?>
-                                        <div class="restriction-item">
-                                            <div class="restriction-label"><?php echo htmlspecialchars($company['name']); ?></div>
-                                            <input type="checkbox" class="restriction-checkbox"
-                                                   id="company_<?php echo $company['id']; ?>" 
-                                                   value="<?php echo $company['id']; ?>"
-                                                   <?php echo in_array($company['id'], $restrictions['companies'] ?? []) ? 'checked' : ''; ?>
-                                                   onchange="updateRestrictions()">
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                <p style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">
-                                    Si no seleccionas ninguna, tendrá acceso a todas las empresas
-                                </p>
-                            <?php endif; ?>
-                        </div>
-                        
-                        <!-- Restricciones por departamento -->
-                        <div class="restriction-group">
-                            <h4><i data-feather="layers"></i> Departamentos permitidos</h4>
-                            
-                            <?php if (empty($departments)): ?>
-                                <p style="color: #64748b; font-style: italic;">No hay departamentos disponibles</p>
-                            <?php else: ?>
-                                <div style="max-height: 200px; overflow-y: auto;">
-                                    <?php 
-                                    $currentCompany = '';
-                                    foreach ($departments as $department): 
-                                        if ($department['company_name'] !== $currentCompany):
-                                            if ($currentCompany !== '') echo '</div>';
-                                            $currentCompany = $department['company_name'];
-                                            echo '<div style="margin-bottom: 12px;">';
-                                            echo '<div style="font-weight: 600; color: #8B4513; font-size: 0.875rem; margin-bottom: 8px;">' . htmlspecialchars($currentCompany) . '</div>';
-                                        endif;
-                                    ?>
-                                        <div class="restriction-item" style="padding: 6px 0;">
-                                            <div class="restriction-label" style="font-size: 0.875rem;"><?php echo htmlspecialchars($department['name']); ?></div>
-                                            <input type="checkbox" class="restriction-checkbox"
-                                                   id="department_<?php echo $department['id']; ?>" 
-                                                   value="<?php echo $department['id']; ?>"
-                                                   <?php echo in_array($department['id'], $restrictions['departments'] ?? []) ? 'checked' : ''; ?>
-                                                   onchange="updateRestrictions()">
-                                        </div>
-                                    <?php 
-                                    endforeach; 
-                                    if ($currentCompany !== '') echo '</div>';
-                                    ?>
-                                </div>
-                                <p style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">
-                                    Si no seleccionas ninguno, tendrá acceso a todos los departamentos
-                                </p>
-                            <?php endif; ?>
-                        </div>
-                        
-                        <!-- Restricciones por tipo de documento -->
-                        <div class="restriction-group">
-                            <h4><i data-feather="file-text"></i> Tipos de documentos</h4>
-                            
-                            <?php if (empty($documentTypes)): ?>
-                                <p style="color: #64748b; font-style: italic;">No hay tipos de documentos disponibles</p>
-                            <?php else: ?>
-                                <div style="max-height: 200px; overflow-y: auto;">
-                                    <?php foreach ($documentTypes as $docType): ?>
-                                        <div class="restriction-item">
-                                            <div class="restriction-label"><?php echo htmlspecialchars($docType['name']); ?></div>
-                                            <input type="checkbox" class="restriction-checkbox"
-                                                   id="doctype_<?php echo $docType['id']; ?>" 
-                                                   value="<?php echo $docType['id']; ?>"
-                                                   <?php echo in_array($docType['id'], $restrictions['document_types'] ?? []) ? 'checked' : ''; ?>
-                                                   onchange="updateRestrictions()">
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                <p style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">
-                                    Si no seleccionas ninguno, tendrá acceso a todos los tipos
-                                </p>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Acciones principales -->
-                <div class="actions-bar">
-                    <button class="btn btn-success" onclick="savePermissions()">
-                        <i data-feather="save"></i>
-                        Guardar Permisos
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="../../config/profile.php">
+                            <i class="fas fa-user me-2"></i>Mi Perfil
+                        </a></li>
+                        <li><a class="dropdown-item" href="../../config/settings.php">
+                            <i class="fas fa-cog me-2"></i>Configuración
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="../../logout.php">
+                            <i class="fas fa-sign-out-alt me-2"></i>Cerrar Sesión
+                        </a></li>
+                    </ul>
+                    <button type="button" class="btn btn-outline-danger" onclick="window.location.href='../../logout.php'">
+                        <i class="fas fa-sign-out-alt"></i>
                     </button>
                 </div>
             </div>
         </div>
-    </main>
+        
+        <div class="content-wrapper">
+            
+            <!-- Estadísticas del grupo -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-number"><?= count($members) ?></div>
+                        <div class="stat-label">MIEMBROS</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-number"><?= $group['status'] === 'active' ? 'Activo' : 'Inactivo' ?></div>
+                        <div class="stat-label">ESTADO</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-number"><?= $group['is_system_group'] ? 'Sistema' : 'Personalizado' ?></div>
+                        <div class="stat-label">TIPO</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-number"><?= date('d/m/Y', strtotime($group['created_at'])) ?></div>
+                        <div class="stat-label">CREADO</div>
+                    </div>
+                </div>
+            </div>
 
+            <!-- Tabs de navegación -->
+            <ul class="nav nav-tabs mb-4" id="groupTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link <?= $activeTab === 'members' ? 'active' : '' ?>" 
+                            onclick="window.location.href='?group=<?= $groupId ?>&tab=members'">
+                        <i class="fas fa-users me-1"></i>Miembros (<?= count($members) ?>)
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link <?= $activeTab === 'permissions' ? 'active' : '' ?>" 
+                            onclick="window.location.href='?group=<?= $groupId ?>&tab=permissions'">
+                        <i class="fas fa-key me-1"></i>Permisos de Acción
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link <?= $activeTab === 'restrictions' ? 'active' : '' ?>" 
+                            onclick="window.location.href='?group=<?= $groupId ?>&tab=restrictions'">
+                        <i class="fas fa-ban me-1"></i>Restricciones de Acceso
+                    </button>
+                </li>
+            </ul>
+
+            <!-- Contenido de las tabs -->
+            <div class="tab-content" id="groupTabsContent">
+                
+                <!-- Tab de Miembros (MANTENER ESTRUCTURA ORIGINAL) -->
+                <?php if ($activeTab === 'members'): ?>
+                <div class="tab-pane fade show active">
+                    <div class="row">
+                        <!-- Todos los Usuarios -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-users me-2"></i>Todos los Usuarios
+                                        <span class="badge bg-secondary ms-2"><?= count($availableUsers) ?></span>
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <input type="text" class="form-control" id="searchUsers" placeholder="Buscar usuarios...">
+                                    </div>
+                                    <div id="usersList" style="max-height: 400px; overflow-y: auto;">
+                                        <?php foreach ($availableUsers as $user): ?>
+                                        <div class="form-check mb-2 user-item">
+                                            <input class="form-check-input" type="checkbox" value="<?= $user['id'] ?>" 
+                                                   id="user_<?= $user['id'] ?>">
+                                            <label class="form-check-label w-100" for="user_<?= $user['id'] ?>">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div>
+                                                        <strong><?= htmlspecialchars($user['first_name'] . ' ' . $user['last_name']) ?></strong>
+                                                        <br><small class="text-muted">@<?= htmlspecialchars($user['username']) ?></small>
+                                                        <br><small class="text-muted"><?= htmlspecialchars($user['email']) ?></small>
+                                                        <?php if ($user['company_name']): ?>
+                                                            <br><small class="text-info"><?= htmlspecialchars($user['company_name']) ?></small>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Miembros del Grupo -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-user-check me-2"></i>Miembros del Grupo
+                                        <span class="badge bg-primary ms-2"><?= count($members) ?></span>
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <input type="text" class="form-control" id="searchMembers" placeholder="Buscar miembros...">
+                                    </div>
+                                    <div id="membersList" style="max-height: 400px; overflow-y: auto;">
+                                        <?php if (empty($members)): ?>
+                                            <div class="text-center text-muted py-4">
+                                                <i class="fas fa-user-slash fa-2x mb-2"></i>
+                                                <p>No hay miembros en este grupo</p>
+                                            </div>
+                                        <?php else: ?>
+                                            <?php foreach ($members as $member): ?>
+                                            <div class="d-flex justify-content-between align-items-start p-2 border-bottom member-item">
+                                                <div>
+                                                    <strong><?= htmlspecialchars($member['first_name'] . ' ' . $member['last_name']) ?></strong>
+                                                    <br><small class="text-muted">@<?= htmlspecialchars($member['username']) ?></small>
+                                                    <br><small class="text-muted"><?= htmlspecialchars($member['email']) ?></small>
+                                                    <?php if ($member['company_name']): ?>
+                                                        <br><small class="text-info"><?= htmlspecialchars($member['company_name']) ?></small>
+                                                    <?php endif; ?>
+                                                    <br><small class="text-secondary">Agregado: <?= date('d/m/Y', strtotime($member['added_at'])) ?></small>
+                                                </div>
+                                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                        onclick="removeMember(<?= $member['id'] ?>)">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botones de acción para miembros -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="d-flex justify-content-center gap-2">
+                                <button type="button" class="btn btn-success" onclick="addSelectedUsers()">
+                                    <i class="fas fa-plus me-1"></i>Agregar Seleccionados
+                                </button>
+                                <button type="button" class="btn btn-primary" onclick="saveMembers()">
+                                    <i class="fas fa-save me-1"></i>Guardar Miembros
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <!-- Tab de Permisos de Acción -->
+                <?php if ($activeTab === 'permissions'): ?>
+                <div class="tab-pane fade show active">
+                    <div class="security-alert">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-shield-alt fa-2x me-3 text-warning"></i>
+                            <div>
+                                <h6 class="mb-1">Configuración de Seguridad</h6>
+                                <p class="mb-0">Configure las 5 acciones principales que pueden realizar los miembros de este grupo. <strong>Por defecto, todos los permisos están desactivados</strong> por seguridad.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="permissionsForm">
+                        <input type="hidden" name="group_id" value="<?= $groupId ?>">
+                        
+                        <div class="row">
+                            <!-- 1. Subir Archivos -->
+                            <div class="col-md-6 col-lg-4 mb-4">
+                                <div class="permission-card <?= $permissions['upload_files'] ? 'active' : '' ?>" 
+                                     onclick="togglePermission('upload_files')">
+                                    <div class="icon">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                    </div>
+                                    <h5>1. Subir Archivos</h5>
+                                    <p class="text-muted small mb-3">Permite subir nuevos documentos al sistema</p>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input permission-toggle" type="checkbox" 
+                                               name="permissions[upload_files]" id="upload_files"
+                                               <?= $permissions['upload_files'] ? 'checked' : '' ?>>
+                                        <label class="form-check-label ms-2 fw-bold" for="upload_files">
+                                            <span class="status-text"><?= $permissions['upload_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 2. Ver Archivos -->
+                            <div class="col-md-6 col-lg-4 mb-4">
+                                <div class="permission-card <?= $permissions['view_files'] ? 'active' : '' ?>" 
+                                     onclick="togglePermission('view_files')">
+                                    <div class="icon">
+                                        <i class="fas fa-eye"></i>
+                                    </div>
+                                    <h5>2. Ver Archivos</h5>
+                                    <p class="text-muted small mb-3">Permite visualizar documentos existentes</p>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input permission-toggle" type="checkbox" 
+                                               name="permissions[view_files]" id="view_files"
+                                               <?= $permissions['view_files'] ? 'checked' : '' ?>>
+                                        <label class="form-check-label ms-2 fw-bold" for="view_files">
+                                            <span class="status-text"><?= $permissions['view_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 3. Crear Carpetas -->
+                            <div class="col-md-6 col-lg-4 mb-4">
+                                <div class="permission-card <?= $permissions['create_folders'] ? 'active' : '' ?>" 
+                                     onclick="togglePermission('create_folders')">
+                                    <div class="icon">
+                                        <i class="fas fa-folder-plus"></i>
+                                    </div>
+                                    <h5>3. Crear Carpetas</h5>
+                                    <p class="text-muted small mb-3">Permite crear carpetas para organizar documentos</p>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input permission-toggle" type="checkbox" 
+                                               name="permissions[create_folders]" id="create_folders"
+                                               <?= $permissions['create_folders'] ? 'checked' : '' ?>>
+                                        <label class="form-check-label ms-2 fw-bold" for="create_folders">
+                                            <span class="status-text"><?= $permissions['create_folders'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 4. Descargar -->
+                            <div class="col-md-6 col-lg-4 mb-4">
+                                <div class="permission-card <?= $permissions['download_files'] ? 'active' : '' ?>" 
+                                     onclick="togglePermission('download_files')">
+                                    <div class="icon">
+                                        <i class="fas fa-download"></i>
+                                    </div>
+                                    <h5>4. Descargar</h5>
+                                    <p class="text-muted small mb-3">Permite descargar documentos al equipo local</p>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input permission-toggle" type="checkbox" 
+                                               name="permissions[download_files]" id="download_files"
+                                               <?= $permissions['download_files'] ? 'checked' : '' ?>>
+                                        <label class="form-check-label ms-2 fw-bold" for="download_files">
+                                            <span class="status-text"><?= $permissions['download_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 5. Eliminar Archivos -->
+                            <div class="col-md-6 col-lg-4 mb-4">
+                                <div class="permission-card <?= $permissions['delete_files'] ? 'active' : '' ?>" 
+                                     onclick="togglePermission('delete_files')">
+                                    <div class="icon">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </div>
+                                    <h5>5. Eliminar Archivos</h5>
+                                    <p class="text-muted small mb-3">Permite eliminar documentos (solo propios en reportes)</p>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input permission-toggle" type="checkbox" 
+                                               name="permissions[delete_files]" id="delete_files"
+                                               <?= $permissions['delete_files'] ? 'checked' : '' ?>>
+                                        <label class="form-check-label ms-2 fw-bold" for="delete_files">
+                                            <span class="status-text"><?= $permissions['delete_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <div class="d-flex justify-content-end gap-2">
+                                    <button type="button" class="btn btn-secondary" onclick="window.history.back()">
+                                        <i class="fas fa-arrow-left me-1"></i>Cancelar
+                                    </button>
+                                    <button type="submit" class="btn btn-success">
+                                        <i class="fas fa-save me-1"></i>Guardar Permisos
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <?php endif; ?>
+
+                <!-- Tab de Restricciones de Acceso -->
+                <?php if ($activeTab === 'restrictions'): ?>
+                <div class="tab-pane fade show active">
+                    <div class="security-alert">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-shield-alt fa-3x me-4 text-warning"></i>
+                            <div>
+                                <h5 class="mb-2 fw-bold">Control de Acceso Estricto</h5>
+                                <p class="mb-0">Los usuarios de este grupo <strong>solo podrán acceder</strong> a las empresas, departamentos y tipos de documentos seleccionados aquí. <span class="text-danger fw-bold">Sin selecciones = Sin acceso.</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="restrictionsForm">
+                        <input type="hidden" name="group_id" value="<?= $groupId ?>">
+
+                        <!-- Empresas Permitidas -->
+                        <div class="restriction-section">
+                            <h5><i class="fas fa-building me-2"></i>Empresas Permitidas</h5>
+                            <p class="text-muted mb-3">Seleccione las empresas a las que este grupo tendrá acceso:</p>
+                            
+                            <?php if (empty($companies)): ?>
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>No hay empresas activas disponibles.
+                                </div>
+                            <?php else: ?>
+                                <div class="restriction-grid">
+                                    <?php foreach ($companies as $company): ?>
+                                    <div class="restriction-item <?= isRestricted('companies', $company['id'], $restrictions) ? 'selected' : '' ?>">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" 
+                                                   name="restrictions[companies][]" 
+                                                   value="<?= $company['id'] ?>"
+                                                   id="company_<?= $company['id'] ?>"
+                                                   <?= isRestricted('companies', $company['id'], $restrictions) ? 'checked' : '' ?>
+                                                   onchange="toggleRestrictionItem(this)">
+                                            <label class="form-check-label fw-bold" for="company_<?= $company['id'] ?>">
+                                                <i class="fas fa-building me-2 text-primary"></i>
+                                                <?= htmlspecialchars($company['name']) ?>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                
+                                <div class="stats-counter">
+                                    <i class="fas fa-check-circle me-1"></i>
+                                    Seleccionadas: <?= isset($restrictions['companies']) ? count($restrictions['companies']) : 0 ?> de <?= count($companies) ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="section-divider"></div>
+
+                        <!-- Departamentos Permitidos -->
+                        <div class="restriction-section">
+                            <h5><i class="fas fa-sitemap me-2"></i>Departamentos Permitidos</h5>
+                            <p class="text-muted mb-3">Seleccione los departamentos a los que este grupo tendrá acceso:</p>
+                            
+                            <?php if (empty($departments)): ?>
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>No hay departamentos activos disponibles.
+                                </div>
+                            <?php else: ?>
+                                <?php 
+                                $currentCompany = '';
+                                foreach ($departments as $department): 
+                                    if ($currentCompany !== $department['company_name']):
+                                        if ($currentCompany !== '') {
+                                            echo '</div>'; // Cerrar grid anterior
+                                        }
+                                        $currentCompany = $department['company_name'];
+                                        echo '<div class="company-header">';
+                                        echo '<i class="fas fa-building me-2"></i>' . htmlspecialchars($currentCompany);
+                                        echo '</div>';
+                                        echo '<div class="department-grid">';
+                                    endif;
+                                ?>
+                                <div class="department-item <?= isRestricted('departments', $department['id'], $restrictions) ? 'selected' : '' ?>">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" 
+                                               name="restrictions[departments][]" 
+                                               value="<?= $department['id'] ?>"
+                                               id="department_<?= $department['id'] ?>"
+                                               <?= isRestricted('departments', $department['id'], $restrictions) ? 'checked' : '' ?>
+                                               onchange="toggleDepartmentItem(this)">
+                                        <label class="form-check-label" for="department_<?= $department['id'] ?>">
+                                            <i class="fas fa-users me-2 text-secondary"></i>
+                                            <?= htmlspecialchars($department['name']) ?>
+                                        </label>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                                <?php if ($currentCompany !== '') {
+                                    echo '</div>'; // Cerrar último grid
+                                } ?>
+                                
+                                <div class="stats-counter mt-3">
+                                    <i class="fas fa-check-circle me-1"></i>
+                                    Seleccionados: <?= isset($restrictions['departments']) ? count($restrictions['departments']) : 0 ?> de <?= count($departments) ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="section-divider"></div>
+
+                        <!-- Tipos de Documentos Permitidos -->
+                        <div class="restriction-section">
+                            <h5><i class="fas fa-file-alt me-2"></i>Tipos de Documentos Permitidos</h5>
+                            <p class="text-muted mb-3">Seleccione los tipos de documentos a los que este grupo tendrá acceso:</p>
+                            
+                            <?php if (empty($documentTypes)): ?>
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>No hay tipos de documentos activos disponibles.
+                                </div>
+                            <?php else: ?>
+                                <div class="document-type-grid">
+                                    <?php foreach ($documentTypes as $docType): ?>
+                                    <div class="document-type-item <?= isRestricted('document_types', $docType['id'], $restrictions) ? 'selected' : '' ?>">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" 
+                                                   name="restrictions[document_types][]" 
+                                                   value="<?= $docType['id'] ?>"
+                                                   id="doctype_<?= $docType['id'] ?>"
+                                                   <?= isRestricted('document_types', $docType['id'], $restrictions) ? 'checked' : '' ?>
+                                                   onchange="toggleDocumentTypeItem(this)">
+                                            <label class="form-check-label" for="doctype_<?= $docType['id'] ?>">
+                                                <div class="d-flex align-items-start">
+                                                    <i class="fas fa-file-alt me-2 text-success mt-1"></i>
+                                                    <div>
+                                                        <div class="fw-bold"><?= htmlspecialchars($docType['name']) ?></div>
+                                                        <?php if ($docType['description']): ?>
+                                                            <small class="text-muted"><?= htmlspecialchars($docType['description']) ?></small>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                
+                                <div class="stats-counter">
+                                    <i class="fas fa-check-circle me-1"></i>
+                                    Seleccionados: <?= isset($restrictions['document_types']) ? count($restrictions['document_types']) : 0 ?> de <?= count($documentTypes) ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="row mt-5">
+                            <div class="col-12">
+                                <div class="alert alert-info">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-info-circle fa-2x me-3 text-info"></i>
+                                        <div>
+                                            <h6 class="fw-bold mb-1">Política de Seguridad</h6>
+                                            <p class="mb-0">Si no selecciona ningún elemento en una categoría, los usuarios del grupo <strong>no tendrán acceso</strong> a esa categoría completa. Esta es una medida de seguridad preventiva.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex justify-content-end gap-3 mt-4">
+                                    <button type="button" class="btn btn-outline-secondary btn-lg" onclick="window.history.back()">
+                                        <i class="fas fa-arrow-left me-2"></i>Cancelar
+                                    </button>
+                                    <button type="submit" class="btn btn-primary btn-lg">
+                                        <i class="fas fa-shield-alt me-2"></i>Guardar Restricciones
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-    // JavaScript básico y funcional
-    var currentPermissions = <?php echo json_encode($permissions); ?>;
-    var currentRestrictions = <?php echo json_encode($restrictions); ?>;
-    var groupId = <?php echo $groupId; ?>;
-    var selectedUsers = new Set();
+        // Variables globales
+        let selectedUserIds = new Set();
 
-    document.addEventListener('DOMContentLoaded', function() {
-        if (typeof feather !== 'undefined') {
-            feather.replace();
+        // Funciones para efectos visuales de restricciones
+        function toggleRestrictionItem(checkbox) {
+            const item = checkbox.closest('.restriction-item');
+            if (checkbox.checked) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
         }
-        updateTime();
-        setInterval(updateTime, 60000);
-        
-        var activeTab = '<?php echo $activeTab; ?>';
-        if (activeTab === 'members') {
-            initializeSelectedUsers();
-            initializeSearch();
-            updateCounts();
-        }
-    });
 
-    function updateTime() {
-        var now = new Date();
-        var timeString = now.toLocaleDateString('es-ES', {
-            day: '2-digit', month: '2-digit', year: 'numeric'
-        }) + ' ' + now.toLocaleTimeString('es-ES', {
-            hour: '2-digit', minute: '2-digit'
+        function toggleDepartmentItem(checkbox) {
+            const item = checkbox.closest('.department-item');
+            if (checkbox.checked) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
+        }
+
+        function toggleDocumentTypeItem(checkbox) {
+            const item = checkbox.closest('.document-type-item');
+            if (checkbox.checked) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
+        }
+        function togglePermission(permissionName) {
+            const checkbox = document.getElementById(permissionName);
+            checkbox.checked = !checkbox.checked;
+            updatePermissionCard(checkbox);
+        }
+
+        // Actualizar estado visual de las tarjetas
+        function updatePermissionCard(checkbox) {
+            const card = checkbox.closest('.permission-card');
+            const statusText = card.querySelector('.status-text');
+            
+            if (checkbox.checked) {
+                card.classList.add('active');
+                statusText.textContent = 'ACTIVADO';
+            } else {
+                card.classList.remove('active');
+                statusText.textContent = 'DESACTIVADO';
+            }
+        }
+
+        // Prevenir que el click en el checkbox active el toggle de la tarjeta
+        document.querySelectorAll('.permission-toggle').forEach(checkbox => {
+            checkbox.addEventListener('click', function(e) {
+                e.stopPropagation();
+                updatePermissionCard(this);
+            });
         });
-        var timeElement = document.getElementById('currentTime');
-        if (timeElement) {
-            timeElement.textContent = timeString;
-        }
-    }
 
-    function toggleSidebar() {
-        var sidebar = document.querySelector('.sidebar');
-        var mainContent = document.querySelector('.main-content');
-        var overlay = document.querySelector('.sidebar-overlay');
-        
-        if (sidebar) {
-            sidebar.classList.toggle('collapsed');
-            if (mainContent) {
-                mainContent.classList.toggle('sidebar-collapsed');
-            }
-            if (overlay) {
-                overlay.classList.toggle('active');
-            }
-        }
-    }
-
-    function showComingSoon(feature) {
-        alert('Función "' + feature + '" próximamente disponible');
-    }
-
-    function initializeSelectedUsers() {
-        var checkboxes = document.querySelectorAll('#allUsersList .item-checkbox:checked');
-        for (var i = 0; i < checkboxes.length; i++) {
-            var checkbox = checkboxes[i];
-            var userItem = checkbox.closest('[data-user-id]');
-            if (userItem && userItem.dataset.userId) {
-                var userId = parseInt(userItem.dataset.userId);
-                selectedUsers.add(userId);
-            }
-        }
-    }
-
-    function initializeSearch() {
-        var searchAllUsers = document.getElementById('searchAllUsers');
-        var searchMembers = document.getElementById('searchMembers');
-        
-        if (searchAllUsers) {
-            searchAllUsers.addEventListener('input', function() {
-                filterItems('allUsersList', this.value);
-            });
-        }
-        
-        if (searchMembers) {
-            searchMembers.addEventListener('input', function() {
-                filterItems('membersList', this.value);
-            });
-        }
-    }
-
-    function filterItems(containerId, searchTerm) {
-        var container = document.getElementById(containerId);
-        if (!container) return;
-        
-        var items = container.querySelectorAll('.selection-item');
-        var searchLower = searchTerm.toLowerCase();
-        
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            var nameElement = item.querySelector('.item-name');
-            var metaElement = item.querySelector('.item-meta');
-            
-            var name = nameElement ? nameElement.textContent.toLowerCase() : '';
-            var meta = metaElement ? metaElement.textContent.toLowerCase() : '';
-            
-            var matches = name.indexOf(searchLower) !== -1 || meta.indexOf(searchLower) !== -1;
-            item.style.display = matches ? 'flex' : 'none';
-        }
-    }
-
-    function toggleUserMembership(userId, isChecked) {
-        var userItem = document.querySelector('#allUsersList [data-user-id="' + userId + '"]');
-        
-        if (isChecked) {
-            selectedUsers.add(userId);
-            if (userItem) userItem.classList.add('selected');
-        } else {
-            selectedUsers.delete(userId);
-            if (userItem) userItem.classList.remove('selected');
-        }
-        
-        updateCounts();
-        updateMembersList();
-    }
-
-    function updateCounts() {
-        var membersCountElement = document.getElementById('membersCount');
-        if (membersCountElement) {
-            membersCountElement.textContent = selectedUsers.size;
-        }
-    }
-
-    function updateMembersList() {
-        var membersList = document.getElementById('membersList');
-        if (!membersList) return;
-        
-        var allUsers = <?php echo json_encode($allUsers); ?>;
-        membersList.innerHTML = '';
-        
-        if (selectedUsers.size === 0) {
-            membersList.innerHTML = '<div class="selection-item" style="text-align: center; color: #64748b; font-style: italic;">No hay miembros seleccionados</div>';
-            return;
-        }
-        
-        selectedUsers.forEach(function(userId) {
-            for (var i = 0; i < allUsers.length; i++) {
-                var user = allUsers[i];
-                if (user.id == userId) {
-                    var initials = user.first_name.charAt(0).toUpperCase() + user.last_name.charAt(0).toUpperCase();
-                    var companyText = user.company_name || 'Sin empresa';
-                    var departmentText = user.department_name ? ' • ' + user.department_name : '';
-                    
-                    var memberHTML = '<div class="selection-item selected" data-user-id="' + user.id + '">' +
-                        '<div class="user-avatar">' + initials + '</div>' +
-                        '<div class="item-info">' +
-                            '<div class="item-name">' + user.first_name + ' ' + user.last_name + '</div>' +
-                            '<div class="item-meta">' + user.username + ' • ' + companyText + departmentText + '</div>' +
-                        '</div>' +
-                    '</div>';
-                    
-                    membersList.innerHTML += memberHTML;
-                    break;
+        // Funciones para manejo de miembros
+        function addSelectedUsers() {
+            const checkboxes = document.querySelectorAll('#usersList input[type="checkbox"]:checked');
+            checkboxes.forEach(checkbox => {
+                selectedUserIds.add(parseInt(checkbox.value));
+                checkbox.checked = false;
+                // Mover visualmente el usuario a la lista de miembros
+                const userItem = checkbox.closest('.user-item');
+                if (userItem) {
+                    userItem.style.display = 'none';
                 }
+            });
+            
+            if (checkboxes.length > 0) {
+                showNotification(`${checkboxes.length} usuario(s) agregado(s) temporalmente. Haz clic en "Guardar Miembros" para confirmar.`, 'info');
             }
-        });
-    }
+        }
 
-    function saveMembers() {
-        var memberIds = Array.from(selectedUsers);
-        var btn = event.target;
-        var originalText = btn.innerHTML;
-        
-        btn.disabled = true;
-        btn.innerHTML = '<i data-feather="loader"></i> Guardando...';
-        
-        fetch('actions/manage_group_members.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                group_id: groupId,
-                member_ids: memberIds
+        function removeMember(userId) {
+            if (confirm('¿Está seguro de que desea remover este usuario del grupo?')) {
+                selectedUserIds.delete(userId);
+                
+                fetch('actions/manage_group_members.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        group_id: <?= $groupId ?>,
+                        action: 'remove',
+                        user_id: userId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Usuario removido del grupo', 'success');
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        showNotification(data.message || 'Error al remover usuario', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showNotification('Error de conexión', 'error');
+                });
+            }
+        }
+
+        function saveMembers() {
+            const currentMembers = Array.from(document.querySelectorAll('#membersList .member-item')).map(item => {
+                const button = item.querySelector('button[onclick*="removeMember"]');
+                if (button) {
+                    const match = button.getAttribute('onclick').match(/removeMember\((\d+)\)/);
+                    return match ? parseInt(match[1]) : null;
+                }
+                return null;
+            }).filter(id => id !== null);
+
+            const finalMembers = [...new Set([...currentMembers, ...selectedUserIds])];
+
+            fetch('actions/manage_group_members.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    group_id: <?= $groupId ?>,
+                    member_ids: finalMembers
+                })
             })
-        })
-        .then(function(response) {
-            return response.json();
-        })
-        .then(function(data) {
-            if (data.success) {
-                alert('Miembros actualizados correctamente');
-                setTimeout(function() {
-                    window.location.reload();
-                }, 1000);
-            } else {
-                // Mostrar información detallada del error
-                var errorMessage = 'Error: ' + (data.message || 'No se pudieron actualizar los miembros');
-                
-                if (data.debug) {
-                    console.log('DEBUG INFO:', data.debug);
-                    errorMessage += '\n\nInformación de debug (ver consola para más detalles):';
-                    
-                    if (data.debug.table_structure) {
-                        console.log('Estructura de tabla:', data.debug.table_structure);
-                        errorMessage += '\n- Estructura de tabla mostrada en consola';
-                    }
-                    
-                    if (data.debug.pdo_error) {
-                        console.log('Error PDO:', data.debug.pdo_error);
-                        errorMessage += '\n- Error de base de datos: ' + data.debug.pdo_error;
-                    }
-                    
-                    if (data.debug.sql_state) {
-                        console.log('SQL State:', data.debug.sql_state);
-                    }
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Miembros guardados correctamente', 'success');
+                    selectedUserIds.clear();
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    showNotification(data.message || 'Error al guardar miembros', 'error');
                 }
-                
-                alert(errorMessage);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error de conexión', 'error');
+            });
+        }
+
+        // Funciones de búsqueda
+        function setupSearch() {
+            const searchUsers = document.getElementById('searchUsers');
+            const searchMembers = document.getElementById('searchMembers');
+
+            if (searchUsers) {
+                searchUsers.addEventListener('input', function() {
+                    const filter = this.value.toLowerCase();
+                    const items = document.querySelectorAll('#usersList .user-item');
+                    
+                    items.forEach(item => {
+                        const text = item.textContent.toLowerCase();
+                        item.style.display = text.includes(filter) ? 'block' : 'none';
+                    });
+                });
             }
-        })
-        .catch(function(error) {
-            console.error('Error:', error);
-            alert('Error de conexión al actualizar miembros');
-        })
-        .finally(function() {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            if (typeof feather !== 'undefined') feather.replace();
+
+            if (searchMembers) {
+                searchMembers.addEventListener('input', function() {
+                    const filter = this.value.toLowerCase();
+                    const items = document.querySelectorAll('#membersList .member-item');
+                    
+                    items.forEach(item => {
+                        const text = item.textContent.toLowerCase();
+                        item.style.display = text.includes(filter) ? 'flex' : 'none';
+                    });
+                });
+            }
+        }
+
+        // Manejo del formulario de permisos
+        document.getElementById('permissionsForm')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const groupId = document.querySelector('input[name="group_id"]').value;
+            
+            // Recopilar permisos
+            const permissions = {};
+            const checkboxes = document.querySelectorAll('input[name^="permissions["]');
+            
+            checkboxes.forEach(checkbox => {
+                const permissionName = checkbox.name.match(/permissions\[(.+)\]/)[1];
+                permissions[permissionName] = checkbox.checked;
+            });
+
+            // Enviar datos como JSON
+            const requestData = {
+                group_id: parseInt(groupId),
+                permissions: permissions,
+                restrictions: {}
+            };
+
+            fetch('actions/update_group_permissions.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Permisos actualizados correctamente', 'success');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    showNotification(data.message || 'Error al actualizar permisos', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error de conexión', 'error');
+            });
         });
-    }
 
-    function togglePermission(permission) {
-        currentPermissions[permission] = !currentPermissions[permission];
-        var toggle = document.querySelector('[onclick="togglePermission(\'' + permission + '\')"]');
-        if (toggle) {
-            if (currentPermissions[permission]) {
-                toggle.classList.add('active');
-            } else {
-                toggle.classList.remove('active');
-            }
-        }
-    }
+        // Manejo del formulario de restricciones
+        document.getElementById('restrictionsForm')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const groupId = document.querySelector('input[name="group_id"]').value;
+            
+            // Recopilar restricciones
+            const restrictions = {
+                companies: [],
+                departments: [],
+                document_types: []
+            };
 
-    function updateRestrictions() {
-        var companyCheckboxes = document.querySelectorAll('input[id^="company_"]:checked');
-        currentRestrictions.companies = [];
-        for (var i = 0; i < companyCheckboxes.length; i++) {
-            currentRestrictions.companies.push(parseInt(companyCheckboxes[i].value));
-        }
-        
-        var departmentCheckboxes = document.querySelectorAll('input[id^="department_"]:checked');
-        currentRestrictions.departments = [];
-        for (var i = 0; i < departmentCheckboxes.length; i++) {
-            currentRestrictions.departments.push(parseInt(departmentCheckboxes[i].value));
-        }
-        
-        var doctypeCheckboxes = document.querySelectorAll('input[id^="doctype_"]:checked');
-        currentRestrictions.document_types = [];
-        for (var i = 0; i < doctypeCheckboxes.length; i++) {
-            currentRestrictions.document_types.push(parseInt(doctypeCheckboxes[i].value));
-        }
-    }
+            // Empresas seleccionadas
+            const companiesChecked = document.querySelectorAll('input[name="restrictions[companies][]"]:checked');
+            restrictions.companies = Array.from(companiesChecked).map(cb => parseInt(cb.value));
 
-    function savePermissions() {
-        var submitBtn = event.target;
-        var originalText = submitBtn.innerHTML;
-        
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i data-feather="loader"></i> Guardando...';
-        
-        updateRestrictions();
-        
-        var data = {
-            group_id: groupId,
-            permissions: currentPermissions,
-            restrictions: currentRestrictions
-        };
-        
-        fetch('actions/update_group_permissions.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        })
-        .then(function(response) {
-            return response.json();
-        })
-        .then(function(data) {
-            if (data.success) {
-                alert('Permisos guardados exitosamente');
-            } else {
-                alert('Error: ' + (data.message || 'No se pudieron guardar los permisos'));
-            }
-        })
-        .catch(function(error) {
-            console.error('Error:', error);
-            alert('Error de conexión al guardar permisos');
-        })
-        .finally(function() {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-            if (typeof feather !== 'undefined') feather.replace();
+            // Departamentos seleccionados
+            const departmentsChecked = document.querySelectorAll('input[name="restrictions[departments][]"]:checked');
+            restrictions.departments = Array.from(departmentsChecked).map(cb => parseInt(cb.value));
+
+            // Tipos de documentos seleccionados
+            const docTypesChecked = document.querySelectorAll('input[name="restrictions[document_types][]"]:checked');
+            restrictions.document_types = Array.from(docTypesChecked).map(cb => parseInt(cb.value));
+
+            // Enviar datos como JSON
+            const requestData = {
+                group_id: parseInt(groupId),
+                permissions: {},
+                restrictions: restrictions
+            };
+
+            fetch('actions/update_group_permissions.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Restricciones actualizadas correctamente', 'success');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    showNotification(data.message || 'Error al actualizar restricciones', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error de conexión', 'error');
+            });
         });
-    }
+
+        // Función para mostrar notificaciones
+        function showNotification(message, type = 'info') {
+            const alertClass = type === 'success' ? 'alert-success' : 
+                             type === 'error' ? 'alert-danger' : 'alert-info';
+            
+            const notification = document.createElement('div');
+            notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remover después de 5 segundos
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 5000);
+        }
+
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', function() {
+            // Inicializar estado visual de las tarjetas de permisos
+            document.querySelectorAll('.permission-toggle').forEach(checkbox => {
+                updatePermissionCard(checkbox);
+            });
+
+            // Configurar búsquedas
+            setupSearch();
+        });
     </script>
 </body>
 </html>
