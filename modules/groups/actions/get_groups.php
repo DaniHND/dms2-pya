@@ -7,7 +7,6 @@
 // Configurar headers y manejo de errores
 header('Content-Type: application/json; charset=utf-8');
 error_reporting(E_ALL);
-ini_set('display_errors', 0);
 
 // Obtener rutas absolutas
 $projectRoot = dirname(dirname(dirname(__DIR__)));

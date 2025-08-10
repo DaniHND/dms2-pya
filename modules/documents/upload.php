@@ -1,4 +1,7 @@
 <?php
+// Incluir configuración de límites de subida
+require_once '../../upload_config.php';
+
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 

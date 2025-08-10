@@ -91,6 +91,31 @@ function formatDate($date) {
 
 // Registrar actividad
 logActivity($currentUser['id'], 'view_document_types', 'document_types', null, 'Usuario accedió al módulo de tipos de documentos');
+
+// Funciones helper necesarias
+if (!function_exists('getFullName')) {
+    function getFullName() {
+        $user = SessionManager::getCurrentUser();
+        return trim($user['first_name'] . ' ' . $user['last_name']);
+    }
+}
+
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName, $recordId = null, $description = '') {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                      VALUES (?, ?, ?, ?, ?, NOW())";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([$userId, $action, $tableName, $recordId, $description]);
+        } catch (Exception $e) {
+            error_log('Error logging activity: ' . $e->getMessage());
+        }
+    }
+}
+
 ?>
 
 <!DOCTYPE html>

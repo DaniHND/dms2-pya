@@ -1,4 +1,5 @@
 <?php
+require_once '../../bootstrap.php';
 /*
  * modules/groups/permissions.php
  * Sistema de permisos - Versión limpia sin diagnósticos

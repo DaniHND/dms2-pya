@@ -1,9 +1,11 @@
 <?php
+require_once '../../bootstrap.php';
+// require_once '../../includes/init.php'; // Reemplazado por bootstrap
 // modules/reports/index.php
 // Dashboard principal de Reportes y Bitácora - DMS2
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 // Verificar que el usuario esté logueado
 SessionManager::requireLogin();

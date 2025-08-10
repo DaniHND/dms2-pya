@@ -1,9 +1,10 @@
 <?php
+require_once '../../bootstrap.php';
 // modules/reports/export.php
 // Sistema de exportación de reportes con DomPDF - DMS2 (VERSIÓN FINAL CORREGIDA)
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 // Cargar DomPDF
 require_once '../../vendor/autoload.php'; // Si usas Composer

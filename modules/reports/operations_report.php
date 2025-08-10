@@ -1,9 +1,10 @@
 <?php
+require_once '../../bootstrap.php';
 // modules/reports/operations_report.php
 // Seguimiento de operaciones del sistema - DMS2
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 // Verificar que el usuario esté logueado
 SessionManager::requireLogin();

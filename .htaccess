@@ -1,0 +1,22 @@
+# Aumentar límites de subida de archivos
+php_value upload_max_filesize 100M
+php_value post_max_size 100M
+php_value max_execution_time 300
+php_value max_input_time 300
+php_value memory_limit 256M
+
+# Límites adicionales para archivos grandes
+php_value max_file_uploads 20
+php_value max_input_vars 3000
+
+# Configuración de seguridad
+<Files ~ "\.(php|phtml|php3|php4|php5|phps|cgi|pl)$">
+    Order allow,deny
+    Allow from all
+</Files>
+
+# Permitir solo ciertos tipos de archivos
+<FilesMatch "\.(jpg|jpeg|png|gif|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|zip|rar|7z)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>

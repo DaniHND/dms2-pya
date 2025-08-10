@@ -1,10 +1,12 @@
 <?php
+require_once '../../bootstrap.php';
+// require_once '../../includes/init.php'; // Reemplazado por bootstrap
 // modules/reports/activity_log.php
 // Log de actividades del sistema - DMS2
 // VERSION CON SEGURIDAD - Usuarios no ven datos de administradores
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 // Verificar que el usuario esté logueado
 SessionManager::requireLogin();

@@ -1,16 +1,16 @@
 <?php
-/*
- * modules/users/index.php
- * Módulo de Gestión de Usuarios - DMS2
- * Versión corregida con conexión de base de datos arreglada
- */
-
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
-// Verificar sesión y permisos
-SessionManager::requireRole('admin');
+// Verificar sesión
+SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
+
+// VERIFICACIÓN SIMPLE Y DIRECTA PARA ADMIN
+if ($currentUser["role"] !== "admin") {
+    header("Location: ../../dashboard.php?error=access_denied");
+    exit;
+}
 
 // Obtener conexión a la base de datos
 try {

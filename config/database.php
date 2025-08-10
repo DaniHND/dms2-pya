@@ -300,4 +300,75 @@ try {
     error_log("Error al verificar conexión: " . $e->getMessage());
 }
 
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+/**
+ * Función helper para obtener múltiples registros
+ */
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+/**
+ * Función para registrar actividades del sistema
+ */
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?)";
+            
+            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
+            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+            
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([
+                $userId,
+                $action,
+                $tableName,
+                $recordId,
+                $description,
+                $ipAddress,
+                $userAgent
+            ]);
+            
+            return true;
+        } catch (Exception $e) {
+            error_log('Error logging activity: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
 ?>

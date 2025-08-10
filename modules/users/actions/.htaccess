@@ -1,0 +1,5 @@
+# Suprimir warnings de PHP para respuestas JSON
+<Files "*.php">
+    php_value display_errors 0
+    php_value log_errors 1
+</Files>

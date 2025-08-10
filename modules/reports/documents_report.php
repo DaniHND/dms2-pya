@@ -1,9 +1,10 @@
 <?php
+require_once '../../bootstrap.php';
 // modules/reports/documents_report.php
 // Reportes de documentos del sistema con tarjetas ordenadas - DMS2
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();

@@ -12,7 +12,7 @@ header('Content-Type: application/json');
 
 try {
     // Verificar sesión y permisos
-    SessionManager::requireRole('admin');
+    SessionManager::requirePermission('manage_users');
     $currentUser = SessionManager::getCurrentUser();
     
     // Verificar método GET

@@ -5,8 +5,6 @@
  */
 
 // Evitar cualquier output
-error_reporting(0);
-ini_set('display_errors', 0);
 
 // Limpiar cualquier buffer de salida
 while (ob_get_level()) {

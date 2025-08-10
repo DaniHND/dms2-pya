@@ -1,4 +1,5 @@
 <?php
+require_once '../../bootstrap.php';
 /*
  * move_document.php
  * API para mover documentos a carpetas
@@ -16,8 +17,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+// require_once '../../config/session.php'; // Cargado por bootstrap
+// require_once '../../config/database.php'; // Cargado por bootstrap
 
 try {
     // Verificar sesión

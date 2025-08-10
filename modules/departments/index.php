@@ -6,6 +6,62 @@ require_once '../../config/session.php';
 require_once '../../config/database.php';
 require_once '../../includes/functions.php';
 
+// Funciones helper agregadas automáticamente
+
+if (!function_exists('getFullName')) {
+    function getFullName() {
+        $user = SessionManager::getCurrentUser();
+        return trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+    }
+}
+
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName, $recordId = null, $description = '') {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                      VALUES (?, ?, ?, ?, ?, NOW())";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([$userId, $action, $tableName, $recordId, $description]);
+        } catch (Exception $e) {
+            error_log('Error logging activity: ' . $e->getMessage());
+        }
+    }
+}
+
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+
 // Verificar permisos de administrador
 SessionManager::requireRole('admin');
 

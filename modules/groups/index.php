@@ -1,4 +1,7 @@
 <?php
+require_once '../../config/session.php';
+require_once '../../config/database.php';
+// require_once '../../includes/init.php'; // Reemplazado por bootstrap
 /*
  * modules/groups/index.php
  * Módulo de Gestión de Grupos con diseño consistente
