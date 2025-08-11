@@ -198,13 +198,11 @@ $filterOptions = getFilterOptions($currentUser);
 logActivity($currentUser['id'], 'view_documents_report', 'reports', null, 'Usuario accedió al reporte de documentos');
 
 // Función para formatear bytes
-function formatBytes($size, $precision = 2)
-{
-    if ($size == 0) return '0 B';
-    $units = array('B', 'KB', 'MB', 'GB', 'TB');
-    $base = log($size, 1024);
-    return round(pow(1024, $base - floor($base)), $precision) . ' ' . $units[floor($base)];
+/*
+function formatBytes($bytes, $precision = 2) {
+    // ... código de la función
 }
+*/
 
 // Función para obtener extensión del archivo
 function getFileExtension($filename)

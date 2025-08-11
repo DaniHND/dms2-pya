@@ -1,9 +1,118 @@
 <?php
-// Incluir configuración de límites de subida
-require_once '../../upload_config.php';
-
+// Tu código existente...
 require_once '../../config/session.php';
 require_once '../../config/database.php';
+// ... otros requires que ya tenías
+
+function isSuperUser($userId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        $query = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        return ($user && $user['role'] === 'super_admin');
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+function getUserPermissions($userId) {
+    // Si es super usuario, acceso total
+    if (isSuperUser($userId)) {
+        return [
+            'permissions' => [
+                'view' => true,
+                'download' => true,
+                'create' => true,
+                'edit' => true,
+                'delete' => true
+            ],
+            'restrictions' => [
+                'companies' => [],      // Vacío = acceso a todas
+                'departments' => [],    // Vacío = acceso a todos
+                'document_types' => []  // Vacío = acceso a todos
+            ]
+        ];
+    }
+    
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+
+        $query = "
+            SELECT ug.module_permissions, ug.access_restrictions 
+            FROM user_groups ug
+            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+            WHERE ugm.user_id = ? AND ug.status = 'active'
+        ";
+
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$userId]);
+        $groupData = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Permisos iniciales - RESTRICTIVOS por defecto
+        $mergedPermissions = [
+            'view' => false, 
+            'download' => false, 
+            'create' => false, 
+            'edit' => false, 
+            'delete' => false
+        ];
+        
+        $mergedRestrictions = [
+            'companies' => [], 
+            'departments' => [], 
+            'document_types' => []
+        ];
+
+        // Fusionar permisos de todos los grupos (OR lógico)
+        foreach ($groupData as $group) {
+            $permissions = json_decode($group['module_permissions'] ?: '{}', true);
+            $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
+
+            // Mapear permisos nuevos a los antiguos
+            if (isset($permissions['view_files']) && $permissions['view_files'] === true) {
+                $mergedPermissions['view'] = true;
+            }
+            if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
+                $mergedPermissions['download'] = true;
+            }
+            if (isset($permissions['upload_files']) && $permissions['upload_files'] === true) {
+                $mergedPermissions['create'] = true;
+            }
+            if (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
+                $mergedPermissions['edit'] = true;
+            }
+            if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
+                $mergedPermissions['delete'] = true;
+            }
+
+            foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
+                if (isset($restrictions[$restrictionType]) && is_array($restrictions[$restrictionType])) {
+                    $mergedRestrictions[$restrictionType] = array_unique(
+                        array_merge($mergedRestrictions[$restrictionType], $restrictions[$restrictionType])
+                    );
+                }
+            }
+        }
+
+        return [
+            'permissions' => $mergedPermissions, 
+            'restrictions' => $mergedRestrictions
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Error getting user permissions: " . $e->getMessage());
+        return [
+            'permissions' => ['view' => false, 'download' => false, 'create' => false, 'edit' => false, 'delete' => false],
+            'restrictions' => ['companies' => [], 'departments' => [], 'document_types' => []]
+        ];
+    }
+}
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();

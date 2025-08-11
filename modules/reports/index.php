@@ -1,16 +1,30 @@
 <?php
-require_once '../../bootstrap.php';
-// require_once '../../includes/init.php'; // Reemplazado por bootstrap
-// modules/reports/index.php
-// Dashboard principal de Reportes y Bitácora - DMS2
+require_once '../../config/session.php';
+require_once '../../config/database.php';
 
-// require_once '../../config/session.php'; // Cargado por bootstrap
-// require_once '../../config/database.php'; // Cargado por bootstrap
-
-// Verificar que el usuario esté logueado
 SessionManager::requireLogin();
-
 $currentUser = SessionManager::getCurrentUser();
+
+// Función helper para nombres completos
+// Función helper para nombres completos
+function getFullName($firstName = null, $lastName = null)
+{
+    global $currentUser;
+
+    // Si no se pasan parámetros, usar el usuario actual
+    if ($firstName === null && $lastName === null) {
+        $firstName = $currentUser['first_name'] ?? '';
+        $lastName = $currentUser['last_name'] ?? '';
+    }
+
+    return trim($firstName . ' ' . $lastName);
+}
+// Verificar permisos básicos
+if ($currentUser['role'] !== 'admin') {
+    // Aquí puedes agregar lógica de permisos si necesitas
+}
+
+// Tu código original continúa desde aquí...
 
 // Función para obtener estadísticas generales
 function getReportStats($userId, $companyId, $role)
@@ -303,102 +317,6 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     </div>
                 </div>
             </div>
-
-            <!-- Métricas de rendimiento -->
-            <div class="performance-metrics">
-                <h3>Métricas de Rendimiento</h3>
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-icon">
-                            <i data-feather="trending-up"></i>
-                        </div>
-                        <div class="metric-content">
-                            <div class="metric-number"><?php echo number_format($stats['documents_this_month'] ?? 0); ?></div>
-                            <div class="metric-label">Docs. Este Mes</div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-icon">
-                            <i data-feather="download"></i>
-                        </div>
-                        <div class="metric-content">
-                            <div class="metric-number"><?php echo number_format($stats['downloads_this_month'] ?? 0); ?></div>
-                            <div class="metric-label">Descargas</div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-icon">
-                            <i data-feather="eye"></i>
-                        </div>
-                        <div class="metric-content">
-                            <div class="metric-number"><?php echo number_format($stats['views_this_month'] ?? 0); ?></div>
-                            <div class="metric-label">Visualizaciones</div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-icon">
-                            <i data-feather="search"></i>
-                        </div>
-                        <div class="metric-content">
-                            <div class="metric-number"><?php echo number_format($stats['searches_this_month'] ?? 0); ?></div>
-                            <div class="metric-label">Búsquedas</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Actividad reciente -->
-            <?php if (!empty($recentActivity)): ?>
-                <div class="reports-table">
-                    <h3>Actividad Reciente</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Usuario</th>
-                                    <th>Acción</th>
-                                    <th>Módulo</th>
-                                    <th>Fecha</th>
-                                    <th>Detalles</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach (array_slice($recentActivity, 0, 10) as $activity): ?>
-                                    <tr>
-                                        <td>
-                                            <strong><?php echo htmlspecialchars($activity['user_name'] ?? 'Sistema'); ?></strong>
-                                            <?php if (!empty($activity['company_name'])): ?>
-                                                <br><small class="text-muted"><?php echo htmlspecialchars($activity['company_name']); ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <span class="status-badge status-active">
-                                                <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $activity['action']))); ?>
-                                            </span>
-                                        </td>
-                                        <td><?php echo htmlspecialchars(ucfirst($activity['module'])); ?></td>
-                                        <td>
-                                            <time datetime="<?php echo $activity['created_at']; ?>">
-                                                <?php echo date('d/m/Y H:i', strtotime($activity['created_at'])); ?>
-                                            </time>
-                                        </td>
-                                        <td>
-                                            <?php if (!empty($activity['details'])): ?>
-                                                <small class="text-muted"><?php echo htmlspecialchars($activity['details']); ?></small>
-                                            <?php else: ?>
-                                                -
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            <?php endif; ?>
         </div>
     </main>
 

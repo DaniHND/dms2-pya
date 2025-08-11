@@ -1,12 +1,10 @@
 <?php
-/**
- * modules/documents/inbox.php
- * Explorador Visual de Documentos - DMS2 Optimizado
- * Archivo principal sin CSS/JS embebido
- */
-
+// Tu código existente...
 require_once '../../config/session.php';
 require_once '../../config/database.php';
+// ... otros requires que ya tenías
+
+
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
@@ -15,7 +13,41 @@ $currentUser = SessionManager::getCurrentUser();
 // SISTEMA DE PERMISOS DE GRUPOS - PRIORIDAD SOBRE PERMISOS BÁSICOS
 // ===================================================================
 
+function isSuperUser($userId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        $query = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        return ($user && $user['role'] === 'super_admin');
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 function getUserPermissions($userId) {
+    // Si es super usuario, acceso total
+    if (isSuperUser($userId)) {
+        return [
+            'permissions' => [
+                'view' => true,
+                'download' => true,
+                'create' => true,
+                'edit' => true,
+                'delete' => true
+            ],
+            'restrictions' => [
+                'companies' => [],      // Vacío = acceso a todas
+                'departments' => [],    // Vacío = acceso a todos
+                'document_types' => []  // Vacío = acceso a todos
+            ]
+        ];
+    }
+    
     try {
         $database = new Database();
         $pdo = $database->getConnection();
@@ -51,10 +83,21 @@ function getUserPermissions($userId) {
             $permissions = json_decode($group['module_permissions'] ?: '{}', true);
             $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
 
-            foreach ($mergedPermissions as $key => $value) {
-                if (isset($permissions[$key]) && $permissions[$key] === true) {
-                    $mergedPermissions[$key] = true;
-                }
+            // Mapear permisos nuevos a los antiguos
+            if (isset($permissions['view_files']) && $permissions['view_files'] === true) {
+                $mergedPermissions['view'] = true;
+            }
+            if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
+                $mergedPermissions['download'] = true;
+            }
+            if (isset($permissions['upload_files']) && $permissions['upload_files'] === true) {
+                $mergedPermissions['create'] = true;
+            }
+            if (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
+                $mergedPermissions['edit'] = true;
+            }
+            if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
+                $mergedPermissions['delete'] = true;
             }
 
             foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
@@ -74,7 +117,7 @@ function getUserPermissions($userId) {
     } catch (Exception $e) {
         error_log("Error getting user permissions: " . $e->getMessage());
         return [
-            'permissions' => ['view' => true, 'download' => false, 'create' => false, 'edit' => false, 'delete' => false],
+            'permissions' => ['view' => false, 'download' => false, 'create' => false, 'edit' => false, 'delete' => false],
             'restrictions' => ['companies' => [], 'departments' => [], 'document_types' => []]
         ];
     }
@@ -647,7 +690,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
             </div>
         </header>
 
-        <div class="container">
+       <div class="container">
             <div class="page-header">
                 <p class="page-subtitle">
                     <?php if (isset($noAccess) && $noAccess): ?>
