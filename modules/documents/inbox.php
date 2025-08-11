@@ -29,7 +29,12 @@ function isSuperUser($userId) {
     }
 }
 
-function getUserPermissions($userId) {
+// ===================================================================
+// CORREGIR LA FUNCIÓN getUserPermissions EN INBOX.PHP
+// ===================================================================
+
+function getUserPermissions($userId)
+{
     // Si es super usuario, acceso total
     if (isSuperUser($userId)) {
         return [
@@ -41,13 +46,13 @@ function getUserPermissions($userId) {
                 'delete' => true
             ],
             'restrictions' => [
-                'companies' => [],      // Vacío = acceso a todas
-                'departments' => [],    // Vacío = acceso a todos
-                'document_types' => []  // Vacío = acceso a todos
+                'companies' => [],
+                'departments' => [],
+                'document_types' => []
             ]
         ];
     }
-    
+
     try {
         $database = new Database();
         $pdo = $database->getConnection();
@@ -65,16 +70,16 @@ function getUserPermissions($userId) {
 
         // Permisos iniciales - RESTRICTIVOS por defecto
         $mergedPermissions = [
-            'view' => false, 
-            'download' => false, 
-            'create' => false, 
-            'edit' => false, 
+            'view' => false,
+            'download' => false,
+            'create' => false,
+            'edit' => false,
             'delete' => false
         ];
-        
+
         $mergedRestrictions = [
-            'companies' => [], 
-            'departments' => [], 
+            'companies' => [],
+            'departments' => [],
             'document_types' => []
         ];
 
@@ -83,23 +88,46 @@ function getUserPermissions($userId) {
             $permissions = json_decode($group['module_permissions'] ?: '{}', true);
             $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
 
-            // Mapear permisos nuevos a los antiguos
+            // ===== MAPEO CORREGIDO DE PERMISOS =====
+            
+            // Ver archivos (sistema nuevo y viejo)
             if (isset($permissions['view_files']) && $permissions['view_files'] === true) {
                 $mergedPermissions['view'] = true;
+            } elseif (isset($permissions['view']) && $permissions['view'] === true) {
+                $mergedPermissions['view'] = true;
             }
+            
+            // ===== DESCARGA CORREGIDA =====
             if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
                 $mergedPermissions['download'] = true;
+            } elseif (isset($permissions['download']) && $permissions['download'] === true) {
+                $mergedPermissions['download'] = true;
             }
+            
+            // Crear/subir archivos Y crear carpetas
             if (isset($permissions['upload_files']) && $permissions['upload_files'] === true) {
                 $mergedPermissions['create'] = true;
+            } elseif (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
+                $mergedPermissions['create'] = true;
+            } elseif (isset($permissions['create']) && $permissions['create'] === true) {
+                $mergedPermissions['create'] = true;
             }
+            
+            // Editar archivos
             if (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
                 $mergedPermissions['edit'] = true;
+            } elseif (isset($permissions['edit']) && $permissions['edit'] === true) {
+                $mergedPermissions['edit'] = true;
             }
+            
+            // Eliminar archivos
             if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
+                $mergedPermissions['delete'] = true;
+            } elseif (isset($permissions['delete']) && $permissions['delete'] === true) {
                 $mergedPermissions['delete'] = true;
             }
 
+            // Manejar restricciones
             foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
                 if (isset($restrictions[$restrictionType]) && is_array($restrictions[$restrictionType])) {
                     $mergedRestrictions[$restrictionType] = array_unique(
@@ -110,10 +138,9 @@ function getUserPermissions($userId) {
         }
 
         return [
-            'permissions' => $mergedPermissions, 
+            'permissions' => $mergedPermissions,
             'restrictions' => $mergedRestrictions
         ];
-        
     } catch (Exception $e) {
         error_log("Error getting user permissions: " . $e->getMessage());
         return [
@@ -122,7 +149,6 @@ function getUserPermissions($userId) {
         ];
     }
 }
-
 function getNavigationItems($userId, $userRole, $currentPath = '') {
     $database = new Database();
     $pdo = $database->getConnection();
@@ -608,12 +634,10 @@ try {
         $canView = $canDownload = $canCreate = $canEdit = $canDelete = true;
     }
 
-    $downloadStmt = $pdo->prepare("SELECT download_enabled FROM users WHERE id = ?");
-    $downloadStmt->execute([$currentUser['id']]);
-    $downloadResult = $downloadStmt->fetch();
-    $canDownload = $canDownload && ($downloadResult['download_enabled'] ?? true);
+    
+    
 
-    if (!$canView && $currentUser['role'] !== 'admin') {
+   /* if (!$canView && $currentUser['role'] !== 'admin') {
         $items = [];
         $breadcrumbs = [['name' => 'Sin acceso', 'path' => '', 'icon' => 'lock']];
         $noAccess = true;
@@ -631,7 +655,20 @@ try {
         $noAccess = false;
     }
 
-    logActivity($currentUser['id'], 'view', 'visual_explorer', null, 'Usuario navegó por el explorador visual');
+    logActivity($currentUser['id'], 'view', 'visual_explorer', null, 'Usuario navegó por el explorador visual');*/
+
+    // REEMPLAZAR CON ESTO (sin verificación de $canView):
+$currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
+$searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
+
+if ($searchTerm) {
+    $items = searchItems($currentUser['id'], $currentUser['role'], $searchTerm, $currentPath);
+} else {
+    $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
+}
+
+$breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
+$noAccess = false;
     
 } catch (Exception $e) {
     error_log("Error in visual explorer: " . $e->getMessage());
@@ -1139,5 +1176,196 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
         const currentPath = '<?= htmlspecialchars($currentPath ?? '') ?>';
     </script>
     <script src="../../assets/js/inbox-visual.js"></script>
+    <!-- JAVASCRIPT DIRECTO PARA ELIMINACIÓN - AGREGAR ANTES DE </body> -->
+<script>
+console.log('🔧 JavaScript directo cargado');
+
+// Sobrescribir completamente la función deleteDocument
+window.deleteDocument = function(documentId, documentName) {
+    console.log('🗑️ deleteDocument DIRECTO ejecutado:', documentId, documentName);
+    
+    if (!documentId) {
+        console.error('🗑️ ERROR: ID vacío');
+        alert('Error: ID de documento no válido');
+        return;
+    }
+    
+    // Confirmaciones
+    let confirmMessage = `¿Eliminar documento${documentName ? '\n\n📄 ' + documentName : ' ID: ' + documentId}?\n\n⚠️ Esta acción no se puede deshacer.`;
+    
+    if (!confirm(confirmMessage)) {
+        console.log('🗑️ Usuario canceló');
+        return;
+    }
+    
+    if (!confirm('¿Está completamente seguro?\n\nEsta es la última oportunidad para cancelar.')) {
+        console.log('🗑️ Usuario canceló segunda confirmación');
+        return;
+    }
+    
+    console.log('🗑️ Procediendo con eliminación...');
+    
+    // Obtener path actual por múltiples métodos
+    function getPathFromMultipleSources() {
+        console.log('🔍 Buscando path actual...');
+        
+        // Método 1: URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlPath = urlParams.get('path');
+        if (urlPath) {
+            console.log('✅ Path desde URL:', urlPath);
+            return urlPath;
+        }
+        
+        // Método 2: Variable global
+        if (typeof currentPath !== 'undefined' && currentPath) {
+            console.log('✅ Path desde variable global:', currentPath);
+            return currentPath;
+        }
+        
+        // Método 3: Breadcrumbs
+        const breadcrumbs = document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]');
+        if (breadcrumbs.length > 0) {
+            const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
+            const breadcrumbPath = lastBreadcrumb.dataset.breadcrumbPath;
+            if (breadcrumbPath && breadcrumbPath !== '') {
+                console.log('✅ Path desde breadcrumb:', breadcrumbPath);
+                return breadcrumbPath;
+            }
+        }
+        
+        // Método 4: Análisis de URL manual
+        const currentUrl = window.location.href;
+        const match = currentUrl.match(/[?&]path=([^&]+)/);
+        if (match) {
+            const decodedPath = decodeURIComponent(match[1]);
+            console.log('✅ Path desde regex URL:', decodedPath);
+            return decodedPath;
+        }
+        
+        console.log('❌ No se encontró path');
+        return '';
+    }
+    
+    const currentPath = getPathFromMultipleSources();
+    console.log('📍 Path final detectado:', currentPath || 'VACÍO');
+    
+    // Crear formulario
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'delete.php';
+    form.style.display = 'none';
+    
+    // Document ID
+    const inputDoc = document.createElement('input');
+    inputDoc.type = 'hidden';
+    inputDoc.name = 'document_id';
+    inputDoc.value = documentId;
+    form.appendChild(inputDoc);
+    
+    // Return path
+    if (currentPath) {
+        const inputPath = document.createElement('input');
+        inputPath.type = 'hidden';
+        inputPath.name = 'return_path';
+        inputPath.value = currentPath;
+        form.appendChild(inputPath);
+        console.log('📤 Enviando return_path:', currentPath);
+    } else {
+        console.log('⚠️ Sin return_path - irá al inicio');
+    }
+    
+    // Agregar al DOM y enviar
+    document.body.appendChild(form);
+    
+    console.log('📤 Enviando formulario POST a delete.php');
+    console.log('📋 Datos del formulario:');
+    console.log('  - document_id:', documentId);
+    console.log('  - return_path:', currentPath || 'no enviado');
+    
+    // Mostrar mensaje de carga
+    const loadingMsg = document.createElement('div');
+    loadingMsg.id = 'deleteLoading';
+    loadingMsg.style.cssText = `
+        position: fixed; top: 20px; right: 20px; z-index: 10000;
+        background: #ffc107; color: #000; padding: 15px 20px;
+        border-radius: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        font-weight: bold;
+    `;
+    loadingMsg.textContent = '🗑️ Eliminando documento...';
+    document.body.appendChild(loadingMsg);
+    
+    // Enviar formulario
+    form.submit();
+};
+
+// Verificar que se sobrescribió correctamente
+if (typeof window.deleteDocument === 'function') {
+    console.log('✅ Función deleteDocument sobrescrita exitosamente');
+} else {
+    console.error('❌ Error: No se pudo sobrescribir deleteDocument');
+}
+
+// Debug de estado actual
+console.log('📊 Estado del sistema:');
+console.log('- URL actual:', window.location.href);
+console.log('- currentPath variable:', typeof currentPath !== 'undefined' ? currentPath : 'undefined');
+console.log('- Breadcrumbs con path:', document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]').length);
+
+// Función de test para debugging
+window.testDeleteFunction = function() {
+    console.log('🧪 TESTING deleteDocument function...');
+    
+    // Simular sin eliminar realmente
+    const originalConfirm = window.confirm;
+    let confirmCalls = 0;
+    
+    window.confirm = function(message) {
+        confirmCalls++;
+        console.log(`📋 Confirm ${confirmCalls}: ${message}`);
+        return confirmCalls <= 2; // Simular aceptar ambas confirmaciones
+    };
+    
+    // Interceptar submit para no enviar realmente
+    const originalSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+        console.log('📤 FORM SUBMIT interceptado (test mode)');
+        
+        const formData = new FormData(this);
+        console.log('📋 Datos que se enviarían:');
+        for (let [key, value] of formData.entries()) {
+            console.log(`  ${key}: ${value}`);
+        }
+        
+        // Restaurar funciones
+        window.confirm = originalConfirm;
+        HTMLFormElement.prototype.submit = originalSubmit;
+        
+        console.log('✅ Test completado - Ver log arriba');
+        alert('Test completado - Ver consola para detalles');
+    };
+    
+    // Ejecutar test
+    deleteDocument(999, 'TEST_DOCUMENT');
+};
+
+console.log('🛠️ JavaScript directo inicializado. Usa testDeleteFunction() para probar.');
+</script>
+
+<!-- ESTILOS PARA NOTIFICACIONES -->
+<style>
+#deleteLoading {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    background: #ffc107;
+    color: #000;
+    padding: 15px 20px;
+    border-radius: 5px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    font-weight: bold;
+}
+</style>
 </body>
 </html>

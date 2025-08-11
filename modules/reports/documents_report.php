@@ -1,10 +1,7 @@
 <?php
 require_once '../../bootstrap.php';
 // modules/reports/documents_report.php
-// Reportes de documentos del sistema con tarjetas ordenadas - DMS2
-
-// require_once '../../config/session.php'; // Cargado por bootstrap
-// require_once '../../config/database.php'; // Cargado por bootstrap
+// Reportes de documentos del sistema - CORREGIDO ERROR count()
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
@@ -16,7 +13,7 @@ $companyId = $_GET['company_id'] ?? '';
 $documentType = $_GET['document_type'] ?? '';
 $reportType = $_GET['report_type'] ?? 'summary';
 
-// Función para obtener estadísticas de documentos
+// Función para obtener estadísticas de documentos (CORREGIDA)
 function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType)
 {
     $whereConditions = [];
@@ -29,9 +26,11 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
     $whereConditions[] = "d.created_at <= :date_to";
     $whereConditions[] = "d.status = 'active'";
 
-    if ($currentUser['role'] !== 'admin') {
-        $whereConditions[] = "d.company_id = :user_company_id";
-        $params['user_company_id'] = $currentUser['company_id'];
+    // SISTEMA UNIFICADO: Aplicar restricciones basadas en grupos
+    $restrictions = getQueryRestrictions('d', $currentUser['id']);
+    if (!empty($restrictions['where'])) {
+        $whereConditions[] = $restrictions['where'];
+        $params = array_merge($params, $restrictions['params']);
     } elseif (!empty($companyId)) {
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
@@ -52,30 +51,33 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
     $result = fetchOne($query, $params);
     $stats['total'] = $result['total'] ?? 0;
     $stats['total_size'] = $result['total_size'] ?? 0;
-    $stats['avg_size'] = $result['avg_size'] ?? 0;
-
-    // Documentos por tipo
+    $stats['avg_size'] = $result['avg_size'] ?? 0;// Documentos por tipo (CORREGIDO)
     $query = "SELECT dt.name as type_name, COUNT(*) as count, SUM(d.file_size) as total_size
               FROM documents d LEFT JOIN document_types dt ON d.document_type_id = dt.id
               WHERE $whereClause GROUP BY dt.name ORDER BY count DESC, dt.name ASC";
-    $stats['by_type'] = fetchAll($query, $params);
+    $byTypeResult = fetchAll($query, $params);
+    $stats['by_type'] = is_array($byTypeResult) ? $byTypeResult : [];
 
-    // Documentos por empresa (solo admin)
+    // Documentos por empresa (solo admin) - CORREGIDO
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT c.name as company_name, COUNT(*) as count, SUM(d.file_size) as total_size
                   FROM documents d LEFT JOIN companies c ON d.company_id = c.id
                   LEFT JOIN document_types dt ON d.document_type_id = dt.id
                   WHERE $whereClause GROUP BY c.name ORDER BY count DESC, c.name ASC";
-        $stats['by_company'] = fetchAll($query, $params);
+        $byCompanyResult = fetchAll($query, $params);
+        $stats['by_company'] = is_array($byCompanyResult) ? $byCompanyResult : [];
+    } else {
+        $stats['by_company'] = [];
     }
 
-    // Documentos por día
+    // Documentos por día - CORREGIDO
     $query = "SELECT DATE(d.created_at) as date, COUNT(*) as count
               FROM documents d LEFT JOIN document_types dt ON d.document_type_id = dt.id
               WHERE $whereClause GROUP BY DATE(d.created_at) ORDER BY date ASC";
-    $stats['by_date'] = fetchAll($query, $params);
+    $byDateResult = fetchAll($query, $params);
+    $stats['by_date'] = is_array($byDateResult) ? $byDateResult : [];
 
-    // Estadísticas de usuarios - subidas
+    // Estadísticas de usuarios - subidas - CORREGIDO
     $query = "SELECT u.id, u.first_name, u.last_name, u.username, u.email, 
                      COUNT(d.id) as uploads_count, SUM(d.file_size) as total_size
               FROM users u
@@ -85,12 +87,11 @@ function getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documen
               GROUP BY u.id, u.first_name, u.last_name, u.username, u.email
               ORDER BY uploads_count DESC, u.first_name ASC
               LIMIT 15";
-    $stats['user_uploads'] = fetchAll($query, $params);
+    $userUploadsResult = fetchAll($query, $params);
+    $stats['user_uploads'] = is_array($userUploadsResult) ? $userUploadsResult : [];
 
     return $stats;
-}
-
-// Función para obtener actividad de documentos
+}// Función para obtener actividad de documentos - CORREGIDA
 function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType)
 {
     $whereConditions = [];
@@ -104,9 +105,11 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
     $whereConditions[] = "al.table_name = 'documents'";
     $whereConditions[] = "al.action IN ('upload', 'download', 'view', 'delete')";
 
-    if ($currentUser['role'] !== 'admin') {
-        $whereConditions[] = "d.company_id = :user_company_id";
-        $params['user_company_id'] = $currentUser['company_id'];
+    // SISTEMA UNIFICADO: Aplicar restricciones basadas en grupos
+    $restrictions = getQueryRestrictions('d', $currentUser['id']);
+    if (!empty($restrictions['where'])) {
+        $whereConditions[] = $restrictions['where'];
+        $params = array_merge($params, $restrictions['params']);
     } elseif (!empty($companyId)) {
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
@@ -119,7 +122,7 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
 
     $whereClause = implode(' AND ', $whereConditions);
 
-    // Estadísticas de descargas por usuario
+    // Estadísticas de descargas por usuario - CORREGIDO
     $query = "SELECT u.id, u.first_name, u.last_name, u.username, u.email,
                      COUNT(al.id) as downloads_count
               FROM activity_logs al
@@ -131,10 +134,9 @@ function getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $docu
               ORDER BY downloads_count DESC, u.first_name ASC
               LIMIT 15";
 
-    return ['user_downloads' => fetchAll($query, $params)];
-}
-
-// Función para obtener lista detallada de documentos
+    $userDownloadsResult = fetchAll($query, $params);
+    return ['user_downloads' => is_array($userDownloadsResult) ? $userDownloadsResult : []];
+}// Función para obtener lista detallada de documentos - CORREGIDA
 function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType, $limit = 100)
 {
     $whereConditions = [];
@@ -147,9 +149,11 @@ function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documen
     $whereConditions[] = "d.created_at <= :date_to";
     $whereConditions[] = "d.status = 'active'";
 
-    if ($currentUser['role'] !== 'admin') {
-        $whereConditions[] = "d.company_id = :user_company_id";
-        $params['user_company_id'] = $currentUser['company_id'];
+    // SISTEMA UNIFICADO: Aplicar restricciones basadas en grupos
+    $restrictions = getQueryRestrictions('d', $currentUser['id']);
+    if (!empty($restrictions['where'])) {
+        $whereConditions[] = $restrictions['where'];
+        $params = array_merge($params, $restrictions['params']);
     } elseif (!empty($companyId)) {
         $whereConditions[] = "d.company_id = :company_id";
         $params['company_id'] = $companyId;
@@ -172,46 +176,58 @@ function getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documen
               WHERE $whereClause ORDER BY d.created_at DESC, d.name ASC LIMIT :limit";
 
     $params['limit'] = $limit;
-    return fetchAll($query, $params);
+    $result = fetchAll($query, $params);
+    return is_array($result) ? $result : [];
 }
 
-// Función para obtener filtros
+// Función para obtener filtros - CORREGIDA
 function getFilterOptions($currentUser)
 {
     $options = [];
     if ($currentUser['role'] === 'admin') {
         $query = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name ASC";
-        $options['companies'] = fetchAll($query);
+        $companiesResult = fetchAll($query);
+        $options['companies'] = is_array($companiesResult) ? $companiesResult : [];
+    } else {
+        $options['companies'] = [];
     }
+    
     $query = "SELECT name FROM document_types WHERE status = 'active' ORDER BY name ASC";
-    $options['document_types'] = fetchAll($query);
+    $typesResult = fetchAll($query);
+    $options['document_types'] = is_array($typesResult) ? $typesResult : [];
+    
     return $options;
+}// Obtener datos (CON VERIFICACIONES ADICIONALES)
+try {
+    $stats = getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
+    $activity = getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
+    $documents = getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
+    $filterOptions = getFilterOptions($currentUser);
+} catch (Exception $e) {
+    error_log('Error in documents_report.php: ' . $e->getMessage());
+    // Valores por defecto en caso de error
+    $stats = [
+        'total' => 0,
+        'total_size' => 0,
+        'avg_size' => 0,
+        'by_type' => [],
+        'by_company' => [],
+        'by_date' => [],
+        'user_uploads' => []
+    ];
+    $activity = ['user_downloads' => []];
+    $documents = [];
+    $filterOptions = ['companies' => [], 'document_types' => []];
 }
 
-// Obtener datos
-$stats = getDocumentStats($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
-$activity = getDocumentActivity($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
-$documents = getDocumentsList($currentUser, $dateFrom, $dateTo, $companyId, $documentType);
-$filterOptions = getFilterOptions($currentUser);
+// Verificaciones adicionales para evitar errores count()
+$stats['user_uploads'] = is_array($stats['user_uploads']) ? $stats['user_uploads'] : [];
+$activity['user_downloads'] = is_array($activity['user_downloads']) ? $activity['user_downloads'] : [];
+$documents = is_array($documents) ? $documents : [];
 
 // Registrar acceso
 logActivity($currentUser['id'], 'view_documents_report', 'reports', null, 'Usuario accedió al reporte de documentos');
-
-// Función para formatear bytes
-/*
-function formatBytes($bytes, $precision = 2) {
-    // ... código de la función
-}
-*/
-
-// Función para obtener extensión del archivo
-function getFileExtension($filename)
-{
-    return strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-}
-?>
-
-<!DOCTYPE html>
+?><!DOCTYPE html>
 <html lang="es">
 
 <head>
@@ -252,9 +268,7 @@ function getFileExtension($filename)
                     </a>
                 </div>
             </div>
-        </header>
-
-        <div class="reports-content">
+        </header><div class="reports-content">
             <div class="reports-nav-breadcrumb">
                 <a href="index.php" class="breadcrumb-link">
                     <i data-feather="arrow-left"></i>
@@ -286,7 +300,7 @@ function getFileExtension($filename)
                             $totalDownloads = 0;
                             if (isset($activity['user_downloads']) && is_array($activity['user_downloads'])) {
                                 foreach ($activity['user_downloads'] as $user) {
-                                    $totalDownloads += $user['downloads_count'];
+                                    $totalDownloads += $user['downloads_count'] ?? 0;
                                 }
                             }
                             echo number_format($totalDownloads);
@@ -298,13 +312,11 @@ function getFileExtension($filename)
                 <div class="stat-card">
                     <div class="stat-icon"><i data-feather="users"></i></div>
                     <div class="stat-info">
-                        <div class="stat-number"><?php echo count($stats['user_uploads']); ?></div>
+                        <div class="stat-number"><?php echo count($stats['user_uploads'] ?? []); ?></div>
                         <div class="stat-label">Usuarios Activos</div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Filtros -->
+            </div><!-- Filtros -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>
                 <form method="GET" action="">
@@ -322,7 +334,7 @@ function getFileExtension($filename)
                                 <label for="company_id">Empresa</label>
                                 <select id="company_id" name="company_id">
                                     <option value="">Todas las empresas</option>
-                                    <?php if (isset($filterOptions['companies'])): ?>
+                                    <?php if (isset($filterOptions['companies']) && is_array($filterOptions['companies'])): ?>
                                         <?php foreach ($filterOptions['companies'] as $company): ?>
                                             <option value="<?php echo $company['id']; ?>" <?php echo $companyId == $company['id'] ? 'selected' : ''; ?>>
                                                 <?php echo htmlspecialchars($company['name']); ?>
@@ -336,7 +348,7 @@ function getFileExtension($filename)
                             <label for="document_type">Tipo de Documento</label>
                             <select id="document_type" name="document_type">
                                 <option value="">Todos los tipos</option>
-                                <?php if (isset($filterOptions['document_types'])): ?>
+                                <?php if (isset($filterOptions['document_types']) && is_array($filterOptions['document_types'])): ?>
                                     <?php foreach ($filterOptions['document_types'] as $type): ?>
                                         <option value="<?php echo htmlspecialchars($type['name']); ?>" <?php echo $documentType == $type['name'] ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($type['name']); ?>
@@ -353,21 +365,8 @@ function getFileExtension($filename)
                             </select>
                         </div>
                     </div>
-                    <!-- Filtros automáticos - ocultar botones -->
-                    <div class="filters-actions" style="display: none;">
-                        <button type="submit" class="btn-filter">
-                            <i data-feather="search"></i>
-                            Filtrar
-                        </button>
-                        <a href="documents_report.php" class="btn-filter secondary">
-                            <i data-feather="x"></i>
-                            Limpiar
-                        </a>
-                    </div>
                 </form>
-            </div>
-
-            <!-- Exportación -->
+            </div><!-- Exportación -->
             <div class="export-section">
                 <h3>Exportar Datos</h3>
                 <div class="export-buttons">
@@ -395,10 +394,8 @@ function getFileExtension($filename)
                             <div class="chart-container">
                                 <canvas id="typeChart"></canvas>
                             </div>
-                        </div>
-
-                        <!-- Lista de usuarios que suben documentos -->
-                        <?php if (!empty($stats['user_uploads'])): ?>
+                        </div><!-- Lista de usuarios que suben documentos -->
+                        <?php if (!empty($stats['user_uploads']) && is_array($stats['user_uploads'])): ?>
                             <div class="chart-card users-section">
                                 <h3>
                                     <i data-feather="upload"></i>
@@ -409,11 +406,11 @@ function getFileExtension($filename)
                                         <div class="user-row rank-<?php echo min($index + 1, 3); ?>">
                                             <span class="user-rank">#<?php echo $index + 1; ?></span>
                                             <div class="user-details">
-                                                <span class="user-name"><?php echo htmlspecialchars(trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: $user['username']); ?></span>
-                                                <span class="user-username">@<?php echo htmlspecialchars($user['username']); ?></span>
+                                                <span class="user-name"><?php echo htmlspecialchars(trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: ($user['username'] ?? 'Usuario')); ?></span>
+                                                <span class="user-username">@<?php echo htmlspecialchars($user['username'] ?? 'usuario'); ?></span>
                                             </div>
                                             <div class="user-stats">
-                                                <span class="stat-number"><?php echo number_format($user['uploads_count']); ?></span>
+                                                <span class="stat-number"><?php echo number_format($user['uploads_count'] ?? 0); ?></span>
                                                 <span class="stat-label">docs</span>
                                                 <span class="stat-size"><?php echo formatBytes($user['total_size'] ?? 0); ?></span>
                                             </div>
@@ -421,10 +418,8 @@ function getFileExtension($filename)
                                     <?php endforeach; ?>
                                 </div>
                             </div>
-                        <?php endif; ?>
-
-                        <!-- Lista de usuarios que descargan documentos -->
-                        <?php if (!empty($activity['user_downloads'])): ?>
+                        <?php endif; ?><!-- Lista de usuarios que descargan documentos -->
+                        <?php if (!empty($activity['user_downloads']) && is_array($activity['user_downloads'])): ?>
                             <div class="chart-card users-section">
                                 <h3>
                                     <i data-feather="download"></i>
@@ -435,11 +430,11 @@ function getFileExtension($filename)
                                         <div class="user-row rank-<?php echo min($index + 1, 3); ?>">
                                             <span class="user-rank">#<?php echo $index + 1; ?></span>
                                             <div class="user-details">
-                                                <span class="user-name"><?php echo htmlspecialchars(trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: $user['username']); ?></span>
-                                                <span class="user-username">@<?php echo htmlspecialchars($user['username']); ?></span>
+                                                <span class="user-name"><?php echo htmlspecialchars(trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: ($user['username'] ?? 'Usuario')); ?></span>
+                                                <span class="user-username">@<?php echo htmlspecialchars($user['username'] ?? 'usuario'); ?></span>
                                             </div>
                                             <div class="user-stats">
-                                                <span class="stat-number"><?php echo number_format($user['downloads_count']); ?></span>
+                                                <span class="stat-number"><?php echo number_format($user['downloads_count'] ?? 0); ?></span>
                                                 <span class="stat-label">descargas</span>
                                             </div>
                                         </div>
@@ -448,13 +443,11 @@ function getFileExtension($filename)
                             </div>
                         <?php endif; ?>
 
-
                     </div>
                 </div>
-            <?php else: ?>
-                <!-- Vista detallada -->
+            <?php else: ?><!-- Vista detallada -->
                 <div class="reports-table">
-                    <h3>Lista Detallada de Documentos (<?php echo count($documents); ?> registros)</h3>
+                    <h3>Lista Detallada de Documentos (<?php echo count($documents ?? []); ?> registros)</h3>
                     <div class="table-container">
                         <table class="data-table">
                             <thead>
@@ -470,13 +463,13 @@ function getFileExtension($filename)
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (!empty($documents)): ?>
+                                <?php if (!empty($documents) && is_array($documents)): ?>
                                     <?php foreach ($documents as $doc): ?>
                                         <tr>
                                             <td>
                                                 <div class="document-info">
                                                     <i data-feather="file-text"></i>
-                                                    <span><?php echo htmlspecialchars($doc['name']); ?></span>
+                                                    <span><?php echo htmlspecialchars($doc['name'] ?? ''); ?></span>
                                                 </div>
                                             </td>
                                             <td><?php echo htmlspecialchars($doc['document_type'] ?? 'Sin tipo'); ?></td>
@@ -488,12 +481,11 @@ function getFileExtension($filename)
                                                 </div>
                                             </td>
                                             <td><?php echo formatBytes($doc['file_size'] ?? 0); ?></td>
-                                            <td><?php echo date('d/m/Y H:i', strtotime($doc['created_at'])); ?></td>
+                                            <td><?php echo isset($doc['created_at']) ? date('d/m/Y H:i', strtotime($doc['created_at'])) : '-'; ?></td>
                                             <td><span class="badge badge-info"><?php echo number_format($doc['download_count'] ?? 0); ?></span></td>
                                             <td><span class="badge badge-success"><?php echo number_format($doc['view_count'] ?? 0); ?></span></td>
                                         </tr>
-                                    <?php endforeach; ?>
-                                <?php else: ?>
+                                    <?php endforeach; ?><?php else: ?>
                                     <tr>
                                         <td colspan="8" class="empty-state">
                                             <div class="empty-content">
@@ -510,132 +502,11 @@ function getFileExtension($filename)
                 </div>
             <?php endif; ?>
 
-            <!-- Tabla de documentos con el mismo estilo de activity_log.php -->
-            <div class="reports-table enhanced-table">
-                <div class="table-header">
-                    <h3><i data-feather="file-text"></i> Lista de Documentos (<?php echo number_format(count($documents)); ?> registros)</h3>
-                    <div class="table-actions">
-                        <span class="pagination-info-header">
-                            Filtros aplicados: <?php
-                                                $activeFilters = 0;
-                                                if ($dateFrom !== date('Y-m-d', strtotime('-30 days'))) $activeFilters++;
-                                                if ($dateTo !== date('Y-m-d')) $activeFilters++;
-                                                if ($companyId) $activeFilters++;
-                                                if ($documentType) $activeFilters++;
-                                                echo $activeFilters;
-                                                ?>
-                        </span>
-                        <span class="status-indicator active">
-                            <i data-feather="database"></i>
-                            Sistema Activo
-                        </span>
-                    </div>
-                </div>
-
-                <?php if (!empty($documents)): ?>
-                    <div class="table-container">
-                        <table class="data-table activity-table enhanced-activity-table">
-                            <thead>
-                                <tr>
-                                    <th><i data-feather="calendar"></i> FECHA/HORA</th>
-                                    <th><i data-feather="user"></i> USUARIO</th>
-                                    <th><i data-feather="file-text"></i> DOCUMENTO</th>
-                                    <th><i data-feather="building"></i> EMPRESA</th>
-                                    <th><i data-feather="tag"></i> TIPO</th>
-                                    <th><i data-feather="hard-drive"></i> TAMAÑO</th>
-                                    <th><i data-feather="eye"></i> VISTAS</th>
-                                    <th><i data-feather="download"></i> DESCARGAS</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($documents as $doc): ?>
-                                    <tr>
-                                        <td>
-                                            <div class="datetime-cell">
-                                                <div class="date"><?php echo date('d/m/Y', strtotime($doc['created_at'])); ?></div>
-                                                <div class="time"><?php echo date('H:i:s', strtotime($doc['created_at'])); ?></div>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="user-cell">
-                                                <div class="user-avatar">
-                                                    <?php echo strtoupper(substr($doc['first_name'], 0, 1) . substr($doc['last_name'], 0, 1)); ?>
-                                                </div>
-                                                <div class="user-info">
-                                                    <div class="user-name"><?php echo htmlspecialchars($doc['first_name'] . ' ' . $doc['last_name']); ?></div>
-                                                    <div class="user-username">@<?php echo htmlspecialchars($doc['username']); ?></div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="action-cell">
-                                                <div class="action-name" title="<?php echo htmlspecialchars($doc['original_filename']); ?>">
-                                                    <?php echo htmlspecialchars(strlen($doc['name']) > 40 ? substr($doc['name'], 0, 40) . '...' : $doc['name']); ?>
-                                                </div>
-                                                <div class="action-description">
-                                                    <?php echo htmlspecialchars($doc['original_filename']); ?>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="company-cell">
-                                                <?php echo htmlspecialchars($doc['company_name']); ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <?php
-                                            $ext = getFileExtension($doc['original_filename']);
-                                            $typeClass = 'type-' . ($ext ?: 'unknown');
-                                            ?>
-                                            <span class="file-type-badge <?php echo $typeClass; ?>">
-                                                <?php echo strtoupper($ext ?: 'UNK'); ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div class="size-cell">
-                                                <?php echo formatBytes($doc['file_size']); ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="view-count badge-info">
-                                                <?php echo number_format($doc['view_count']); ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <span class="download-count badge-success">
-                                                <?php echo number_format($doc['download_count']); ?>
-                                            </span>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <div class="no-data-state">
-                        <div class="no-data-icon">
-                            <i data-feather="search"></i>
-                        </div>
-                        <h3>No se encontraron documentos</h3>
-                        <p>No hay documentos que coincidan con los filtros seleccionados.</p>
-                        <div class="no-data-actions">
-                            <button type="button" onclick="limpiarFiltros()" class="btn-filter secondary">
-                                <i data-feather="refresh-cw"></i>
-                                Limpiar Filtros
-                            </button>
-                        </div>
-                    </div>
-                <?php endif; ?>
-            </div>
-
         </div>
     </main>
 
     <script src="../../assets/js/dashboard.js"></script>
     <script>
-        var currentFilters = <?php echo json_encode($_GET); ?>;
-
         document.addEventListener('DOMContentLoaded', function() {
             feather.replace();
             updateTime();
@@ -645,7 +516,6 @@ function getFileExtension($filename)
                 initCharts();
             <?php endif; ?>
 
-            // Hacer filtros automáticos
             setupAutoFilters();
         });
 
@@ -664,18 +534,14 @@ function getFileExtension($filename)
                 });
                 timeElement.textContent = `${dateString} ${timeString}`;
             }
-        }
-
-        function toggleSidebar() {
+        }function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             if (window.innerWidth <= 768) {
                 sidebar.classList.toggle('active');
             }
         }
 
-        // Función para limpiar filtros
         function limpiarFiltros() {
-            // Restaurar valores por defecto
             document.getElementById('date_from').value = '<?php echo date('Y-m-d', strtotime('-30 days')); ?>';
             document.getElementById('date_to').value = '<?php echo date('Y-m-d'); ?>';
 
@@ -693,13 +559,10 @@ function getFileExtension($filename)
                 document.getElementById('report_type').value = 'summary';
             }
 
-            // Enviar formulario
             document.querySelector('form').submit();
         }
 
-        // Configurar filtros automáticos
         function setupAutoFilters() {
-            // Agregar eventos de cambio a todos los campos de filtro
             const filterInputs = ['date_from', 'date_to', 'document_type', 'report_type'];
             <?php if ($currentUser['role'] === 'admin'): ?>
                 filterInputs.push('company_id');
@@ -709,7 +572,6 @@ function getFileExtension($filename)
                 const element = document.getElementById(inputId);
                 if (element) {
                     element.addEventListener('change', function() {
-                        // Pequeña demora para evitar múltiples envíos
                         setTimeout(function() {
                             document.querySelector('form').submit();
                         }, 300);
@@ -719,95 +581,13 @@ function getFileExtension($filename)
         }
 
         function exportarDatos(formato) {
-            const urlParams = new URLSearchParams(window.location.search);
-            const exportUrl = 'export.php?format=' + formato + '&type=documents_report&modal=1&' + urlParams.toString();
-
-            if (formato === 'pdf') {
-                abrirModalPDF(exportUrl);
-            } else {
-                mostrarNotificacion('Preparando descarga...', 'info');
-                window.open(exportUrl.replace('&modal=1', ''), '_blank');
-            }
-        }
-
-        function abrirModalPDF(url) {
-            // Crear modal para PDF
-            const modal = document.createElement('div');
-            modal.className = 'pdf-modal';
-            modal.innerHTML = `
-               <div class="pdf-modal-content">
-                   <div class="pdf-modal-header">
-                       <h3><i data-feather="file-text"></i> Reporte de Documentos - PDF</h3>
-                       <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
-                   </div>
-                   <div class="pdf-modal-body">
-                       <div class="pdf-preview-container">
-                           <div class="pdf-loading">
-                               <div class="loading-spinner"></div>
-                               <p>Generando reporte PDF...</p>
-                           </div>
-                           <iframe id="pdfFrame" src="${url.replace('&modal=1', '')}" style="display: none;"></iframe>
-                       </div>
-                       <div class="pdf-actions">
-                           <button class="btn-primary" onclick="descargarPDF('${url.replace('&modal=1', '')}')">
-                               <i data-feather="download"></i> Descargar PDF
-                           </button>
-                       </div>
-                   </div>
-               </div>
-           `;
-
-            document.body.appendChild(modal);
-            feather.replace();
-
-            // Mostrar iframe cuando cargue
-            const iframe = document.getElementById('pdfFrame');
-            iframe.onload = function() {
-                document.querySelector('.pdf-loading').style.display = 'none';
-                iframe.style.display = 'block';
-            };
-
-            // Cerrar modal al hacer clic fuera
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) {
-                    cerrarModalPDF();
-                }
-            });
-        }
-
-        function cerrarModalPDF() {
-            const modal = document.querySelector('.pdf-modal');
-            if (modal) {
-                modal.remove();
-            }
-        }
-
-        function descargarPDF(url) {
-            window.open(url, '_blank');
-            mostrarNotificacion('Descargando PDF...', 'success');
-        }
-
-        function mostrarNotificacion(mensaje, tipo = 'info') {
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-               position: fixed; top: 20px; right: 20px; padding: 15px 20px;
-               background: ${tipo === 'error' ? '#dc3545' : tipo === 'success' ? '#28a745' : '#17a2b8'};
-               color: white; border-radius: 4px; z-index: 1000;
-               box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-family: Arial, sans-serif;
-           `;
-            notification.textContent = mensaje;
-            document.body.appendChild(notification);
-            setTimeout(() => notification.remove(), 3000);
+            alert('Función de exportación próximamente');
         }
 
         function showComingSoon(feature) {
             alert(`${feature} - Próximamente`);
-        }
-
-        <?php if ($reportType === 'summary'): ?>
-
+        }<?php if ($reportType === 'summary'): ?>
             function initCharts() {
-                // Gráfico de tipos - MEJORADO
                 const typeData = <?php echo json_encode($stats['by_type'] ?? []); ?>;
                 if (typeData.length > 0) {
                     const typeCtx = document.getElementById('typeChart');
@@ -861,89 +641,6 @@ function getFileExtension($filename)
                         });
                     }
                 }
-
-                // Gráfico por día - MEJORADO
-                const dateData = <?php echo json_encode($stats['by_date'] ?? []); ?>;
-                if (dateData.length > 0) {
-                    const dateCtx = document.getElementById('dateChart');
-                    if (dateCtx) {
-                        new Chart(dateCtx.getContext('2d'), {
-                            type: 'line',
-                            data: {
-                                labels: dateData.map(item => {
-                                    const date = new Date(item.date);
-                                    return date.toLocaleDateString('es-ES', {
-                                        day: '2-digit',
-                                        month: '2-digit'
-                                    });
-                                }),
-                                datasets: [{
-                                    label: 'Documentos subidos',
-                                    data: dateData.map(item => item.count),
-                                    borderColor: '#3b82f6',
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    borderWidth: 3,
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointBackgroundColor: '#3b82f6',
-                                    pointBorderColor: '#ffffff',
-                                    pointBorderWidth: 2,
-                                    pointRadius: 5,
-                                    pointHoverRadius: 8,
-                                    pointHoverBackgroundColor: '#1d4ed8',
-                                    pointHoverBorderColor: '#ffffff',
-                                    pointHoverBorderWidth: 3
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: {
-                                        display: false
-                                    },
-                                    tooltip: {
-                                        mode: 'index',
-                                        intersect: false,
-                                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                        titleColor: '#ffffff',
-                                        bodyColor: '#ffffff',
-                                        borderColor: '#3b82f6',
-                                        borderWidth: 1
-                                    }
-                                },
-                                scales: {
-                                    x: {
-                                        grid: {
-                                            display: false
-                                        },
-                                        ticks: {
-                                            color: '#6b7280'
-                                        }
-                                    },
-                                    y: {
-                                        beginAtZero: true,
-                                        ticks: {
-                                            stepSize: 1,
-                                            color: '#6b7280'
-                                        },
-                                        grid: {
-                                            color: 'rgba(107, 114, 128, 0.1)'
-                                        }
-                                    }
-                                },
-                                interaction: {
-                                    intersect: false,
-                                    mode: 'index'
-                                },
-                                animation: {
-                                    duration: 1000,
-                                    easing: 'easeInOutQuart'
-                                }
-                            }
-                        });
-                    }
-                }
             }
         <?php endif; ?>
 
@@ -953,778 +650,234 @@ function getFileExtension($filename)
                 if (sidebar) sidebar.classList.remove('active');
             }
         });
-    </script>
-
-    <style>
-        /* Aplicar los mismos colores elegantes de user_reports.php */
-        :root {
-            --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
-            --secondary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-            --success-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
-            --warning-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
-            --info-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-            --soft-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-
-        /* Sobrescribir estadísticas con diseño elegante */
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow) !important;
-            border: 1px solid #e5e7eb !important;
-            position: relative !important;
-            overflow: hidden !important;
-            transition: all 0.3s ease !important;
-            padding: 1.5rem !important;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
-        }
-
-        .stat-card:nth-child(2)::before {
-            background: var(--info-gradient) !important;
-        }
-
-        .stat-card:nth-child(3)::before {
-            background: var(--success-gradient) !important;
-        }
-
-        .stat-card:nth-child(4)::before {
-            background: var(--warning-gradient) !important;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: var(--soft-shadow-lg) !important;
-        }
-
-        .stat-icon {
-            background: var(--primary-gradient) !important;
-            border-radius: 16px !important;
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3) !important;
-            width: 60px !important;
-            height: 60px !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            color: white !important;
-        }
-
-        .stat-card:nth-child(2) .stat-icon {
-            background: var(--info-gradient) !important;
-            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3) !important;
-        }
-
-        .stat-card:nth-child(3) .stat-icon {
-            background: var(--success-gradient) !important;
-            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3) !important;
-        }
-
-        .stat-card:nth-child(4) .stat-icon {
-            background: var(--warning-gradient) !important;
-            box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3) !important;
-        }
-
-        .stat-number {
-            background: var(--primary-gradient) !important;
-            -webkit-background-clip: text !important;
-            -webkit-text-fill-color: transparent !important;
-            background-clip: text !important;
-            font-weight: 700 !important;
-            font-size: 2rem !important;
-            line-height: 1 !important;
-            margin-bottom: 0.25rem !important;
-        }
-
-        /* Filtros con diseño elegante */
-        .reports-filters {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow) !important;
-            border: 1px solid #e5e7eb !important;
-            position: relative !important;
-            overflow: hidden !important;
-            padding: 2rem !important;
-            margin-bottom: 2rem !important;
-        }
-
-        .reports-filters::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
-        }
-
-        .reports-filters h3 {
-            margin: 0 0 1.5rem 0 !important;
-            color: #1f2937 !important;
-            font-size: 1.25rem !important;
-            font-weight: 600 !important;
-        }
-
-        .filter-group input,
-        .filter-group select {
-            padding: 0.75rem !important;
-            border: 2px solid #e5e7eb !important;
-            border-radius: 8px !important;
-            font-size: 0.875rem !important;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
-        }
-
-        .filter-group input:focus,
-        .filter-group select:focus {
-            outline: none !important;
-            border-color: #8B4513 !important;
-            box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1) !important;
-        }
-
-        /* Sección de exportar elegante */
-        .export-section {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow) !important;
-            border: 1px solid #e5e7eb !important;
-            padding: 2rem !important;
-            margin-bottom: 2rem !important;
-        }
-
-        .export-section h3 {
-            margin: 0 0 1.5rem 0 !important;
-            color: #1f2937 !important;
-            font-size: 1.25rem !important;
-            font-weight: 600 !important;
-        }
-
-        .export-btn {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border: 2px solid #e5e7eb !important;
-            border-radius: 12px !important;
-            box-shadow: var(--soft-shadow) !important;
-            transition: all 0.3s ease !important;
-            padding: 0.875rem 1.5rem !important;
-            font-weight: 500 !important;
-            color: #374151 !important;
-        }
-
-        .export-btn:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: var(--soft-shadow-lg) !important;
-            border-color: #8B4513 !important;
-            color: #8B4513 !important;
-        }
-
-        /* Botones de filtro elegantes */
-        .btn-filter {
-            background: var(--primary-gradient) !important;
-            border: none !important;
-            border-radius: 8px !important;
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3) !important;
-            transition: all 0.3s ease !important;
-            color: white !important;
-            padding: 0.75rem 1.5rem !important;
-            font-weight: 500 !important;
-        }
-
-        .btn-filter:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: 0 6px 12px rgba(139, 69, 19, 0.4) !important;
-            color: white !important;
-            text-decoration: none !important;
-        }
-
-        .btn-filter.secondary {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            color: #374151 !important;
-            border: 2px solid #e5e7eb !important;
-            box-shadow: var(--soft-shadow) !important;
-        }
-
-        .btn-filter.secondary:hover {
-            border-color: #8B4513 !important;
-            color: #8B4513 !important;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-        }
-
-        /* Gráficos y tarjetas elegantes */
-        .chart-card,
-        .users-section {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow-lg) !important;
-            border: 1px solid #e5e7eb !important;
-            padding: 1.5rem !important;
-            position: relative !important;
-            overflow: hidden !important;
-        }
-
-        .chart-card::before,
-        .users-section::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--info-gradient);
-        }
-
-        .users-section:nth-child(odd)::before {
-            background: var(--success-gradient);
-        }
-
-        .chart-card h3,
-        .users-section h3 {
-            color: #1f2937 !important;
-            font-size: 1.125rem !important;
-            font-weight: 600 !important;
-            margin: 0 0 1rem 0 !important;
-        }
-
-        .chart-card h3 i,
-        .users-section h3 i {
-            color: #8B4513 !important;
-        }
-
-        /* Tabla elegante */
-        .reports-table {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow-lg) !important;
-            border: 1px solid #e5e7eb !important;
-            overflow: hidden !important;
-        }
-
-        .reports-table h3 {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            padding: 1.5rem !important;
-            margin: 0 !important;
-            color: #1f2937 !important;
-            font-size: 1.25rem !important;
-            font-weight: 600 !important;
-            border-bottom: 1px solid #e5e7eb !important;
-        }
-
-        .data-table th {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            padding: 1rem 0.75rem !important;
-            font-weight: 600 !important;
-            color: #374151 !important;
-            border-bottom: 2px solid #e5e7eb !important;
-            font-size: 0.875rem !important;
-        }
-
-        .data-table td {
-            padding: 1rem 0.75rem !important;
-            border-bottom: 1px solid #f3f4f6 !important;
-            vertical-align: middle !important;
-        }
-
-        .data-table tbody tr:hover {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-        }
-
-        /* Badges elegantes */
-        .badge {
-            padding: 0.25rem 0.75rem !important;
-            border-radius: 20px !important;
-            font-size: 0.75rem !important;
-            font-weight: 600 !important;
-            display: inline-block !important;
-        }
-
-        .badge-info {
-            background: var(--info-gradient) !important;
-            color: white !important;
-            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3) !important;
-        }
-
-        .badge-success {
-            background: var(--success-gradient) !important;
-            color: white !important;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3) !important;
-        }
-
-        /* Lista de usuarios elegante */
-        .users-compact-list {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            border: 1px solid #e5e7eb !important;
-            border-radius: 12px !important;
-        }
-
-        .user-row {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-bottom: 1px solid #e5e7eb !important;
-            transition: all 0.3s ease !important;
-        }
-
-        .user-row:hover {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e5e7eb 100%) !important;
-            transform: translateX(3px) !important;
-        }
-
-        .user-row.rank-1 {
-            border-left: 4px solid #8B4513 !important;
-            background: linear-gradient(90deg, rgba(139, 69, 19, 0.05) 0%, #ffffff 100%) !important;
-        }
-
-        .user-row.rank-2 {
-            border-left: 4px solid #3B82F6 !important;
-            background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, #ffffff 100%) !important;
-        }
-
-        .user-row.rank-3 {
-            border-left: 4px solid #10B981 !important;
-            background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, #ffffff 100%) !important;
-        }
-
-        .rank-1 .user-rank {
-            color: #8B4513 !important;
-            font-weight: 700 !important;
-        }
-
-        .rank-2 .user-rank {
-            color: #3B82F6 !important;
-            font-weight: 700 !important;
-        }
-
-        .rank-3 .user-rank {
-            color: #10B981 !important;
-            font-weight: 700 !important;
-        }
-
-        .user-name {
-            color: #1f2937 !important;
-            font-weight: 600 !important;
-        }
-
-        .user-username {
-            color: #8B4513 !important;
-            background: rgba(139, 69, 19, 0.1) !important;
-            padding: 2px 6px !important;
-            border-radius: 8px !important;
-            font-size: 0.65rem !important;
-        }
-
-        .stat-number {
-            color: #1f2937 !important;
-            font-weight: 700 !important;
-        }
-
-        .stat-size {
-            color: #8B4513 !important;
-            font-weight: 500 !important;
-        }
-
-        /* Estado vacío elegante */
-        .empty-state {
-            text-align: center !important;
-            padding: 4rem 2rem !important;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-        }
-
-        .empty-content i {
-            color: #8B4513 !important;
-            opacity: 0.5 !important;
-        }
-
-        .empty-content h4 {
-            color: #1f2937 !important;
-            margin: 1rem 0 0.5rem 0 !important;
-        }
-
-        .empty-content p {
-            color: #6b7280 !important;
-        }
-
-        /* Estilos específicos para la tabla de documentos - activity_log style */
-        .enhanced-table {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: var(--soft-shadow-lg) !important;
-            border: 1px solid #e5e7eb !important;
-            overflow: hidden !important;
-            margin: 2rem 0 !important;
-        }
-
-        .table-header {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            padding: 1.5rem !important;
-            border-bottom: 1px solid #e5e7eb !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
-            flex-wrap: wrap !important;
-        }
-
-        .table-header h3 {
-            margin: 0 !important;
-            color: #1f2937 !important;
-            font-size: 1.25rem !important;
-            font-weight: 600 !important;
-            display: flex !important;
-            align-items: center !important;
-            gap: 0.5rem !important;
-        }
-
-        .table-header h3 i {
-            color: #8B4513 !important;
-        }
-
-        .table-actions {
-            display: flex !important;
-            align-items: center !important;
-            gap: 1rem !important;
-            flex-wrap: wrap !important;
-        }
-
-        .pagination-info-header,
-        .status-indicator {
-            font-size: 0.875rem !important;
-            font-weight: 500 !important;
-            display: flex !important;
-            align-items: center !important;
-            gap: 0.25rem !important;
-        }
-
-        .pagination-info-header {
-            color: #6b7280 !important;
-        }
-
-        .status-indicator.active {
-            color: #10b981 !important;
-            background: rgba(16, 185, 129, 0.1) !important;
-            padding: 0.25rem 0.75rem !important;
-            border-radius: 20px !important;
-        }
-
-        .enhanced-activity-table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-        }
-
-        .enhanced-activity-table th {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-            padding: 1rem 0.75rem !important;
-            font-weight: 600 !important;
-            color: #374151 !important;
-            border-bottom: 2px solid #e5e7eb !important;
-            font-size: 0.875rem !important;
-            text-align: left !important;
-        }
-
-        .enhanced-activity-table th i {
-            color: #8B4513 !important;
-            margin-right: 0.5rem !important;
-        }
-
-        .enhanced-activity-table td {
-            padding: 1rem 0.75rem !important;
-            border-bottom: 1px solid #f3f4f6 !important;
-            vertical-align: middle !important;
-        }
-
-        .enhanced-activity-table tbody tr:hover {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-        }
-
-        /* Celdas específicas */
-        .datetime-cell {
-            display: flex !important;
-            flex-direction: column !important;
-            gap: 0.25rem !important;
-        }
-
-        .datetime-cell .date {
-            font-weight: 600 !important;
-            color: #1f2937 !important;
-            font-size: 0.875rem !important;
-        }
-
-        .datetime-cell .time {
-            color: #6b7280 !important;
-            font-size: 0.75rem !important;
-            font-family: 'Consolas', 'Monaco', monospace !important;
-        }
-
-        .user-cell {
-            display: flex !important;
-            align-items: center !important;
-            gap: 0.75rem !important;
-        }
-
-        .user-avatar {
-            width: 40px !important;
-            height: 40px !important;
-            background: var(--primary-gradient) !important;
-            border-radius: 50% !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            color: white !important;
-            font-weight: 600 !important;
-            font-size: 0.875rem !important;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.3) !important;
-        }
-
-        .user-info .user-name {
-            font-weight: 600 !important;
-            color: #1f2937 !important;
-            font-size: 0.875rem !important;
-            display: block !important;
-        }
-
-        .user-info .user-username {
-            color: #8B4513 !important;
-            background: rgba(139, 69, 19, 0.1) !important;
-            padding: 2px 6px !important;
-            border-radius: 8px !important;
-            font-size: 0.65rem !important;
-            font-weight: 500 !important;
-            display: inline-block !important;
-            margin-top: 2px !important;
-        }
-
-        .action-cell .action-name {
-            font-weight: 600 !important;
-            color: #1f2937 !important;
-            font-size: 0.875rem !important;
-            margin-bottom: 0.25rem !important;
-        }
-
-        .action-cell .action-description {
-            color: #6b7280 !important;
-            font-size: 0.75rem !important;
-        }
-
-        .company-cell {
-            font-weight: 500 !important;
-            color: #475569 !important;
-        }
-
-        .size-cell {
-            font-family: 'Consolas', 'Monaco', monospace !important;
-            font-weight: 500 !important;
-            color: #64748b !important;
-        }
-
-        /* Badges para tipos de archivo */
-        .file-type-badge {
-            display: inline-block !important;
-            padding: 0.25rem 0.5rem !important;
-            border-radius: 4px !important;
-            font-size: 0.75rem !important;
-            font-weight: 600 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.025em !important;
-            font-family: monospace !important;
-        }
-
-        .type-pdf {
-            background: rgba(239, 68, 68, 0.1) !important;
-            color: #ef4444 !important;
-        }
-
-        .type-doc,
-        .type-docx {
-            background: rgba(59, 130, 246, 0.1) !important;
-            color: #3b82f6 !important;
-        }
-
-        .type-xls,
-        .type-xlsx {
-            background: rgba(16, 185, 129, 0.1) !important;
-            color: #10b981 !important;
-        }
-
-        .type-jpg,
-        .type-jpeg,
-        .type-png,
-        .type-gif {
-            background: rgba(245, 158, 11, 0.1) !important;
-            color: #f59e0b !important;
-        }
-
-        .type-zip,
-        .type-rar {
-            background: rgba(139, 69, 19, 0.1) !important;
-            color: #8b4513 !important;
-        }
-
-        .type-txt {
-            background: rgba(107, 114, 128, 0.1) !important;
-            color: #6b7280 !important;
-        }
-
-        .type-unknown {
-            background: rgba(156, 163, 175, 0.1) !important;
-            color: #9ca3af !important;
-        }
-
-        /* Badges para contadores - redefinidos para la nueva tabla */
-        .enhanced-activity-table .view-count,
-        .enhanced-activity-table .download-count {
-            display: inline-block !important;
-            padding: 4px 8px !important;
-            border-radius: 12px !important;
-            font-size: 0.75rem !important;
-            font-weight: 600 !important;
-            min-width: 24px !important;
-            text-align: center !important;
-        }
-
-        .enhanced-activity-table .view-count.badge-info {
-            background: var(--info-gradient) !important;
-            color: white !important;
-            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3) !important;
-        }
-
-        .enhanced-activity-table .download-count.badge-success {
-            background: var(--success-gradient) !important;
-            color: white !important;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3) !important;
-        }
-
-        /* Estado sin datos */
-        .no-data-state {
-            text-align: center !important;
-            padding: 4rem 2rem !important;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
-        }
-
-        .no-data-icon i {
-            color: #8B4513 !important;
-            opacity: 0.5 !important;
-            width: 48px !important;
-            height: 48px !important;
-        }
-
-        .no-data-state h3 {
-            color: #1f2937 !important;
-            margin: 1rem 0 0.5rem 0 !important;
-            font-size: 1.25rem !important;
-            font-weight: 600 !important;
-        }
-
-        .no-data-state p {
-            color: #6b7280 !important;
-            margin-bottom: 2rem !important;
-        }
-
-        /* Animaciones suaves */
-        @keyframes elegantFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .stat-card,
-        .chart-card,
-        .users-section,
-        .reports-filters,
-        .export-section,
-        .reports-table,
-        .enhanced-table {
-            animation: elegantFadeIn 0.6s ease-out !important;
-        }
-
-        .stat-card:nth-child(1) {
-            animation-delay: 0.1s !important;
-        }
-
-        .stat-card:nth-child(2) {
-            animation-delay: 0.2s !important;
-        }
-
-        .stat-card:nth-child(3) {
-            animation-delay: 0.3s !important;
-        }
-
-        .stat-card:nth-child(4) {
-            animation-delay: 0.4s !important;
-        }
-
-        /* Responsive mejorado */
-        @media (max-width: 768px) {
-            .stat-card {
-                padding: 1rem !important;
-            }
-
-            .stat-icon {
-                width: 50px !important;
-                height: 50px !important;
-            }
-
-            .stat-number {
-                font-size: 1.5rem !important;
-            }
-
-            .reports-filters,
-            .export-section {
-                padding: 1.5rem !important;
-            }
-
-            .table-header {
-                flex-direction: column !important;
-                align-items: flex-start !important;
-                gap: 1rem !important;
-            }
-
-            .table-actions {
-                width: 100% !important;
-                justify-content: space-between !important;
-            }
-
-            .enhanced-activity-table th:nth-child(4),
-            .enhanced-activity-table td:nth-child(4) {
-                display: none !important;
-                /* Ocultar empresa en móvil */
-            }
-
-            .enhanced-activity-table th:nth-child(7),
-            .enhanced-activity-table td:nth-child(7) {
-                display: none !important;
-                /* Ocultar vistas en móvil */
-            }
-        }
-
-        @media (max-width: 480px) {
-
-            .enhanced-activity-table th:nth-child(6),
-            .enhanced-activity-table td:nth-child(6) {
-                display: none !important;
-                /* Ocultar tamaño en móvil pequeño */
-            }
-
-            .user-cell {
-                flex-direction: column !important;
-                align-items: flex-start !important;
-                gap: 0.5rem !important;
-            }
-
-            .user-avatar {
-                width: 32px !important;
-                height: 32px !important;
-                font-size: 0.75rem !important;
-            }
-        }
-    </style>
+    </script><style>
+       :root {
+           --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
+           --secondary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+           --success-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
+           --warning-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+           --info-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+           --soft-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+           --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+       }
+
+       .stat-card {
+           background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+           border-radius: 16px !important;
+           box-shadow: var(--soft-shadow) !important;
+           border: 1px solid #e5e7eb !important;
+           position: relative !important;
+           overflow: hidden !important;
+           transition: all 0.3s ease !important;
+           padding: 1.5rem !important;
+       }
+
+       .stat-card::before {
+           content: '';
+           position: absolute;
+           top: 0;
+           left: 0;
+           width: 100%;
+           height: 4px;
+           background: var(--primary-gradient);
+       }
+
+       .stat-card:nth-child(2)::before {
+           background: var(--info-gradient) !important;
+       }
+
+       .stat-card:nth-child(3)::before {
+           background: var(--success-gradient) !important;
+       }
+
+       .stat-card:nth-child(4)::before {
+           background: var(--warning-gradient) !important;
+       }
+
+       .stat-card:hover {
+           transform: translateY(-2px) !important;
+           box-shadow: var(--soft-shadow-lg) !important;
+       }
+
+       .stat-icon {
+           background: var(--primary-gradient) !important;
+           border-radius: 16px !important;
+           box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3) !important;
+           width: 60px !important;
+           height: 60px !important;
+           display: flex !important;
+           align-items: center !important;
+           justify-content: center !important;
+           color: white !important;
+       }
+
+       .stat-card:nth-child(2) .stat-icon {
+           background: var(--info-gradient) !important;
+           box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3) !important;
+       }
+
+       .stat-card:nth-child(3) .stat-icon {
+           background: var(--success-gradient) !important;
+           box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3) !important;
+       }
+
+       .stat-card:nth-child(4) .stat-icon {
+           background: var(--warning-gradient) !important;
+           box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3) !important;
+       }.stat-number {
+           background: var(--primary-gradient) !important;
+           -webkit-background-clip: text !important;
+           -webkit-text-fill-color: transparent !important;
+           background-clip: text !important;
+           font-weight: 700 !important;
+           font-size: 2rem !important;
+           line-height: 1 !important;
+           margin-bottom: 0.25rem !important;
+       }
+
+       .reports-filters, .export-section, .chart-card, .reports-table {
+           background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+           border-radius: 16px !important;
+           box-shadow: var(--soft-shadow) !important;
+           border: 1px solid #e5e7eb !important;
+           margin-bottom: 2rem !important;
+           padding: 1.5rem !important;
+       }
+
+       .badge {
+           padding: 0.25rem 0.75rem !important;
+           border-radius: 20px !important;
+           font-size: 0.75rem !important;
+           font-weight: 600 !important;
+           display: inline-block !important;
+       }
+
+       .badge-info {
+           background: var(--info-gradient) !important;
+           color: white !important;
+           box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3) !important;
+       }
+
+       .badge-success {
+           background: var(--success-gradient) !important;
+           color: white !important;
+           box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3) !important;
+       }
+
+       .empty-state {
+           text-align: center !important;
+           padding: 4rem 2rem !important;
+           background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+       }
+
+       .empty-content i {
+           color: #8B4513 !important;
+           opacity: 0.5 !important;
+       }
+
+       .empty-content h4 {
+           color: #1f2937 !important;
+           margin: 1rem 0 0.5rem 0 !important;
+       }
+
+       .empty-content p {
+           color: #6b7280 !important;
+       }
+
+       .users-compact-list {
+           background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+           border: 1px solid #e5e7eb !important;
+           border-radius: 12px !important;
+       }
+
+       .user-row {
+           background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+           border-bottom: 1px solid #e5e7eb !important;
+           transition: all 0.3s ease !important;
+           padding: 0.75rem !important;
+           display: flex !important;
+           align-items: center !important;
+           gap: 1rem !important;
+       }
+
+       .user-row:hover {
+           background: linear-gradient(135deg, #f1f5f9 0%, #e5e7eb 100%) !important;
+           transform: translateX(3px) !important;
+       }.user-row.rank-1 {
+           border-left: 4px solid #8B4513 !important;
+           background: linear-gradient(90deg, rgba(139, 69, 19, 0.05) 0%, #ffffff 100%) !important;
+       }
+
+       .user-row.rank-2 {
+           border-left: 4px solid #3B82F6 !important;
+           background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, #ffffff 100%) !important;
+       }
+
+       .user-row.rank-3 {
+           border-left: 4px solid #10B981 !important;
+           background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, #ffffff 100%) !important;
+       }
+
+       .user-rank {
+           font-weight: 700 !important;
+           font-size: 0.875rem !important;
+           min-width: 30px !important;
+       }
+
+       .rank-1 .user-rank {
+           color: #8B4513 !important;
+       }
+
+       .rank-2 .user-rank {
+           color: #3B82F6 !important;
+       }
+
+       .rank-3 .user-rank {
+           color: #10B981 !important;
+       }
+
+       .user-details {
+           flex: 1 !important;
+       }
+
+       .user-name {
+           color: #1f2937 !important;
+           font-weight: 600 !important;
+           display: block !important;
+       }
+
+       .user-username {
+           color: #8B4513 !important;
+           background: rgba(139, 69, 19, 0.1) !important;
+           padding: 2px 6px !important;
+           border-radius: 8px !important;
+           font-size: 0.65rem !important;
+           display: inline-block !important;
+           margin-top: 2px !important;
+       }
+
+       .user-stats {
+           display: flex !important;
+           align-items: center !important;
+           gap: 0.5rem !important;
+       }
+
+       .stat-number {
+           color: #1f2937 !important;
+           font-weight: 700 !important;
+       }
+
+       .stat-label {
+           color: #6b7280 !important;
+           font-size: 0.75rem !important;
+       }
+
+       .stat-size {
+           color: #8B4513 !important;
+           font-weight: 500 !important;
+           font-size: 0.75rem !important;
+       }
+   </style>
 
 </body>
 

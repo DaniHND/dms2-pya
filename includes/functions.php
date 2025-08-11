@@ -1,6 +1,6 @@
 <?php
 // includes/functions.php
-// Funciones auxiliares globales para DMS2 - VERSIÓN SIMPLIFICADA
+// Funciones auxiliares globales para DMS2 - VERSIÓN COMPLETA
 
 // Evitar múltiples inclusiones
 if (defined('DMS2_FUNCTIONS_LOADED')) {
@@ -149,6 +149,12 @@ if (!function_exists('getMimeType')) {
     }
 }
 
+if (!function_exists('getFileExtension')) {
+    function getFileExtension($filename) {
+        return strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    }
+}
+
 // ============================================================================
 // FUNCIONES DE FORMATEO
 // ============================================================================
@@ -176,173 +182,146 @@ if (!function_exists('formatNumber')) {
     }
 }
 
+if (!function_exists('formatCurrency')) {
+    function formatCurrency($amount, $currency = 'HNL') {
+        $formatted = formatNumber($amount, 2);
+        return $currency . ' ' . $formatted;
+    }
+}
+
 // ============================================================================
-// FUNCIONES DE TEXTO
+// FUNCIONES DE LOGGING Y DEBUG
 // ============================================================================
+
+if (!function_exists('debugLog')) {
+    function debugLog($message, $data = null) {
+        $log = '[DEBUG] ' . date('Y-m-d H:i:s') . ' - ' . $message;
+        if ($data !== null) {
+            $log .= ' - ' . print_r($data, true);
+        }
+        error_log($log);
+    }
+}
+
+if (!function_exists('logError')) {
+    function logError($message, $context = []) {
+        $log = '[ERROR] ' . date('Y-m-d H:i:s') . ' - ' . $message;
+        if (!empty($context)) {
+            $log .= ' - Context: ' . json_encode($context);
+        }
+        error_log($log);
+    }
+}
+
+// ============================================================================
+// FUNCIONES DE UTILIDAD
+// ============================================================================
+
+if (!function_exists('getCurrentUrl')) {
+    function getCurrentUrl() {
+        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'];
+        $uri = $_SERVER['REQUEST_URI'];
+        return $protocol . '://' . $host . $uri;
+    }
+}
+
+if (!function_exists('getBaseUrl')) {
+    function getBaseUrl() {
+        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'];
+        $script = $_SERVER['SCRIPT_NAME'];
+        $base = dirname($script);
+        
+        if ($base === '/') {
+            $base = '';
+        }
+        
+        return $protocol . '://' . $host . $base;
+    }
+}
+
+if (!function_exists('redirect')) {
+    function redirect($url, $statusCode = 302) {
+        header('Location: ' . $url, true, $statusCode);
+        exit();
+    }
+}
+
+if (!function_exists('generateSlug')) {
+    function generateSlug($text) {
+        // Convertir a minúsculas
+        $text = strtolower($text);
+        
+        // Eliminar acentos
+        $text = iconv('UTF-8', 'ASCII//TRANSLIT', $text);
+        
+        // Eliminar caracteres especiales
+        $text = preg_replace('/[^a-z0-9]+/', '-', $text);
+        
+        // Eliminar guiones del inicio y final
+        $text = trim($text, '-');
+        
+        return $text;
+    }
+}
 
 if (!function_exists('truncateText')) {
     function truncateText($text, $length = 100, $suffix = '...') {
         if (strlen($text) <= $length) {
             return $text;
         }
+        
         return substr($text, 0, $length) . $suffix;
     }
 }
 
-if (!function_exists('slugify')) {
-    function slugify($text) {
-        // Convertir a minúsculas y reemplazar caracteres especiales
-        $text = strtolower(trim($text));
-        $text = preg_replace('/[^a-z0-9-]/', '-', $text);
-        $text = preg_replace('/-+/', '-', $text);
-        return trim($text, '-');
-    }
-}
-
 // ============================================================================
-// FUNCIONES DE TIEMPO SIMPLIFICADAS
-// ============================================================================
-
-if (!function_exists('timeAgo')) {
-    function timeAgo($datetime) {
-        if (empty($datetime)) {
-            return 'nunca';
-        }
-        
-        try {
-            $time = strtotime($datetime);
-            if ($time === false) {
-                return 'fecha inválida';
-            }
-            
-            $diff = time() - $time;
-            
-            if ($diff < 60) {
-                return 'hace un momento';
-            } elseif ($diff < 3600) {
-                $minutes = floor($diff / 60);
-                return "hace $minutes minuto" . ($minutes > 1 ? 's' : '');
-            } elseif ($diff < 86400) {
-                $hours = floor($diff / 3600);
-                return "hace $hours hora" . ($hours > 1 ? 's' : '');
-            } elseif ($diff < 2592000) {
-                $days = floor($diff / 86400);
-                return "hace $days día" . ($days > 1 ? 's' : '');
-            } else {
-                return formatDate($datetime, 'd/m/Y');
-            }
-        } catch (Exception $e) {
-            return 'fecha inválida';
-        }
-    }
-}
-
-// ============================================================================
-// FUNCIONES DE ARRAYS
+// FUNCIONES DE ARRAYS Y COLECCIONES
 // ============================================================================
 
 if (!function_exists('arrayGet')) {
     function arrayGet($array, $key, $default = null) {
-        return isset($array[$key]) ? $array[$key] : $default;
-    }
-}
-
-if (!function_exists('arrayHas')) {
-    function arrayHas($array, $key) {
-        return isset($array[$key]);
-    }
-}
-
-// ============================================================================
-// FUNCIONES DE URL
-// ============================================================================
-
-if (!function_exists('baseUrl')) {
-    function baseUrl($path = '') {
-        try {
-            $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
-            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-            
-            // Detectar subdirectorio DMS2
-            $baseDir = '';
-            $requestUri = $_SERVER['REQUEST_URI'] ?? '';
-            if (strpos($requestUri, '/dms2/') !== false) {
-                $baseDir = '/dms2';
-            }
-            
-            $url = $protocol . '://' . $host . $baseDir;
-            
-            if (!empty($path)) {
-                $url .= '/' . ltrim($path, '/');
-            }
-            
-            return $url;
-        } catch (Exception $e) {
-            return 'http://localhost/dms2';
+        if (is_array($array) && array_key_exists($key, $array)) {
+            return $array[$key];
         }
+        return $default;
     }
 }
 
-if (!function_exists('currentUrl')) {
-    function currentUrl() {
-        try {
-            $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
-            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-            $uri = $_SERVER['REQUEST_URI'] ?? '';
-            
-            return $protocol . '://' . $host . $uri;
-        } catch (Exception $e) {
-            return '';
-        }
+if (!function_exists('arrayOnly')) {
+    function arrayOnly($array, $keys) {
+        return array_intersect_key($array, array_flip($keys));
     }
 }
 
-// ============================================================================
-// FUNCIONES DE RESPUESTA JSON
-// ============================================================================
-
-if (!function_exists('jsonResponse')) {
-    function jsonResponse($success, $message = '', $data = null, $httpCode = 200) {
-        http_response_code($httpCode);
-        header('Content-Type: application/json; charset=UTF-8');
-        
-        $response = [
-            'success' => $success,
-            'message' => $message
-        ];
-        
-        if ($data !== null) {
-            $response['data'] = $data;
-        }
-        
-        echo json_encode($response, JSON_UNESCAPED_UNICODE);
-        exit();
-    }
-}
-
-if (!function_exists('jsonSuccess')) {
-    function jsonSuccess($message = '', $data = null) {
-        jsonResponse(true, $message, $data);
-    }
-}
-
-if (!function_exists('jsonError')) {
-    function jsonError($message = '', $httpCode = 400) {
-        jsonResponse(false, $message, null, $httpCode);
+if (!function_exists('arrayExcept')) {
+    function arrayExcept($array, $keys) {
+        return array_diff_key($array, array_flip($keys));
     }
 }
 
 // ============================================================================
-// FUNCIONES DE DEBUG
+// FUNCIONES DE VALIDACIÓN AVANZADA
 // ============================================================================
 
-if (!function_exists('logDebug')) {
-    function logDebug($message, $data = null) {
-        $log = date('Y-m-d H:i:s') . ' - ' . $message;
-        if ($data !== null) {
-            $log .= ' - ' . print_r($data, true);
-        }
-        error_log($log);
+if (!function_exists('isValidUrl')) {
+    function isValidUrl($url) {
+        return filter_var($url, FILTER_VALIDATE_URL) !== false;
+    }
+}
+
+if (!function_exists('isValidDate')) {
+    function isValidDate($date, $format = 'Y-m-d') {
+        $d = DateTime::createFromFormat($format, $date);
+        return $d && $d->format($format) === $date;
+    }
+}
+
+if (!function_exists('isValidJson')) {
+    function isValidJson($string) {
+        json_decode($string);
+        return json_last_error() === JSON_ERROR_NONE;
     }
 }
 
@@ -356,6 +335,46 @@ if (!defined('MAX_FILE_SIZE')) {
 
 if (!defined('ALLOWED_EXTENSIONS')) {
     define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'csv', 'zip']);
+}
+
+// ============================================================================
+// FUNCIONES ESPECÍFICAS PARA EL SISTEMA DMS
+// ============================================================================
+
+if (!function_exists('getUserDisplayName')) {
+    function getUserDisplayName($user) {
+        if (is_array($user)) {
+            $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+            return $fullName ?: ($user['username'] ?? 'Usuario Desconocido');
+        }
+        return 'Usuario Desconocido';
+    }
+}
+
+if (!function_exists('getDocumentStatusBadge')) {
+    function getDocumentStatusBadge($status) {
+        $badges = [
+            'active' => '<span class="badge badge-success">Activo</span>',
+            'inactive' => '<span class="badge badge-secondary">Inactivo</span>',
+            'deleted' => '<span class="badge badge-danger">Eliminado</span>',
+            'pending' => '<span class="badge badge-warning">Pendiente</span>'
+        ];
+        
+        return $badges[$status] ?? '<span class="badge badge-secondary">Desconocido</span>';
+    }
+}
+
+if (!function_exists('getUserRoleBadge')) {
+    function getUserRoleBadge($role) {
+        $badges = [
+            'admin' => '<span class="badge badge-danger">Administrador</span>',
+            'manager' => '<span class="badge badge-primary">Gerente</span>',
+            'user' => '<span class="badge badge-success">Usuario</span>',
+            'viewer' => '<span class="badge badge-info">Visualizador</span>'
+        ];
+        
+        return $badges[$role] ?? '<span class="badge badge-secondary">Desconocido</span>';
+    }
 }
 
 ?>

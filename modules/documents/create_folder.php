@@ -1,15 +1,13 @@
 <?php
 /*
  * create_folder.php
- * API para crear carpetas de documentos
+ * API para crear carpetas de documentos - VERSIÓN CORREGIDA
  */
 
-header('Content-Type: application/json');
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+// Usar bootstrap para consistencia
+require_once '../../bootstrap.php';
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
+header('Content-Type: application/json');
 
 // Solo acepta POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -23,35 +21,52 @@ try {
     SessionManager::requireLogin();
     $currentUser = SessionManager::getCurrentUser();
     
-    // Verificar permisos
-    if ($currentUser['role'] !== 'admin') {
-        // Verificar permisos de usuario regular
-        $database = new Database();
-        $pdo = $database->getConnection();
-        
-        $permQuery = "
-            SELECT ug.module_permissions 
-            FROM user_groups ug
-            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-        $permStmt = $pdo->prepare($permQuery);
-        $permStmt->execute([$currentUser['id']]);
-        $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        $canCreate = false;
-        foreach ($permissions as $perm) {
-            $permData = json_decode($perm['module_permissions'] ?: '{}', true);
-            if ($permData['create'] ?? false) {
-                $canCreate = true;
-                break;
+    // ===== VERIFICACIÓN DE PERMISOS CORREGIDA =====
+    $hasCreatePermission = false;
+    
+    if ($currentUser['role'] === 'admin') {
+        $hasCreatePermission = true;
+    } else {
+        // Verificar sistema unificado
+        if (class_exists('UnifiedPermissionSystem')) {
+            try {
+                $permissionSystem = UnifiedPermissionSystem::getInstance();
+                $userPerms = $permissionSystem->getUserEffectivePermissions($currentUser['id']);
+                $hasCreatePermission = isset($userPerms['permissions']['create_folders']) && 
+                                       $userPerms['permissions']['create_folders'] === true;
+            } catch (Exception $e) {
+                error_log('ERROR en verificación de permisos create_folder: ' . $e->getMessage());
+                $hasCreatePermission = false;
+            }
+        } else {
+            // Sistema legacy - buscar permisos antiguos
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $permQuery = "
+                SELECT ug.module_permissions 
+                FROM user_groups ug
+                INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
+                WHERE ugm.user_id = ? AND ug.status = 'active'
+            ";
+            $permStmt = $pdo->prepare($permQuery);
+            $permStmt->execute([$currentUser['id']]);
+            $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            foreach ($permissions as $perm) {
+                $permData = json_decode($perm['module_permissions'] ?: '{}', true);
+                // Buscar tanto el permiso nuevo como el viejo
+                if (($permData['create_folders'] ?? false) || ($permData['create'] ?? false)) {
+                    $hasCreatePermission = true;
+                    break;
+                }
             }
         }
-        
-        if (!$canCreate) {
-            echo json_encode(['success' => false, 'message' => 'No tienes permisos para crear carpetas']);
-            exit;
-        }
+    }
+    
+    if (!$hasCreatePermission) {
+        echo json_encode(['success' => false, 'message' => 'No tienes permisos para crear carpetas']);
+        exit;
     }
     
     // Obtener datos del formulario
@@ -136,16 +151,15 @@ try {
         $folderId = $pdo->lastInsertId();
         
         // Log de actividad
-        $logQuery = "
-            INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
-            VALUES (?, 'create', 'document_folders', ?, ?, NOW())
-        ";
-        $logStmt = $pdo->prepare($logQuery);
-        $logStmt->execute([
-            $currentUser['id'],
-            $folderId,
-            "Carpeta '{$name}' creada en departamento {$department['name']}"
-        ]);
+        if (function_exists('logActivity')) {
+            logActivity(
+                $currentUser['id'],
+                'create',
+                'document_folders',
+                $folderId,
+                "Carpeta '{$name}' creada en departamento {$department['name']}"
+            );
+        }
         
         echo json_encode([
             'success' => true, 

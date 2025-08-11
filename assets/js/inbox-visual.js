@@ -252,37 +252,141 @@ async function moveDocumentToPath(docId, targetPath, docName) {
     }
 }
 
+// ===================================================================
+// BUSCAR Y REEMPLAZAR LA FUNCIÓN deleteDocument EN assets/js/inbox-visual.js
+// ===================================================================
+
+// ==========================================
+// CORRECCIÓN COMPLETA DEL SISTEMA DE ELIMINACIÓN
+// AGREGAR ESTE CÓDIGO AL FINAL DE assets/js/inbox-visual.js
+// ==========================================
+
+/**
+ * SOBRESCRIBIR la función deleteDocument existente
+ */
+// BUSCAR esta función en assets/js/inbox-visual.js y REEMPLAZARLA por esta versión:
+
 function deleteDocument(documentId, documentName) {
-    if (!canDelete) {
-        showNotification('❌ No tienes permisos para eliminar documentos', 'error');
+    console.log('🗑️ INICIO - Eliminar documento ID:', documentId);
+    
+    if (!documentId) {
+        console.error('🗑️ ERROR: ID de documento vacío');
+        alert('Error: ID de documento no válido');
         return;
     }
-
-    if (!confirm(`¿Eliminar "${documentName}"?\n\n⚠️ Esta acción no se puede deshacer.`)) {
+    
+    // Verificar permisos básicos si la variable existe
+    if (typeof canDelete !== 'undefined' && !canDelete) {
+        console.log('🗑️ ERROR: Sin permisos para eliminar');
+        alert('No tienes permisos para eliminar documentos');
         return;
     }
+    
+    // Preparar mensaje de confirmación
+    let confirmMessage = `¿Eliminar documento?`;
+    
+    if (documentName) {
+        confirmMessage = `¿Eliminar documento?
 
-    if (!confirm('¿Está completamente seguro? Esta es la última oportunidad.')) {
+📄 ${documentName}
+
+⚠️ Esta acción no se puede deshacer.`;
+    } else {
+        confirmMessage = `¿Eliminar documento ID: ${documentId}?
+
+⚠️ Esta acción no se puede deshacer.`;
+    }
+    
+    // Confirmaciones
+    if (!confirm(confirmMessage)) {
+        console.log('🗑️ Usuario canceló en primera confirmación');
         return;
     }
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = 'delete.php';
-    form.style.display = 'none';
-
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'document_id';
-    input.value = documentId;
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
-}
-
-// ====================================================================
-// FUNCIONES DE CARPETAS
+    
+    if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) {
+        console.log('🗑️ Usuario canceló en segunda confirmación');
+        return;
+    }
+    
+    console.log('🗑️ Usuario confirmó eliminación, procediendo...');
+    
+    // *** OBTENER PATH ACTUAL - Método simplificado ***
+    function getSimpleCurrentPath() {
+        // Método 1: Desde URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const pathFromUrl = urlParams.get('path');
+        
+        if (pathFromUrl) {
+            console.log('🗑️ Path de URL:', pathFromUrl);
+            return pathFromUrl;
+        }
+        
+        // Método 2: Desde variable global si existe
+        if (typeof currentPath !== 'undefined' && currentPath) {
+            console.log('🗑️ Path de variable:', currentPath);
+            return currentPath;
+        }
+        
+        // Método 3: Desde breadcrumbs
+        const breadcrumbs = document.querySelectorAll('.breadcrumb-item');
+        if (breadcrumbs.length > 0) {
+            const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
+            const pathFromBreadcrumb = lastBreadcrumb.dataset.breadcrumbPath || '';
+            if (pathFromBreadcrumb) {
+                console.log('🗑️ Path de breadcrumb:', pathFromBreadcrumb);
+                return pathFromBreadcrumb;
+            }
+        }
+        
+        console.log('🗑️ No se pudo obtener path');
+        return '';
+    }
+    
+    const currentPath = getSimpleCurrentPath();
+    console.log('🗑️ Path final obtenido:', currentPath);
+    
+    // Crear y enviar formulario de eliminación
+    try {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'delete.php';
+        form.style.display = 'none';
+        
+        // Campo del ID del documento
+        const inputDocId = document.createElement('input');
+        inputDocId.type = 'hidden';
+        inputDocId.name = 'document_id';
+        inputDocId.value = documentId.toString();
+        form.appendChild(inputDocId);
+        
+        // *** AGREGAR return_path ***
+        if (currentPath) {
+            const inputReturnPath = document.createElement('input');
+            inputReturnPath.type = 'hidden';
+            inputReturnPath.name = 'return_path';
+            inputReturnPath.value = currentPath;
+            form.appendChild(inputReturnPath);
+            console.log('🗑️ Agregando return_path:', currentPath);
+        } else {
+            console.log('🗑️ WARNING: No se pudo obtener currentPath');
+        }
+        
+        document.body.appendChild(form);
+        
+        console.log('🗑️ Enviando formulario de eliminación');
+        
+        // Mostrar notificación si la función existe
+        if (typeof showNotification === 'function') {
+            showNotification('Eliminando documento...', 'warning', 3000);
+        }
+        
+        form.submit();
+        
+    } catch (error) {
+        console.error('🗑️ ERROR al crear/enviar formulario:', error);
+        alert('Error al eliminar documento: ' + error.message);
+    }
+}// FUNCIONES DE CARPETAS
 // ====================================================================
 
 function createDocumentFolder() {

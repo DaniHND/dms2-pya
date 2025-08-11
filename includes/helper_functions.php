@@ -95,7 +95,7 @@ if (!function_exists('formatDate')) {
 }
 
 /**
- * Formatear tamaño de archivo
+ * Formatear tamaño de archivo (alias de formatBytes)
  */
 if (!function_exists('formatFileSize')) {
     function formatFileSize($bytes) {
@@ -150,20 +150,12 @@ if (!function_exists('isValidJson')) {
 }
 
 /**
- * Obtener extensión de archivo
- */
-if (!function_exists('getFileExtension')) {
-    function getFileExtension($filename) {
-        return strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-    }
-}
-
-/**
  * Obtener icono para tipo de archivo
+ * NOTA: Usa getFileExtension() que está definida en functions.php
  */
 if (!function_exists('getFileIcon')) {
     function getFileIcon($filename) {
-        $extension = getFileExtension($filename);
+        $extension = getFileExtension($filename); // Usa la función del functions.php
         
         $icons = [
             'pdf' => 'file-text',
@@ -194,10 +186,11 @@ if (!function_exists('getFileIcon')) {
 
 /**
  * Obtener color para tipo de archivo
+ * NOTA: Usa getFileExtension() que está definida en functions.php
  */
 if (!function_exists('getFileColor')) {
     function getFileColor($filename) {
-        $extension = getFileExtension($filename);
+        $extension = getFileExtension($filename); // Usa la función del functions.php
         
         $colors = [
             'pdf' => '#dc3545',
@@ -222,92 +215,7 @@ if (!function_exists('getFileColor')) {
 }
 
 /**
- * Verificar si un archivo es imagen
- */
-if (!function_exists('isImageFile')) {
-    function isImageFile($filename) {
-        $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-        return in_array(getFileExtension($filename), $imageExtensions);
-    }
-}
-
-/**
- * Obtener mensaje de error amigable
- */
-if (!function_exists('getFriendlyErrorMessage')) {
-    function getFriendlyErrorMessage($errorCode) {
-        $messages = [
-            'access_denied' => 'No tienes permisos para acceder a esta sección',
-            'file_not_found' => 'El archivo solicitado no fue encontrado',
-            'invalid_request' => 'La solicitud no es válida',
-            'database_error' => 'Error en la base de datos. Inténtalo más tarde',
-            'upload_error' => 'Error al subir el archivo',
-            'session_expired' => 'Tu sesión ha expirado. Por favor, inicia sesión nuevamente',
-        ];
-        
-        return $messages[$errorCode] ?? 'Ha ocurrido un error inesperado';
-    }
-}
-
-/**
- * Limpiar y validar entrada de usuario
- */
-if (!function_exists('cleanInput')) {
-    function cleanInput($input) {
-        if (is_array($input)) {
-            return array_map('cleanInput', $input);
-        }
-        
-        return trim(strip_tags($input));
-    }
-}
-
-/**
- * Validar email
- */
-if (!function_exists('isValidEmail')) {
-    function isValidEmail($email) {
-        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
-    }
-}
-
-/**
- * Generar breadcrumbs
- */
-if (!function_exists('generateBreadcrumbs')) {
-    function generateBreadcrumbs($items) {
-        if (empty($items)) return '';
-        
-        $html = '<nav aria-label="breadcrumb"><ol class="breadcrumb">';
-        
-        $count = count($items);
-        for ($i = 0; $i < $count; $i++) {
-            $item = $items[$i];
-            $isLast = ($i === $count - 1);
-            
-            $html .= '<li class="breadcrumb-item' . ($isLast ? ' active' : '') . '">';
-            
-            if (!$isLast && isset($item['url'])) {
-                $html .= '<a href="' . htmlspecialchars($item['url']) . '">';
-            }
-            
-            $html .= htmlspecialchars($item['text']);
-            
-            if (!$isLast && isset($item['url'])) {
-                $html .= '</a>';
-            }
-            
-            $html .= '</li>';
-        }
-        
-        $html .= '</ol></nav>';
-        
-        return $html;
-    }
-}
-
-/**
- * Obtener configuración del sistema
+ * Verificar permisos del sistema
  */
 if (!function_exists('getSystemConfig')) {
     function getSystemConfig($key, $default = null) {
@@ -328,12 +236,12 @@ if (!function_exists('getSystemConfig')) {
  */
 if (!function_exists('canUserPerform')) {
     function canUserPerform($action, $userId = null) {
-        // Usar el sistema de permisos
+        // Usar el sistema de permisos corregido
         if (function_exists('hasUserPermission')) {
             return hasUserPermission($action, $userId);
         }
         
-        // Fallback: solo admins pueden todo
+        // Si no hay sistema de permisos, usar fallback básico
         if ($userId === null) {
             return SessionManager::isAdmin();
         }

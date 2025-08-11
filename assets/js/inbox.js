@@ -559,3 +559,279 @@ function debugInbox() {
     console.log('- Current sort:', new URLSearchParams(window.location.search).get('sort') || 'name');
     console.log('- Current order:', new URLSearchParams(window.location.search).get('order') || 'asc');
 }
+// ==========================================
+// CÓDIGO JAVASCRIPT ADICIONAL PARA INBOX.PHP
+// Agregar al final del archivo assets/js/inbox.js
+// ==========================================
+
+/**
+ * Verificar permisos por grupos antes de mostrar botones
+ * Esta función debe llamarse al cargar la página
+ */
+function initializeGroupPermissions() {
+    console.log('🛡️ Inicializando verificación de permisos por grupos...');
+    
+    // Verificar si tenemos información de permisos del usuario
+    if (typeof userGroupPermissions !== 'undefined') {
+        console.log('📊 Permisos de usuario:', userGroupPermissions);
+        
+        // Verificar cada permiso específico
+        const permissions = {
+            canDelete: userGroupPermissions.delete_files || false,
+            canDownload: userGroupPermissions.download_files || false,
+            canView: userGroupPermissions.view_files || false,
+            canUpload: userGroupPermissions.upload_files || false,
+            canCreateFolders: userGroupPermissions.create_folders || false
+        };
+        
+        console.log('🔑 Permisos procesados:', permissions);
+        
+        // Actualizar botones según permisos
+        updateButtonsBasedOnPermissions(permissions);
+        
+        // Actualizar variable global canDelete
+        if (!permissions.canDelete) {
+            window.canDelete = false;
+            console.log('🚫 Permisos de eliminación deshabilitados por grupos');
+        }
+        
+    } else {
+        console.log('⚠️ No hay información de permisos por grupos, usando lógica tradicional');
+    }
+}
+
+/**
+ * Actualizar visibilidad de botones según permisos
+ */
+function updateButtonsBasedOnPermissions(permissions) {
+    console.log('🔄 Actualizando botones según permisos...');
+    
+    // Botones de eliminación
+    const deleteButtons = document.querySelectorAll('.delete-btn');
+    deleteButtons.forEach(btn => {
+        if (!permissions.canDelete) {
+            btn.style.display = 'none';
+            btn.disabled = true;
+        } else {
+            btn.style.display = '';
+            btn.disabled = false;
+        }
+    });
+    
+    // Botones de descarga
+    const downloadButtons = document.querySelectorAll('.download-btn');
+    downloadButtons.forEach(btn => {
+        if (!permissions.canDownload) {
+            btn.style.display = 'none';
+            btn.disabled = true;
+        } else {
+            btn.style.display = '';
+            btn.disabled = false;
+        }
+    });
+    
+    // Botones de vista (siempre visibles si hay documentos)
+    const viewButtons = document.querySelectorAll('.view-btn');
+    viewButtons.forEach(btn => {
+        if (!permissions.canView) {
+            btn.style.display = 'none';
+            btn.disabled = true;
+        } else {
+            btn.style.display = '';
+            btn.disabled = false;
+        }
+    });
+    
+    console.log('✅ Botones actualizados según permisos de grupos');
+}
+
+/**
+ * Función mejorada de eliminación con verificación de permisos por grupos
+ */
+function deleteDocumentWithGroupCheck(documentId) {
+    console.log('🗑️ Iniciando eliminación con verificación de grupos para documento:', documentId);
+    
+    // Verificar permisos por grupos primero
+    if (typeof userGroupPermissions !== 'undefined') {
+        if (!userGroupPermissions.delete_files) {
+            console.log('🚫 Eliminación bloqueada por permisos de grupo');
+            showNotification('No tienes permisos para eliminar documentos según tu grupo', 'error');
+            return;
+        }
+    }
+    
+    // Verificar permisos tradicionales como fallback
+    if (typeof canDelete !== 'undefined' && !canDelete) {
+        console.log('🚫 Eliminación bloqueada por permisos tradicionales');
+        showNotification('No tienes permisos para eliminar documentos', 'error');
+        return;
+    }
+    
+    // Continuar con la eliminación normal
+    deleteDocument(documentId);
+}
+
+/**
+ * Verificar acceso a empresa según restricciones de grupo
+ */
+function canAccessCompany(companyId) {
+    if (typeof userGroupRestrictions === 'undefined') {
+        return true; // Sin restricciones definidas
+    }
+    
+    const allowedCompanies = userGroupRestrictions.companies || [];
+    
+    // Si no hay restricciones de empresa, permitir todas
+    if (allowedCompanies.length === 0) {
+        return true;
+    }
+    
+    // Verificar si la empresa está en la lista permitida
+    return allowedCompanies.includes(parseInt(companyId));
+}
+
+/**
+ * Verificar acceso a departamento según restricciones de grupo
+ */
+function canAccessDepartment(departmentId) {
+    if (typeof userGroupRestrictions === 'undefined') {
+        return true; // Sin restricciones definidas
+    }
+    
+    const allowedDepartments = userGroupRestrictions.departments || [];
+    
+    // Si no hay restricciones de departamento, permitir todos
+    if (allowedDepartments.length === 0) {
+        return true;
+    }
+    
+    // Verificar si el departamento está en la lista permitida
+    return allowedDepartments.includes(parseInt(departmentId));
+}
+
+/**
+ * Filtrar documentos según restricciones de grupo
+ */
+function filterDocumentsByGroupRestrictions(documents) {
+    if (typeof userGroupRestrictions === 'undefined') {
+        return documents; // Sin restricciones definidas
+    }
+    
+    return documents.filter(doc => {
+        // Verificar acceso a empresa
+        if (!canAccessCompany(doc.company_id)) {
+            console.log(`🚫 Documento ${doc.id} filtrado por empresa ${doc.company_id}`);
+            return false;
+        }
+        
+        // Verificar acceso a departamento
+        if (!canAccessDepartment(doc.department_id)) {
+            console.log(`🚫 Documento ${doc.id} filtrado por departamento ${doc.department_id}`);
+            return false;
+        }
+        
+        return true;
+    });
+}
+
+/**
+ * Mostrar información de permisos en la interfaz
+ */
+function displayPermissionInfo() {
+    if (typeof userGroupPermissions === 'undefined') {
+        return;
+    }
+    
+    // Crear o actualizar indicador de permisos
+    let permissionIndicator = document.getElementById('permission-indicator');
+    if (!permissionIndicator) {
+        permissionIndicator = document.createElement('div');
+        permissionIndicator.id = 'permission-indicator';
+        permissionIndicator.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 250px;
+        `;
+        document.body.appendChild(permissionIndicator);
+    }
+    
+    const permissions = [];
+    if (userGroupPermissions.view_files) permissions.push('👁️ Ver');
+    if (userGroupPermissions.download_files) permissions.push('⬇️ Descargar');
+    if (userGroupPermissions.upload_files) permissions.push('⬆️ Subir');
+    if (userGroupPermissions.delete_files) permissions.push('🗑️ Eliminar');
+    if (userGroupPermissions.create_folders) permissions.push('📁 Carpetas');
+    
+    permissionIndicator.innerHTML = `
+        <strong>🛡️ Permisos de grupo:</strong><br>
+        ${permissions.length > 0 ? permissions.join('<br>') : '❌ Sin permisos'}
+    `;
+    
+    // Auto-ocultar después de 10 segundos
+    setTimeout(() => {
+        if (permissionIndicator && permissionIndicator.parentNode) {
+            permissionIndicator.style.opacity = '0.3';
+        }
+    }, 10000);
+}
+
+/**
+ * Función para debugging de permisos
+ */
+function debugPermissions() {
+    console.log('🔍 DEBUG DE PERMISOS:');
+    console.log('- userGroupPermissions:', typeof userGroupPermissions !== 'undefined' ? userGroupPermissions : 'No definido');
+    console.log('- userGroupRestrictions:', typeof userGroupRestrictions !== 'undefined' ? userGroupRestrictions : 'No definido');
+    console.log('- canDelete (tradicional):', typeof canDelete !== 'undefined' ? canDelete : 'No definido');
+    console.log('- currentUserRole:', typeof currentUserRole !== 'undefined' ? currentUserRole : 'No definido');
+    
+    if (typeof userGroupPermissions !== 'undefined') {
+        console.log('📊 Análisis de permisos:');
+        Object.keys(userGroupPermissions).forEach(permission => {
+            const status = userGroupPermissions[permission] ? '✅' : '❌';
+            console.log(`  ${status} ${permission}`);
+        });
+    }
+}
+
+// ==========================================
+// INICIALIZACIÓN AUTOMÁTICA
+// ==========================================
+
+// Ejecutar cuando el DOM esté listo
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Inicializando sistema de permisos por grupos en inbox...');
+    
+    // Inicializar permisos por grupos
+    initializeGroupPermissions();
+    
+    // Mostrar indicador de permisos (opcional, para debugging)
+    if (typeof showPermissionIndicator !== 'undefined' && showPermissionIndicator) {
+        displayPermissionInfo();
+    }
+    
+    // Debug de permisos en desarrollo
+    if (typeof debugMode !== 'undefined' && debugMode) {
+        debugPermissions();
+    }
+});
+
+// ==========================================
+// REEMPLAZAR FUNCIONES EXISTENTES
+// ==========================================
+
+// Guardar referencia a la función original de eliminación
+const originalDeleteDocument = window.deleteDocument;
+
+// Reemplazar función de eliminación con verificación de grupos
+window.deleteDocument = function(documentId) {
+    console.log('🔄 Usando función de eliminación mejorada con grupos');
+    deleteDocumentWithGroupCheck(documentId);
+};

@@ -1,359 +1,390 @@
 <?php
 /**
- * bootstrap.php
- * Archivo de inicialización del sistema DMS2
- * Versión simplificada sin ENVIRONMENT
+ * bootstrap.php - Inicializador global del sistema DMS2 
+ * CON SISTEMA UNIFICADO DE PERMISOS
  */
 
-// Definir constantes del sistema
-define('DMS_VERSION', '2.0.0');
-define('DMS_ROOT', __DIR__);
+// Prevenir inclusión múltiple
+if (defined('DMS_BOOTSTRAP_LOADED')) {
+    return;
+}
+define('DMS_BOOTSTRAP_LOADED', true);
 
-// Configuración de errores
-ini_set('display_errors', 0);
+// Configurar manejo de errores
+error_reporting(E_ALL);
+ini_set('display_errors', 1); // Cambiar a 0 en producción
 ini_set('log_errors', 1);
-ini_set('error_log', DMS_ROOT . '/logs/error.log');
 
-// Autoloader básico para clases del sistema
-spl_autoload_register(function ($class) {
-    $classFile = DMS_ROOT . '/classes/' . $class . '.php';
-    if (file_exists($classFile)) {
-        require_once $classFile;
+// Definir constantes del sistema
+if (!defined('DMS_ROOT')) {
+    define('DMS_ROOT', __DIR__);
+}
+
+if (!defined('DMS_VERSION')) {
+    define('DMS_VERSION', '2.1.0-UNIFIED');
+}
+
+// Configurar zona horaria
+date_default_timezone_set('America/Tegucigalpa');
+
+// Configurar sesión
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Función de auto-carga para clases
+spl_autoload_register(function ($className) {
+    $paths = [
+        DMS_ROOT . '/classes/' . $className . '.php',
+        DMS_ROOT . '/config/' . $className . '.php',
+        DMS_ROOT . '/includes/' . $className . '.php',
+    ];
+    
+    foreach ($paths as $path) {
+        if (file_exists($path)) {
+            require_once $path;
+            return;
+        }
     }
 });
 
-// Cargar archivos de configuración base
-require_once DMS_ROOT . '/config/database.php';
-require_once DMS_ROOT . '/config/session.php';
+// ============================================================================
+// CARGAR ARCHIVOS CORE DEL SISTEMA
+// ============================================================================
 
-// ===================================================================
-// SISTEMA DE PERMISOS DE GRUPOS - CARGA PRIORITARIA
-// ===================================================================
-
-// Cargar sistema de permisos de grupos (PRIORIDAD ABSOLUTA)
-require_once DMS_ROOT . '/includes/group_permissions.php';
-require_once DMS_ROOT . '/includes/permission_check.php';
-
-// ===================================================================
-// FUNCIONES GLOBALES DEL SISTEMA
-// ===================================================================
-
-/**
- * Función para obtener la URL base del sistema
- */
-function getBaseUrl() {
-    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-    $host = $_SERVER['HTTP_HOST'];
-    $script = $_SERVER['SCRIPT_NAME'];
-    $path = dirname($script);
-    
-    // Limpiar path
-    $path = str_replace('\\', '/', $path);
-    $path = rtrim($path, '/');
-    
-    return $protocol . $host . $path;
+// 1. Cargar configuración de base de datos
+$databasePath = DMS_ROOT . '/config/database.php';
+if (file_exists($databasePath)) {
+    require_once $databasePath;
+} else {
+    die('Error: No se pudo cargar config/database.php');
 }
 
-/**
- * Función para redireccionar con mensajes
- */
-function redirectWithMessage($url, $message, $type = 'info') {
-    session_start();
-    $_SESSION['flash_message'] = $message;
-    $_SESSION['flash_type'] = $type;
-    header("Location: $url");
-    exit;
+// 2. Cargar SessionManager
+$sessionPath = DMS_ROOT . '/config/session.php';
+if (file_exists($sessionPath)) {
+    require_once $sessionPath;
+} else {
+    die('Error: No se pudo cargar config/session.php');
 }
 
-/**
- * Función para mostrar mensajes flash
- */
-function getFlashMessage() {
-    session_start();
-    if (isset($_SESSION['flash_message'])) {
-        $message = $_SESSION['flash_message'];
-        $type = $_SESSION['flash_type'] ?? 'info';
-        
-        unset($_SESSION['flash_message']);
-        unset($_SESSION['flash_type']);
-        
-        return ['message' => $message, 'type' => $type];
-    }
-    return null;
+// 3. Cargar funciones helper básicas
+$helperPath = DMS_ROOT . '/includes/helper_functions.php';
+if (file_exists($helperPath)) {
+    require_once $helperPath;
 }
 
-/**
- * Función para escapar HTML
- */
-function h($string) {
-    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+// 4. Cargar funciones principales
+$functionsPath = DMS_ROOT . '/includes/functions.php';
+if (file_exists($functionsPath)) {
+    require_once $functionsPath;
 }
 
-/**
- * Función para formatear fechas
- */
-function formatDate($date, $format = 'd/m/Y H:i') {
-    if (empty($date) || $date === '0000-00-00 00:00:00') {
-        return '-';
-    }
-    return date($format, strtotime($date));
-}
-
-/**
- * Función para formatear tamaños de archivo
- */
-function formatBytes($bytes, $precision = 2) {
-    $units = array('B', 'KB', 'MB', 'GB', 'TB');
-    
-    for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
-        $bytes /= 1024;
-    }
-    
-    return round($bytes, $precision) . ' ' . $units[$i];
-}
-
-/**
- * Función para generar tokens CSRF
- */
-function generateCSRFToken() {
-    session_start();
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    }
-    return $_SESSION['csrf_token'];
-}
-
-/**
- * Función para verificar tokens CSRF
- */
-function verifyCSRFToken($token) {
-    session_start();
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
-}
-
-/**
- * Función para limpiar y validar entrada
- */
-function cleanInput($input) {
-    if (is_array($input)) {
-        return array_map('cleanInput', $input);
-    }
-    return trim(strip_tags($input));
-}
-
-/**
- * Función para validar email
- */
-function isValidEmail($email) {
-    return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
-}
-
-/**
- * Función para log de actividades del sistema
- */
-function logSystemActivity($action, $description, $userId = null, $tableAffected = null, $recordId = null) {
-    try {
-        $database = new Database();
-        $pdo = $database->getConnection();
-        
-        $stmt = $pdo->prepare("
-            INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
-        ");
-        
-        $stmt->execute([
-            $userId,
-            $action,
-            $tableAffected,
-            $recordId,
-            $description,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null
-        ]);
-        
-    } catch (Exception $e) {
-        error_log("Error logging activity: " . $e->getMessage());
+// 5. *** NUEVO *** Cargar Sistema Unificado de Permisos
+$unifiedPermissionsPath = DMS_ROOT . '/includes/UnifiedPermissionSystem.php';
+if (file_exists($unifiedPermissionsPath)) {
+    require_once $unifiedPermissionsPath;
+    error_log('DMS2: Sistema Unificado de Permisos cargado');
+} else {
+    error_log('DMS2: ADVERTENCIA - Sistema Unificado de Permisos no encontrado');
+    // Cargar sistema de permisos anterior como fallback
+    $legacyPermissionsPath = DMS_ROOT . '/includes/permission_functions.php';
+    if (file_exists($legacyPermissionsPath)) {
+        require_once $legacyPermissionsPath;
+        error_log('DMS2: Sistema de Permisos Legacy cargado como fallback');
     }
 }
 
-// ===================================================================
-// FUNCIONES ESPECÍFICAS DE PERMISOS (WRAPPERS)
-// ===================================================================
+// ============================================================================
+// DEFINIR FUNCIONES BÁSICAS SI NO EXISTEN
+// ============================================================================
 
-/**
- * Verificar si el usuario actual puede subir archivos
- */
-function currentUserCanUpload() {
-    if (!SessionManager::isLoggedIn()) return false;
-    $user = SessionManager::getCurrentUser();
-    return canUserUploadFiles($user['id']);
-}
-
-/**
- * Verificar si el usuario actual puede ver archivos
- */
-function currentUserCanViewFiles() {
-    if (!SessionManager::isLoggedIn()) return false;
-    $user = SessionManager::getCurrentUser();
-    return canUserViewFiles($user['id']);
-}
-
-/**
- * Verificar si el usuario actual puede crear carpetas
- */
-function currentUserCanCreateFolders() {
-    if (!SessionManager::isLoggedIn()) return false;
-    $user = SessionManager::getCurrentUser();
-    return canUserCreateFolders($user['id']);
-}
-
-/**
- * Verificar si el usuario actual puede descargar archivos
- */
-function currentUserCanDownload() {
-    if (!SessionManager::isLoggedIn()) return false;
-    $user = SessionManager::getCurrentUser();
-    return canUserDownloadFiles($user['id']);
-}
-
-/**
- * Verificar si el usuario actual puede eliminar archivos
- */
-function currentUserCanDelete() {
-    if (!SessionManager::isLoggedIn()) return false;
-    $user = SessionManager::getCurrentUser();
-    return canUserDeleteFiles($user['id']);
-}
-
-/**
- * Obtener empresas permitidas para el usuario actual
- */
-function getCurrentUserAllowedCompanies() {
-    if (!SessionManager::isLoggedIn()) return [];
-    $user = SessionManager::getCurrentUser();
-    return getUserAllowedCompanies($user['id']);
-}
-
-/**
- * Obtener departamentos permitidos para el usuario actual
- */
-function getCurrentUserAllowedDepartments($companyId = null) {
-    if (!SessionManager::isLoggedIn()) return [];
-    $user = SessionManager::getCurrentUser();
-    return getUserAllowedDepartments($user['id'], $companyId);
-}
-
-/**
- * Obtener tipos de documentos permitidos para el usuario actual
- */
-function getCurrentUserAllowedDocumentTypes() {
-    if (!SessionManager::isLoggedIn()) return [];
-    $user = SessionManager::getCurrentUser();
-    return getUserAllowedDocumentTypes($user['id']);
-}
-
-/**
- * Función para verificar acceso a módulos específicos
- */
-function checkModuleAccess($module) {
-    if (!SessionManager::isLoggedIn()) {
-        redirectWithMessage('/login.php', 'Debe iniciar sesión', 'warning');
+// Función fetchOne si no existe
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return null;
+        }
     }
-    
-    $user = SessionManager::getCurrentUser();
-    
-    // Verificar que tenga grupos activos
-    $userPerms = getUserGroupPermissions($user['id']);
-    if (!$userPerms['has_groups']) {
-        redirectWithMessage('/dashboard.php', 'Usuario sin grupos de acceso asignados. Contacte al administrador.', 'error');
+}
+
+// Función fetchAll si no existe
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
     }
-    
-    // Verificar permisos específicos según el módulo
-    switch ($module) {
-        case 'upload':
-            if (!canUserUploadFiles($user['id'])) {
-                redirectWithMessage('/dashboard.php', 'No tiene permisos para subir archivos', 'error');
-            }
-            break;
+}
+
+// Función logActivity si no existe
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
             
-        case 'inbox':
-        case 'documents':
-            if (!canUserViewFiles($user['id'])) {
-                redirectWithMessage('/dashboard.php', 'No tiene permisos para ver archivos', 'error');
-            }
-            break;
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
             
-        case 'folders':
-            if (!canUserCreateFolders($user['id'])) {
-                redirectWithMessage('/dashboard.php', 'No tiene permisos para crear carpetas', 'error');
-            }
-            break;
+            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $userAgent = substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 255);
             
-        case 'download':
-            if (!canUserDownloadFiles($user['id'])) {
-                redirectWithMessage('/dashboard.php', 'No tiene permisos para descargar archivos', 'error');
-            }
-            break;
-            
-        case 'delete':
-            if (!canUserDeleteFiles($user['id'])) {
-                redirectWithMessage('/dashboard.php', 'No tiene permisos para eliminar archivos', 'error');
-            }
-            break;
+            $stmt = $pdo->prepare($query);
+            return $stmt->execute([$userId, $action, $tableName, $recordId, $description, $ipAddress, $userAgent]);
+        } catch (Exception $e) {
+            error_log('Error in logActivity: ' . $e->getMessage());
+            return false;
+        }
     }
 }
 
-// ===================================================================
-// CONFIGURACIÓN DE ZONA HORARIA
-// ===================================================================
+// Función formatBytes si no existe
+if (!function_exists('formatBytes')) {
+    function formatBytes($size, $precision = 2) {
+        if ($size == 0 || !is_numeric($size)) {
+            return '0 B';
+        }
+        
+        $units = array('B', 'KB', 'MB', 'GB', 'TB');
+        $base = log($size, 1024);
+        $unitIndex = floor($base);
+        
+        // Validar el índice
+        if ($unitIndex < 0) $unitIndex = 0;
+        if ($unitIndex >= count($units)) $unitIndex = count($units) - 1;
+        
+        $pow = pow(1024, $base - $unitIndex);
+        $unit = $units[$unitIndex];
+        
+        return round($pow, $precision) . ' ' . $unit;
+    }
+}
 
-// Establecer zona horaria para Honduras
-date_default_timezone_set('America/Tegucigalpa');
+// Función getFullName si no existe
+if (!function_exists('getFullName')) {
+    function getFullName($userId = null) {
+        if ($userId === null) {
+            $currentUser = SessionManager::getCurrentUser();
+            if ($currentUser) {
+                return trim($currentUser['first_name'] . ' ' . $currentUser['last_name']);
+            }
+            return 'Usuario Desconocido';
+        }
+        
+        try {
+            $query = "SELECT first_name, last_name FROM users WHERE id = ? AND status = 'active'";
+            $user = fetchOne($query, [$userId]);
+            
+            if ($user) {
+                return trim($user['first_name'] . ' ' . $user['last_name']);
+            }
+            
+            return 'Usuario Desconocido';
+        } catch (Exception $e) {
+            error_log('Error in getFullName: ' . $e->getMessage());
+            return 'Usuario Desconocido';
+        }
+    }
+}
 
-// ===================================================================
-// CONFIGURACIÓN DE SESIÓN SEGURA
-// ===================================================================
+// Función getFileExtension si no existe
+if (!function_exists('getFileExtension')) {
+    function getFileExtension($filename) {
+        return strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    }
+}
 
-// Configurar sesión segura
-ini_set('session.cookie_secure', '0'); // Cambiar a 1 en HTTPS
-ini_set('session.cookie_httponly', '1');
-ini_set('session.use_strict_mode', '1');
-ini_set('session.cookie_samesite', 'Strict');
+// ============================================================================
+// FUNCIONES DE COMPATIBILIDAD CON SISTEMA ANTERIOR
+// ============================================================================
 
-// ===================================================================
-// MANEJO DE ERRORES PERSONALIZADO (SIMPLIFICADO)
-// ===================================================================
+// Asegurar compatibilidad con sistemas que llaman funciones con nombres antiguos
+if (!function_exists('userHasPermission')) {
+    function userHasPermission($userId, $permission) {
+        return hasUserPermission($permission, $userId);
+    }
+}
 
-set_error_handler(function($severity, $message, $file, $line) {
-    if (!(error_reporting() & $severity)) {
+if (!function_exists('canAccessCompany')) {
+    function canAccessCompany($companyId, $userId = null) {
+        return canAccessResource('company', $companyId, $userId);
+    }
+}
+
+if (!function_exists('canAccessDepartment')) {
+    function canAccessDepartment($departmentId, $userId = null) {
+        return canAccessResource('department', $departmentId, $userId);
+    }
+}
+
+if (!function_exists('getUserEffectivePermissions')) {
+    function getUserEffectivePermissions($userId) {
+        return getUserPermissions($userId);
+    }
+}
+
+// ============================================================================
+// MIDDLEWARE PARA VERIFICAR PERMISOS EN PÁGINAS
+// ============================================================================
+
+/**
+ * Función para verificar permisos al inicio de páginas
+ */
+if (!function_exists('requirePermission')) {
+    function requirePermission($permission, $redirectUrl = '../../dashboard.php') {
+        if (!hasUserPermission($permission)) {
+            $_SESSION['error_message'] = 'No tienes permisos para acceder a esta función.';
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
+    }
+}
+
+/**
+ * Función para verificar acceso a recurso específico
+ */
+if (!function_exists('requireResourceAccess')) {
+    function requireResourceAccess($resourceType, $resourceId, $redirectUrl = '../../dashboard.php') {
+        if (!canAccessResource($resourceType, $resourceId)) {
+            $_SESSION['error_message'] = 'No tienes acceso a este recurso.';
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
+    }
+}
+
+/**
+ * Función para obtener SQL con restricciones aplicadas
+ */
+if (!function_exists('buildRestrictedQuery')) {
+    function buildRestrictedQuery($baseQuery, $tableAlias = 'd', $userId = null) {
+        $restrictions = getQueryRestrictions($tableAlias, $userId);
+        
+        if (!empty($restrictions['where'])) {
+            // Agregar restricciones al WHERE existente o crear nuevo WHERE
+            if (stripos($baseQuery, 'WHERE') !== false) {
+                $baseQuery .= ' AND (' . $restrictions['where'] . ')';
+            } else {
+                $baseQuery .= ' WHERE ' . $restrictions['where'];
+            }
+        }
+        
+        return [
+            'query' => $baseQuery,
+            'params' => $restrictions['params']
+        ];
+    }
+}
+
+// ============================================================================
+// VERIFICACIÓN FINAL DEL SISTEMA
+// ============================================================================
+
+/**
+ * Verificar que el sistema esté completamente cargado
+ */
+function verifyUnifiedSystemLoaded() {
+    $required = [
+        'class' => ['SessionManager', 'Database', 'UnifiedPermissionSystem'],
+        'function' => ['fetchOne', 'fetchAll', 'logActivity', 'getFullName', 'formatBytes', 'hasUserPermission', 'canAccessResource']
+    ];
+    
+    $missing = [];
+    
+    foreach ($required['class'] as $class) {
+        if (!class_exists($class)) {
+            $missing[] = "Clase: $class";
+        }
+    }
+    
+    foreach ($required['function'] as $function) {
+        if (!function_exists($function)) {
+            $missing[] = "Función: $function";
+        }
+    }
+    
+    if (!empty($missing)) {
+        error_log('Sistema DMS2 Unificado incompleto. Faltantes: ' . implode(', ', $missing));
         return false;
     }
     
-    $errorTypes = [
-        E_ERROR => 'ERROR',
-        E_WARNING => 'WARNING',
-        E_NOTICE => 'NOTICE',
-        E_USER_ERROR => 'USER_ERROR',
-        E_USER_WARNING => 'USER_WARNING',
-        E_USER_NOTICE => 'USER_NOTICE'
-    ];
-    
-    $errorType = $errorTypes[$severity] ?? 'UNKNOWN';
-    $logMessage = "[$errorType] $message in $file on line $line";
-    
-    error_log($logMessage);
-    
-    // No mostrar errores detallados al usuario
     return true;
-});
+}
 
-// ===================================================================
-// INICIALIZACIÓN COMPLETADA
-// ===================================================================
+// Verificar que todo esté cargado correctamente
+if (!verifyUnifiedSystemLoaded()) {
+    error_log('Error: Sistema DMS2 Unificado no se cargó completamente en bootstrap.php');
+    // Mostrar error detallado en desarrollo
+    if (ini_get('display_errors')) {
+        die('Error: Sistema DMS2 Unificado no se cargó completamente. Revise los logs de error.');
+    }
+} else {
+    // Log de inicialización exitosa
+    error_log('DMS2 Bootstrap Unificado cargado correctamente - Versión ' . DMS_VERSION);
+    
+    // Inicializar el sistema de permisos
+    if (class_exists('UnifiedPermissionSystem')) {
+        $permissionSystem = UnifiedPermissionSystem::getInstance();
+        error_log('DMS2: Sistema Unificado de Permisos inicializado');
+    }
+}
 
-// Marcar que el bootstrap se cargó correctamente
-define('DMS_BOOTSTRAP_LOADED', true);
+// ============================================================================
+// CONFIGURACIONES ADICIONALES PARA EL SISTEMA UNIFICADO
+// ============================================================================
 
-// Log de inicialización
-error_log("DMS2 Bootstrap loaded successfully - Version " . DMS_VERSION);
+/**
+ * Configurar headers de seguridad básicos
+ */
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-XSS-Protection: 1; mode=block');
+}
+
+/**
+ * Definir constantes de permisos para facilitar el uso
+ */
+if (!defined('PERM_VIEW_FILES')) {
+    define('PERM_VIEW_FILES', 'view_files');
+    define('PERM_UPLOAD_FILES', 'upload_files');
+    define('PERM_DOWNLOAD_FILES', 'download_files');
+    define('PERM_DELETE_FILES', 'delete_files');
+    define('PERM_CREATE_FOLDERS', 'create_folders');
+    define('PERM_VIEW_REPORTS', 'view_reports');
+    define('PERM_MANAGE_USERS', 'manage_users');
+    define('PERM_MANAGE_COMPANIES', 'manage_companies');
+    define('PERM_MANAGE_GROUPS', 'manage_groups');
+    define('PERM_SYSTEM_ADMIN', 'system_admin');
+}
+
+/**
+ * Función de debug para permisos (solo en desarrollo)
+ */
+if (!function_exists('debugPermissions') && ini_get('display_errors')) {
+    function debugPermissions($userId = null) {
+        if (!class_exists('UnifiedPermissionSystem')) {
+            return "Sistema Unificado no disponible";
+        }
+        
+        $permissionSystem = UnifiedPermissionSystem::getInstance();
+        return $permissionSystem->getPermissionDebugInfo($userId ?: SessionManager::getUserId());
+    }
+}
+
 ?>
