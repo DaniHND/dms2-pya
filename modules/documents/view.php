@@ -352,6 +352,19 @@ function formatBytes($size, $precision = 2)
                 document.body.style.overflow = '';
             }
         });
+        // Agregar al final de view.php en el script
+window.addEventListener('beforeunload', function(e) {
+    // Evitar abrir en nueva ventana
+});
+
+// O cambiar todos los enlaces dinámicamente
+document.addEventListener('DOMContentLoaded', function() {
+    // Remover target="_blank" de todos los enlaces a view.php
+    const viewLinks = document.querySelectorAll('a[href*="view.php"]');
+    viewLinks.forEach(link => {
+        link.removeAttribute('target');
+    });
+});
     </script>
 </body>
 

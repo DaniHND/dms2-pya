@@ -1,301 +1,38 @@
 <?php
-/**
- * upload.php - Módulo de subida de documentos
- * DMS2 - Sistema de Gestión Documental
- */
+// Incluir configuración de límites de subida
+require_once '../../upload_config.php';
 
-// ========================================================================
-// 1. CARGA DE DEPENDENCIAS (SOLO BOOTSTRAP)
-// ========================================================================
-require_once '../../bootstrap.php';
+require_once '../../config/session.php';
+require_once '../../config/database.php';
+require_once '../../includes/group_permissions.php';  // AGREGAR
+require_once '../../includes/permission_check.php';   // AGREGAR
 
-// ========================================================================  
-// 2. VERIFICACIÓN DE SESIÓN Y AUTENTICACIÓN
-// ========================================================================
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-if (!$currentUser) {
-    header('Location: ../../login.php');
-    exit;
-}
-
-// ========================================================================
-// 3. FUNCIONES DE PERMISOS LEGACY (MANTENER PARA COMPATIBILIDAD)
-// ========================================================================
-function isSuperUser($userId)
-{
-    try {
-        $database = new Database();
-        $pdo = $database->getConnection();
-
-        $query = "SELECT role FROM users WHERE id = ? AND status = 'active'";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$userId]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        return ($user && $user['role'] === 'super_admin');
-    } catch (Exception $e) {
-        return false;
-    }
-}
-
-function getUserPermissions($userId)
-{
-    // Si es super usuario, acceso total
-    if (isSuperUser($userId)) {
-        return [
-            'permissions' => [
-                'view' => true,
-                'download' => true,
-                'create' => true,
-                'edit' => true,
-                'delete' => true
-            ],
-            'restrictions' => [
-                'companies' => [],
-                'departments' => [],
-                'document_types' => []
-            ]
-        ];
-    }
-
-    try {
-        $database = new Database();
-        $pdo = $database->getConnection();
-
-        $query = "
-            SELECT ug.module_permissions, ug.access_restrictions 
-            FROM user_groups ug
-            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$userId]);
-        $groupData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Permisos iniciales - RESTRICTIVOS por defecto
-        $mergedPermissions = [
-            'view' => false,
-            'download' => false,
-            'create' => false,
-            'edit' => false,
-            'delete' => false
-        ];
-
-        $mergedRestrictions = [
-            'companies' => [],
-            'departments' => [],
-            'document_types' => []
-        ];
-
-        // Fusionar permisos de todos los grupos (OR lógico)
-        foreach ($groupData as $group) {
-            $permissions = json_decode($group['module_permissions'] ?: '{}', true);
-            $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
-
-            // Mapear permisos nuevos a los antiguos
-            if (isset($permissions['view_files']) && $permissions['view_files'] === true) {
-                $mergedPermissions['view'] = true;
-            }
-            if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
-                $mergedPermissions['download'] = true;
-            }
-            if (isset($permissions['upload_files']) && $permissions['upload_files'] === true) {
-                $mergedPermissions['create'] = true;
-            }
-            if (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
-                $mergedPermissions['edit'] = true;
-            }
-            if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
-                $mergedPermissions['delete'] = true;
-            }
-
-            foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
-                if (isset($restrictions[$restrictionType]) && is_array($restrictions[$restrictionType])) {
-                    $mergedRestrictions[$restrictionType] = array_unique(
-                        array_merge($mergedRestrictions[$restrictionType], $restrictions[$restrictionType])
-                    );
-                }
-            }
+// AGREGAR ESTE BLOQUE COMPLETO
+try {
+    if ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin') {
+        if (!getUserGroupPermissions($currentUser['id'])['has_groups']) {
+            $error = 'ADVERTENCIA: Como administrador debe configurar grupos de usuarios para mejor seguridad.';
         }
-
-        return [
-            'permissions' => $mergedPermissions,
-            'restrictions' => $mergedRestrictions
-        ];
-    } catch (Exception $e) {
-        error_log("Error getting user permissions: " . $e->getMessage());
-        return [
-            'permissions' => ['view' => false, 'download' => false, 'create' => false, 'edit' => false, 'delete' => false],
-            'restrictions' => ['companies' => [], 'departments' => [], 'document_types' => []]
-        ];
-    }
-}
-
-// ========================================================================
-// 4. VERIFICACIÓN DE PERMISOS DE UPLOAD
-// ========================================================================
-$hasUploadPermission = false;
-
-if ($currentUser['role'] === 'admin') {
-    $hasUploadPermission = true;
-} else {
-    // Verificar sistema unificado
-    if (class_exists('UnifiedPermissionSystem')) {
-        try {
-            $permissionSystem = UnifiedPermissionSystem::getInstance();
-            $userPerms = $permissionSystem->getUserEffectivePermissions($currentUser['id']);
-            $hasUploadPermission = isset($userPerms['permissions']['upload_files']) && 
-                                   $userPerms['permissions']['upload_files'] === true;
-        } catch (Exception $e) {
-            error_log('ERROR en verificación de permisos upload: ' . $e->getMessage());
-            $hasUploadPermission = false;
-        }
-    } elseif (function_exists('hasUserPermission')) {
-        // Sistema legacy
-        $hasUploadPermission = hasUserPermission('upload_files', $currentUser['id']);
     } else {
-        // Fallback usando getUserPermissions
-        $userPermissions = getUserPermissions($currentUser['id']);
-        $hasUploadPermission = isset($userPermissions['permissions']['create']) && 
-                               $userPermissions['permissions']['create'] === true;
+        requireActiveGroups();
+        requireUploadPermission();
     }
+} catch (Exception $e) {
+    $error = $e->getMessage();
 }
+// FIN DEL BLOQUE AGREGADO
 
-// Si no tiene permisos, mostrar página de error y salir
-if (!$hasUploadPermission) {
-    $fullName = trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''));
-    $displayName = $fullName ?: ($currentUser['username'] ?? 'Usuario');
-?>
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Subir Archivos - DMS2</title>
-    <link rel="stylesheet" href="../../assets/css/main.css">
-    <link rel="stylesheet" href="../../assets/css/dashboard.css">
-    <link rel="stylesheet" href="../../assets/css/inbox.css">
-    <script src="https://unpkg.com/feather-icons"></script>
-</head>
-<body class="dashboard-layout">
-    <?php include '../../includes/sidebar.php'; ?>
-    <main class="main-content">
-        <header class="content-header">
-            <div class="header-left">
-                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
-                    <i data-feather="menu"></i>
-                </button>
-                <h1>Subir Archivos</h1>
-            </div>
-            <div class="header-right">
-                <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars($displayName); ?></div>
-                    <div class="current-time" id="currentTime"></div>
-                </div>
-                <div class="header-actions">
-                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                        <i data-feather="log-out"></i>
-                    </a>
-                </div>
-            </div>
-        </header>
-        <div class="main-content-area">
-            <div class="inbox-container">
-                <div class="content-panel">
-                    <div class="content-section">
-                        <div class="content-header-section">
-                            <div class="content-header-left">
-                                <p>Su usuario no tiene permisos para subir archivos. Contacte al administrador.</p>
-                            </div>
-                        </div>
-                        <div class="content-card">
-                            <div class="content-body">
-                                <div class="empty-state">
-                                    <div class="empty-icon">
-                                        <i data-feather="lock"></i>
-                                    </div>
-                                    <h3>Sin permisos de acceso</h3>
-                                    <p>Su usuario no tiene permisos para subir archivos en el sistema.<br>Para obtener acceso, contacte al administrador del sistema.</p>
-                                    <div class="empty-actions">
-                                        <a href="../../dashboard.php" class="btn btn-secondary">
-                                            <i data-feather="home"></i>
-                                            Volver al Dashboard
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </main>
-    <script src="../../assets/js/dashboard.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            feather.replace();
-            updateTime();
-            setInterval(updateTime, 1000);
-        });
-        function updateTime() {
-            const timeElement = document.getElementById('currentTime');
-            if (timeElement) {
-                const now = new Date();
-                const timeString = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-                const dateString = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                timeElement.textContent = `${dateString} ${timeString}`;
-            }
-        }
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            if (window.innerWidth <= 768) {
-                sidebar.classList.toggle('active');
-            }
-        }
-    </script>
-    <style>
-        .main-content-area { flex: 1; display: flex; flex-direction: column; }
-        .inbox-container { display: flex; height: calc(100vh - 80px); background: #f8fafc; }
-        .content-panel { flex: 1; overflow-y: auto; background: #f8fafc; }
-        .content-section { padding: 1.5rem; }
-        .content-header-section { margin-bottom: 1.5rem; }
-        .content-header-left p { margin: 0; color: #64748b; font-size: 0.875rem; }
-        .content-card { background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); overflow: hidden; }
-        .content-body { padding: 2rem; }
-        .empty-state { text-align: center; padding: 3rem 2rem; }
-        .empty-icon { width: 80px; height: 80px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); }
-        .empty-icon i { width: 40px; height: 40px; color: #9ca3af; }
-        .empty-state h3 { color: #1e293b; font-size: 1.25rem; font-weight: 600; margin-bottom: 0.75rem; }
-        .empty-state p { color: #64748b; font-size: 0.875rem; line-height: 1.5; margin-bottom: 2rem; max-width: 400px; margin-left: auto; margin-right: auto; }
-        .empty-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
-        .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 500; text-decoration: none; transition: all 0.2s ease; border: none; cursor: pointer; }
-        .btn-secondary { background: #ffffff; color: #374151; border: 1px solid #d1d5db; }
-        .btn-secondary:hover { background: #f3f4f6; border-color: #8b5cf6; color: #8b5cf6; text-decoration: none; }
-        .btn i { width: 16px; height: 16px; }
-    </style>
-</body>
-</html>
-<?php
-    exit;
-}
+SessionManager::requireLogin();
+$currentUser = SessionManager::getCurrentUser();
 
-// ========================================================================
-// 5. CONTINUAR CON UPLOAD NORMAL - OBTENER RUTA ACTUAL  
-// ========================================================================
+// Obtener la ruta actual del explorador
 $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
-
-// AQUÍ CONTINÚA TU CÓDIGO NORMAL DE UPLOAD.PHP...
-
-// AQUÍ CONTINÚA TU CÓDIGO NORMAL DE UPLOAD.PHP...
-
-// ========================================================================
-// 6. DETERMINACIÓN DEL CONTEXTO DE UPLOAD
-// ========================================================================
 $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 
+// Determinar contexto de subida basado en la ruta
 $uploadContext = [
     'company_id' => null,
     'department_id' => null,
@@ -343,43 +80,7 @@ try {
     error_log("Error determining upload context: " . $e->getMessage());
 }
 
-// ========================================================================
-// 7. OBTENER DATOS PARA EL FORMULARIO
-// ========================================================================
-try {
-    // Obtener tipos de documento
-    $documentTypes = fetchAll("SELECT id, name FROM document_types WHERE status = 'active' ORDER BY name");
-
-    // Obtener empresas (admin ve todas, usuarios solo la suya)
-    if ($currentUser['role'] === 'admin') {
-        $companies = fetchAll("SELECT id, name FROM companies WHERE status = 'active' ORDER BY name");
-    } else {
-        $companies = fetchAll("SELECT id, name FROM companies WHERE id = ? AND status = 'active'", [$currentUser['company_id']]);
-    }
-
-    // Obtener departamentos del contexto
-    $departments = [];
-    if ($uploadContext['company_id']) {
-        $departments = fetchAll("SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name", [$uploadContext['company_id']]);
-    }
-
-    // Obtener carpetas del contexto
-    $folders = [];
-    if ($uploadContext['department_id']) {
-        $folders = fetchAll("SELECT id, name FROM document_folders WHERE department_id = ? AND status = 'active' ORDER BY name", [$uploadContext['department_id']]);
-    }
-
-} catch (Exception $e) {
-    error_log("Error loading form data: " . $e->getMessage());
-    $documentTypes = [];
-    $companies = [];
-    $departments = [];
-    $folders = [];
-}
-
-// ========================================================================
-// 8. PROCESAMIENTO DEL FORMULARIO (SI ES POST)
-// ========================================================================
+// Procesar formulario
 $error = '';
 $success = '';
 
@@ -388,74 +89,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $database = new Database();
         $pdo = $database->getConnection();
 
-        // Verificar que se subió un archivo
         if (!isset($_FILES['document']) || $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception('Error al subir el archivo. Por favor intente nuevamente.');
+            throw new Exception('Error al subir el archivo');
         }
 
         $file = $_FILES['document'];
-        $maxFileSize = 20 * 1024 * 1024; // 20MB
+        $maxFileSize = 20 * 1024 * 1024;
 
-        // Validar tamaño del archivo
         if ($file['size'] > $maxFileSize) {
             throw new Exception('El archivo es demasiado grande (máximo 20MB)');
         }
 
-        // Validar tipo de archivo
         $allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'zip', 'rar'];
         $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
         if (!in_array($fileExtension, $allowedExtensions)) {
-            throw new Exception('Tipo de archivo no permitido. Formatos válidos: ' . implode(', ', $allowedExtensions));
+            throw new Exception('Tipo de archivo no permitido');
         }
 
-        // Obtener datos del formulario
         $documentName = trim($_POST['document_name']) ?: pathinfo($file['name'], PATHINFO_FILENAME);
         $description = trim($_POST['description']) ?: '';
         $documentTypeId = intval($_POST['document_type_id']) ?: null;
+        $tags = isset($_POST['tags']) && $_POST['tags'] ? explode(',', $_POST['tags']) : [];
+        $tags = array_map('trim', $tags);
+        $tags = array_filter($tags);
 
-        // Usar contexto del upload o datos del formulario
+        // Usar contexto del upload
         $companyId = intval($_POST['company_id']) ?: $uploadContext['company_id'];
         $departmentId = intval($_POST['department_id']) ?: $uploadContext['department_id'];
         $folderId = intval($_POST['folder_id']) ?: $uploadContext['folder_id'];
-
-        // Validar datos requeridos
-        if (empty($documentName)) {
-            throw new Exception('El nombre del documento es requerido');
-        }
-
-        if (!$documentTypeId) {
-            throw new Exception('El tipo de documento es requerido');
-        }
-
-        if (!$companyId) {
-            throw new Exception('La empresa es requerida');
-        }
-
-        // Crear directorio de uploads si no existe
-        $uploadDir = '../../uploads/documents/';
-        if (!is_dir($uploadDir)) {
-            if (!mkdir($uploadDir, 0755, true)) {
-                throw new Exception('Error al crear directorio de uploads');
+        // AGREGAR ESTAS 3 VALIDACIONES
+       // VALIDACIONES DE PERMISOS (con excepción para admins)
+        $userPermissions = getUserGroupPermissions($currentUser['id']);
+        
+        if ($userPermissions['has_groups']) {
+            // Usuario con grupos - aplicar restricciones
+            if (!canUserAccessCompany($currentUser['id'], $companyId)) {
+                throw new Exception('Sin acceso a la empresa seleccionada');
+            }
+            if ($departmentId && !canUserAccessDepartment($currentUser['id'], $departmentId)) {
+                throw new Exception('Sin acceso al departamento seleccionado');
+            }
+            if (!canUserAccessDocumentType($currentUser['id'], $documentTypeId)) {
+                throw new Exception('Sin acceso al tipo de documento seleccionado');
             }
         }
+        // Para admins sin grupos: sin validaciones (acceso completo)
+        // FIN DE VALIDACIONES
+        // FIN DE VALIDACIONES AGREGADAS
 
-        // Generar nombre único para el archivo
         $uniqueFileName = uniqid() . '_' . time() . '.' . $fileExtension;
-        $filePath = $uploadDir . $uniqueFileName;
+        $uploadDir = '../../uploads/documents/';
 
-        // Mover archivo subido
-        if (!move_uploaded_file($file['tmp_name'], $filePath)) {
-            throw new Exception('Error al guardar el archivo en el servidor');
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
         }
 
-        // Guardar en la base de datos
+        $filePath = $uploadDir . $uniqueFileName;
+
+        if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+            throw new Exception('Error al guardar el archivo');
+        }
+
         $insertQuery = "
             INSERT INTO documents (
                 company_id, department_id, folder_id, document_type_id, user_id,
                 name, original_name, file_path, file_size, mime_type, 
-                description, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
+                description, tags, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
         ";
 
         $relativePath = 'uploads/documents/' . $uniqueFileName;
@@ -463,8 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare($insertQuery);
         $result = $stmt->execute([
             $companyId,
-            $departmentId ?: null,
-            $folderId ?: null,
+            $departmentId,
+            $folderId,
             $documentTypeId,
             $currentUser['id'],
             $documentName,
@@ -472,54 +173,114 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $relativePath,
             $file['size'],
             $file['type'],
-            $description
+            $description,
+            json_encode($tags)
         ]);
 
         if ($result) {
             $documentId = $pdo->lastInsertId();
 
-            // Log de actividad
-            if (function_exists('logActivity')) {
-                logActivity(
-                    $currentUser['id'],
-                    'upload',
-                    'documents',
-                    $documentId,
-                    "Documento '{$documentName}' subido en " . $uploadContext['context_name']
-                );
-            }
+            $logQuery = "
+                INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                VALUES (?, 'create', 'documents', ?, ?, NOW())
+            ";
+            $logStmt = $pdo->prepare($logQuery);
+            $logStmt->execute([
+                $currentUser['id'],
+                $documentId,
+                "Documento '{$documentName}' subido en " . $uploadContext['context_name']
+            ]);
 
             $success = 'Documento subido exitosamente';
 
-            // Redirigir de vuelta al explorador después de 2 segundos
-            echo "<script>
-                setTimeout(function() {
-                    window.location.href = 'inbox.php" . ($currentPath ? '?path=' . urlencode($currentPath) : '') . "';
-                }, 2000);
-            </script>";
-
-        } else {
-            // Si falla la inserción, eliminar el archivo
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            // Redirigir de vuelta al explorador
+            $redirectUrl = 'inbox.php';
+            if ($currentPath) {
+                $redirectUrl .= '?path=' . urlencode($currentPath);
             }
+
+            header("Location: $redirectUrl");
+            exit;
+        } else {
             throw new Exception('Error al guardar el documento en la base de datos');
         }
-
     } catch (Exception $e) {
         $error = $e->getMessage();
-        
-        // Limpiar archivo si se subió pero falló algo más
+
         if (isset($filePath) && file_exists($filePath)) {
             unlink($filePath);
         }
-        
-        error_log("Error en upload: " . $e->getMessage());
     }
 }
-// ========================================================================
-// 9. MOSTRAR LA PÁGINA HTML (Tu código HTML existente continúa aquí)
-// ========================================================================
+
+// Obtener tipos de documentos para el select
+try {
+    $database = new Database();
+    $pdo = $database->getConnection();
+
+    // SOLO REEMPLAZA ESTAS LÍNEAS DE AQUÍ ↓
+    $userPermissions = getUserGroupPermissions($currentUser['id']);
+
+    if ($userPermissions['has_groups'] && !empty($userPermissions['restrictions']['document_types'])) {
+        $documentTypes = getUserAllowedDocumentTypes($currentUser['id']);
+    } else {
+        $typesQuery = "SELECT id, name, description FROM document_types WHERE status = 'active' ORDER BY name";
+        $typesStmt = $pdo->prepare($typesQuery);
+        $typesStmt->execute();
+        $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    if ($userPermissions['has_groups'] && !empty($userPermissions['restrictions']['companies'])) {
+        $companies = getUserAllowedCompanies($currentUser['id']);
+    } else {
+        $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
+        $companiesStmt = $pdo->prepare($companiesQuery);
+        $companiesStmt->execute();
+        $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    // HASTA AQUÍ ↑ (quita las líneas originales de $typesQuery y $companiesQuery)
+
+
+
+
+    $departments = [];
+    if ($uploadContext['company_id']) {
+        $userPermissions = getUserGroupPermissions($currentUser['id']);
+
+        // DEBUG: Mostrar información
+        error_log("=== DEBUG DEPARTAMENTOS ===");
+        error_log("Usuario ID: " . $currentUser['id']);
+        error_log("Company ID: " . $uploadContext['company_id']);
+        error_log("Tiene grupos: " . ($userPermissions['has_groups'] ? 'SÍ' : 'NO'));
+        error_log("Restricciones: " . json_encode($userPermissions['restrictions']));
+
+        if ($userPermissions['has_groups'] && !empty($userPermissions['restrictions']['departments'])) {
+            error_log("APLICANDO restricciones de departamentos");
+            $departments = getUserAllowedDepartments($currentUser['id'], $uploadContext['company_id']);
+            error_log("Departamentos obtenidos CON restricciones: " . json_encode($departments));
+        } else {
+            error_log("SIN restricciones - obteniendo todos los departamentos");
+            $deptsQuery = "SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name";
+            $deptsStmt = $pdo->prepare($deptsQuery);
+            $deptsStmt->execute([$uploadContext['company_id']]);
+            $departments = $deptsStmt->fetchAll(PDO::FETCH_ASSOC);
+            error_log("Departamentos obtenidos SIN restricciones: " . json_encode($departments));
+        }
+        error_log("=== FIN DEBUG DEPARTAMENTOS ===");
+    }
+    $folders = [];
+    if ($uploadContext['department_id']) {
+        $foldersQuery = "SELECT id, name, folder_color FROM document_folders WHERE company_id = ? AND department_id = ? AND is_active = 1 ORDER BY name";
+        $foldersStmt = $pdo->prepare($foldersQuery);
+        $foldersStmt->execute([$uploadContext['company_id'], $uploadContext['department_id']]);
+        $folders = $foldersStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+} catch (Exception $e) {
+    $documentTypes = [];
+    $companies = [];
+    $departments = [];
+    $folders = [];
+}
 ?>
 
 <!DOCTYPE html>
@@ -1235,6 +996,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Funciones de sistema
+
+        // Cargar departamentos con restricciones de grupo
+        async function loadDepartments() {
+            const companyId = document.getElementById('companySelect').value;
+            const departmentSelect = document.getElementById('departmentSelect');
+            const folderSelect = document.getElementById('folderSelect');
+
+            departmentSelect.innerHTML = '<option value="">Sin departamento</option>';
+            folderSelect.innerHTML = '<option value="">Sin carpeta específica</option>';
+
+            if (!companyId) return;
+
+            try {
+                const response = await fetch('actions/get_departments.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        company_id: parseInt(companyId)
+                    })
+                });
+                const data = await response.json();
+
+                console.log('DEBUG - Respuesta departamentos:', data);
+
+                if (data.success && data.departments) {
+                    data.departments.forEach(dept => {
+                        const option = document.createElement('option');
+                        option.value = dept.id;
+                        option.textContent = dept.name;
+                        departmentSelect.appendChild(option);
+                    });
+                    console.log(`Departamentos cargados: ${data.departments.length}`);
+                } else {
+                    console.error('Error:', data.message);
+                }
+            } catch (error) {
+                console.error('Error cargando departamentos:', error);
+            }
+        }
+        // Cargar carpetas con restricciones de grupo
+        async function loadFolders() {
+            const companyId = document.getElementById('companySelect').value;
+            const departmentId = document.getElementById('departmentSelect').value;
+            const folderSelect = document.getElementById('folderSelect');
+
+            folderSelect.innerHTML = '<option value="">Sin carpeta específica</option>';
+
+            if (!companyId || !departmentId) return;
+
+            try {
+                const response = await fetch('actions/get_folders.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        department_id: parseInt(departmentId)
+                    })
+                });
+                const data = await response.json();
+
+                console.log('DEBUG - Respuesta carpetas:', data);
+
+                if (data.success && data.folders) {
+                    data.folders.forEach(folder => {
+                        const option = document.createElement('option');
+                        option.value = folder.id;
+                        option.textContent = folder.name;
+                        folderSelect.appendChild(option);
+                    });
+                    console.log(`Carpetas cargadas: ${data.folders.length}`);
+                } else {
+                    console.error('Error carpetas:', data.message);
+                }
+            } catch (error) {
+                console.error('Error cargando carpetas:', error);
+            }
+        }
+
         function showSettings() {
             alert('Configuración estará disponible próximamente');
         }
@@ -1506,6 +1348,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         `;
 
         document.head.insertAdjacentHTML('beforeend', additionalStyles);
+
+        // FUNCIÓN DE DEBUG - AGREGAR AL FINAL
+        console.log('=== DEBUG PERMISOS INICIO ===');
+        <?php
+        $debugPerms = getUserGroupPermissions($currentUser['id']);
+        echo "console.log('Permisos del usuario:', " . json_encode($debugPerms, JSON_PRETTY_PRINT) . ");";
+        echo "console.log('Departamentos cargados:', " . json_encode($departments, JSON_PRETTY_PRINT) . ");";
+        echo "console.log('ID usuario actual:', " . $currentUser['id'] . ");";
+        echo "console.log('Contexto upload:', " . json_encode($uploadContext, JSON_PRETTY_PRINT) . ");";
+        ?>
+        console.log('=== DEBUG PERMISOS FIN ===');
     </script>
 </body>
 
