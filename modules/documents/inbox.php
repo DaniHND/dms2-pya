@@ -1,18 +1,15 @@
 <?php
 // ===================================================================
-// INICIO DEL ARCHIVO modules/documents/inbox.php
+// INICIO DEL ARCHIVO modules/documents/inbox.php - VERSIÓN LIMPIA
 // ===================================================================
 
-// Tu código existente...
 require_once '../../config/session.php';
 require_once '../../config/database.php';
-// ... otros requires que ya tenías
+require_once '../../includes/group_permissions.php';
 
-// *** VERIFICAR QUE LA SESIÓN ESTÉ INICIADA ***
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-// *** VERIFICAR QUE $currentUser NO SEA NULL ***
 if (!$currentUser) {
     error_log("Error: getCurrentUser() retornó null");
     header('Location: ../../login.php');
@@ -20,7 +17,7 @@ if (!$currentUser) {
 }
 
 // ===================================================================
-// FUNCIÓN isSuperUser - MANTENER IGUAL
+// FUNCIÓN isSuperUser
 // ===================================================================
 function isSuperUser($userId)
 {
@@ -41,13 +38,11 @@ function isSuperUser($userId)
 }
 
 // ===================================================================
-// FUNCIÓN getUserPermissions - CORREGIDA
+// FUNCIÓN getUserPermissions - SIMPLIFICADA CON PRIORIDAD A GRUPOS
 // ===================================================================
 function getUserPermissions($userId)
 {
-    // Verificar que $userId no sea null
     if (!$userId) {
-        error_log("getUserPermissions: userId es null");
         return [
             'permissions' => [
                 'view' => false,
@@ -82,121 +77,72 @@ function getUserPermissions($userId)
         ];
     }
 
+    // PRIORIDAD ABSOLUTA A GRUPOS
+    $groupPermissions = getUserGroupPermissions($userId);
+    
+    if ($groupPermissions['has_groups']) {
+        $permissions = $groupPermissions['permissions'];
+        
+        return [
+            'permissions' => [
+                'view' => $permissions['view_files'] ?? false,
+                'download' => $permissions['download_files'] ?? false,
+                'create' => $permissions['upload_files'] ?? false,
+                'edit' => $permissions['create_folders'] ?? false,
+                'delete' => $permissions['delete_files'] ?? false
+            ],
+            'restrictions' => $groupPermissions['restrictions']
+        ];
+    }
+    
+    // Fallback para usuarios sin grupos
     try {
         $database = new Database();
         $pdo = $database->getConnection();
-
-        $query = "
-            SELECT ug.module_permissions, ug.access_restrictions 
-            FROM user_groups ug
-            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-
+        
+        $query = "SELECT role, company_id FROM users WHERE id = ? AND status = 'active'";
         $stmt = $pdo->prepare($query);
         $stmt->execute([$userId]);
-        $groupData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Log para debugging
-        error_log("getUserPermissions para userId $userId: " . count($groupData) . " grupos encontrados");
-
-        // Permisos iniciales - RESTRICTIVOS por defecto
-        $mergedPermissions = [
-            'view' => false,
-            'download' => false,
-            'create' => false,
-            'edit' => false,
-            'delete' => false
-        ];
-
-        $mergedRestrictions = [
-            'companies' => [],
-            'departments' => [],
-            'document_types' => []
-        ];
-
-        // Si no hay grupos, retornar permisos restrictivos
-        if (empty($groupData)) {
-            error_log("getUserPermissions: Usuario $userId no tiene grupos asignados");
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
             return [
-                'permissions' => $mergedPermissions,
-                'restrictions' => $mergedRestrictions
+                'permissions' => [
+                    'view' => true,
+                    'download' => true,
+                    'create' => true,
+                    'edit' => true,
+                    'delete' => true
+                ],
+                'restrictions' => [
+                    'companies' => [],
+                    'departments' => [],
+                    'document_types' => []
+                ]
             ];
         }
-
-        // Fusionar permisos de todos los grupos (OR lógico)
-        foreach ($groupData as $group) {
-            $permissions = json_decode($group['module_permissions'] ?: '{}', true);
-            $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
-
-            // Log para debugging
-            error_log("Procesando grupo con permisos: " . $group['module_permissions']);
-
-            // ===== MAPEO CORREGIDO DE PERMISOS =====
-
-            // Ver archivos (sistema nuevo y viejo)
-            if (isset($permissions['view_files']) && $permissions['view_files'] === true) {
-                $mergedPermissions['view'] = true;
-                error_log("Permiso view activado por view_files");
-            } elseif (isset($permissions['view']) && $permissions['view'] === true) {
-                $mergedPermissions['view'] = true;
-                error_log("Permiso view activado por view");
-            }
-
-            // Descarga
-            if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
-                $mergedPermissions['download'] = true;
-            } elseif (isset($permissions['download']) && $permissions['download'] === true) {
-                $mergedPermissions['download'] = true;
-            }
-
-            // Crear/subir archivos Y crear carpetas
-            if (isset($permissions['upload_files']) && $permissions['upload_files'] === true) {
-                $mergedPermissions['create'] = true;
-            } elseif (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
-                $mergedPermissions['create'] = true;
-            } elseif (isset($permissions['create']) && $permissions['create'] === true) {
-                $mergedPermissions['create'] = true;
-            }
-
-            // Editar archivos
-            if (isset($permissions['create_folders']) && $permissions['create_folders'] === true) {
-                $mergedPermissions['edit'] = true;
-            } elseif (isset($permissions['edit']) && $permissions['edit'] === true) {
-                $mergedPermissions['edit'] = true;
-            }
-
-            // Eliminar archivos
-            if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
-                $mergedPermissions['delete'] = true;
-            } elseif (isset($permissions['delete']) && $permissions['delete'] === true) {
-                $mergedPermissions['delete'] = true;
-            }
-
-            // Manejar restricciones
-            foreach (['companies', 'departments', 'document_types'] as $restrictionType) {
-                if (isset($restrictions[$restrictionType]) && is_array($restrictions[$restrictionType])) {
-                    $mergedRestrictions[$restrictionType] = array_unique(
-                        array_merge($mergedRestrictions[$restrictionType], $restrictions[$restrictionType])
-                    );
-                }
-            }
-        }
-
-        // Log del resultado final
-        error_log("getUserPermissions resultado para userId $userId: view=" . ($mergedPermissions['view'] ? 'true' : 'false'));
-
-        return [
-            'permissions' => $mergedPermissions,
-            'restrictions' => $mergedRestrictions
-        ];
-    } catch (Exception $e) {
-        error_log("Error getting user permissions para userId $userId: " . $e->getMessage());
-
-        // *** IMPORTANTE: RETORNAR PERMISOS RESTRICTIVOS EN CASO DE ERROR ***
+        
+        // Usuario normal sin grupos - acceso básico
         return [
             'permissions' => [
-                'view' => false,      // *** CAMBIO CRÍTICO: false en lugar de true ***
+                'view' => true,
+                'download' => true,
+                'create' => false,
+                'edit' => false,
+                'delete' => false
+            ],
+            'restrictions' => [
+                'companies' => $user['company_id'] ? [$user['company_id']] : [],
+                'departments' => [],
+                'document_types' => []
+            ]
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Error getting user permissions: " . $e->getMessage());
+        return [
+            'permissions' => [
+                'view' => false,
                 'download' => false,
                 'create' => false,
                 'edit' => false,
@@ -210,6 +156,10 @@ function getUserPermissions($userId)
         ];
     }
 }
+
+// ===================================================================
+// FUNCIÓN getNavigationItems - LIMPIA
+// ===================================================================
 function getNavigationItems($userId, $userRole, $currentPath = '')
 {
     $database = new Database();
@@ -227,18 +177,10 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
         $whereConditions = ["c.status = 'active'"];
         $params = [];
 
-        if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
+        if (!empty($restrictions['companies'])) {
             $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
             $whereConditions[] = "c.id IN ($placeholders)";
             $params = array_merge($params, $restrictions['companies']);
-        } elseif ($userRole !== 'admin' && empty($restrictions['companies'])) {
-            $userStmt = $pdo->prepare("SELECT company_id FROM users WHERE id = ?");
-            $userStmt->execute([$userId]);
-            $userInfo = $userStmt->fetch();
-            if ($userInfo && $userInfo['company_id']) {
-                $whereConditions[] = "c.id = ?";
-                $params[] = $userInfo['company_id'];
-            }
         }
 
         $whereClause = implode(' AND ', $whereConditions);
@@ -279,38 +221,62 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
         $userPermissions = getUserPermissions($userId);
         $restrictions = $userPermissions['restrictions'];
 
-        $hasAccess = $userRole === 'admin';
-        if (!$hasAccess) {
-            if (!empty($restrictions['companies'])) {
-                $hasAccess = in_array($companyId, $restrictions['companies']);
-            } else {
-                $userStmt = $pdo->prepare("SELECT company_id FROM users WHERE id = ?");
-                $userStmt->execute([$userId]);
-                $userInfo = $userStmt->fetch();
-                $hasAccess = $userInfo && $userInfo['company_id'] == $companyId;
-            }
+        // Verificar acceso a la empresa
+        $hasAccess = true;
+        if (!empty($restrictions['companies'])) {
+            $hasAccess = in_array($companyId, $restrictions['companies']);
         }
 
         if (!$hasAccess) {
             return [];
         }
 
-        // DEPARTAMENTOS
-        $deptQuery = "
-            SELECT d.id, d.name, d.description,
-                   COUNT(doc.id) as document_count,
-                   COUNT(DISTINCT f.id) as folder_count
-            FROM departments d
-            LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
-            LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
-            WHERE d.company_id = ? AND d.status = 'active'
-            GROUP BY d.id, d.name, d.description
-            ORDER BY d.name
-        ";
+        // DEPARTAMENTOS CON RESTRICCIONES DE GRUPO
+        $userGroupPermissions = getUserGroupPermissions($userId);
 
-        $stmt = $pdo->prepare($deptQuery);
-        $stmt->execute([$companyId]);
-        $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($userGroupPermissions['has_groups'] && !empty($userGroupPermissions['restrictions']['departments'])) {
+            // Usuario con grupos - aplicar restricciones de departamentos
+            $allowedDepartments = getUserAllowedDepartments($userId, $companyId);
+            $departments = [];
+            
+            foreach ($allowedDepartments as $dept) {
+                $statsQuery = "
+                    SELECT d.id, d.name, d.description,
+                           COUNT(DISTINCT doc.id) as document_count,
+                           COUNT(DISTINCT f.id) as folder_count
+                    FROM departments d
+                    LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
+                    LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
+                    WHERE d.id = ? AND d.status = 'active'
+                    GROUP BY d.id, d.name, d.description
+                ";
+                
+                $statsStmt = $pdo->prepare($statsQuery);
+                $statsStmt->execute([$dept['id']]);
+                $deptStats = $statsStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($deptStats) {
+                    $departments[] = $deptStats;
+                }
+            }
+        } else {
+            // Sin restricciones - mostrar todos los departamentos
+            $deptQuery = "
+                SELECT d.id, d.name, d.description,
+                       COUNT(doc.id) as document_count,
+                       COUNT(DISTINCT f.id) as folder_count
+                FROM departments d
+                LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
+                LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
+                WHERE d.company_id = ? AND d.status = 'active'
+                GROUP BY d.id, d.name, d.description
+                ORDER BY d.name
+            ";
+
+            $stmt = $pdo->prepare($deptQuery);
+            $stmt->execute([$companyId]);
+            $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         foreach ($departments as $dept) {
             $items[] = [
@@ -480,6 +446,9 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
     return $items;
 }
 
+// ===================================================================
+// FUNCIONES AUXILIARES
+// ===================================================================
 function getBreadcrumbs($currentPath, $userId)
 {
     if (empty($currentPath)) {
@@ -563,7 +532,7 @@ function searchItems($userId, $userRole, $searchTerm, $currentPath = '')
     $companyRestriction = '';
     $params = ["%{$searchTerm}%", "%{$searchTerm}%", "%{$searchTerm}%"];
 
-    if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
+    if (!empty($restrictions['companies'])) {
         $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
         $companyRestriction = " AND company_id IN ($placeholders)";
         $params = array_merge($params, $restrictions['companies']);
@@ -584,8 +553,9 @@ function searchItems($userId, $userRole, $searchTerm, $currentPath = '')
         $companyRestriction
         ORDER BY doc.name
     ";
+
     $searchParams = ["%{$searchTerm}%", "%{$searchTerm}%", "%{$searchTerm}%"];
-    if ($userRole !== 'admin' && !empty($restrictions['companies'])) {
+    if (!empty($restrictions['companies'])) {
         $searchParams = array_merge($searchParams, $restrictions['companies']);
     }
 
@@ -629,6 +599,7 @@ function searchItems($userId, $userRole, $searchTerm, $currentPath = '')
 
     return $results;
 }
+
 function formatBytes($bytes)
 {
     if ($bytes == 0) return '0 B';
@@ -680,15 +651,23 @@ function adjustBrightness($color, $percent)
     return sprintf("#%02x%02x%02x", $red, $green, $blue);
 }
 
+// Función para logging de actividad (si existe)
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $table, $recordId, $description) {
+        // Función placeholder
+        error_log("Activity: User $userId performed $action on $table: $description");
+    }
+}
+
 // ===================================================================
-// LÓGICA PRINCIPAL - CORREGIDA (SIN DUPLICACIÓN)
+// LÓGICA PRINCIPAL
 // ===================================================================
 
 try {
     $database = new Database();
     $pdo = $database->getConnection();
 
-    // *** PRIMERO: OBTENER PERMISOS ***
+    // Obtener permisos
     $userPermissions = getUserPermissions($currentUser['id']);
     $canView = $userPermissions['permissions']['view'] ?? false;
     $canDownload = $userPermissions['permissions']['download'] ?? false;
@@ -696,17 +675,8 @@ try {
     $canEdit = $userPermissions['permissions']['edit'] ?? false;
     $canDelete = $userPermissions['permissions']['delete'] ?? false;
 
-    // *** SEGUNDO: SOBRESCRIBIR SI ES ADMIN ***
-    if ($currentUser['role'] === 'admin') {
-        $canView = true;
-        $canDownload = true;
-        $canCreate = true;
-        $canEdit = true;
-        $canDelete = true;
-    }
-
-    // *** TERCERO: VERIFICAR ACCESO (AHORA $canView YA ESTÁ DEFINIDA) ***
-    if (!$canView && $currentUser['role'] !== 'admin') {
+    // Verificar acceso
+    if (!$canView) {
         $items = [];
         $breadcrumbs = [['name' => 'Sin acceso', 'path' => '', 'icon' => 'lock']];
         $noAccess = true;
@@ -733,8 +703,19 @@ try {
     $noAccess = true;
 }
 
-$pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPath, '/')) : []) : [];
+// Inicializar variables para evitar warnings
+$noAccess = $noAccess ?? false;
+$canView = $canView ?? false;
+$canDownload = $canDownload ?? false;
+$canCreate = $canCreate ?? false;
+$canEdit = $canEdit ?? false;
+$canDelete = $canDelete ?? false;
+$currentPath = $currentPath ?? '';
+$searchTerm = $searchTerm ?? '';
+$items = $items ?? [];
+$breadcrumbs = $breadcrumbs ?? [];
 
+$pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -785,7 +766,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
         <div class="container">
             <div class="page-header">
                 <p class="page-subtitle">
-                    <?php if (isset($noAccess) && $noAccess): ?>
+                    <?php if ($noAccess): ?>
                         Su usuario no tiene permisos para ver documentos. Contacte al administrador.
                     <?php else: ?>
                         Navegue y gestione sus documentos organizados por empresas y departamentos
@@ -793,7 +774,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                 </p>
             </div>
 
-            <?php if (!isset($noAccess) || !$noAccess): ?>
+            <?php if (!$noAccess): ?>
                 <!-- BREADCRUMB -->
                 <div class="breadcrumb-section">
                     <div class="breadcrumb-card">
@@ -849,10 +830,10 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                             <div class="search-wrapper">
                                 <i data-feather="search" class="search-icon"></i>
                                 <input type="text" class="search-input" placeholder="Buscar documentos, carpetas..."
-                                    value="<?= htmlspecialchars($searchTerm ?? '') ?>"
+                                    value="<?= htmlspecialchars($searchTerm) ?>"
                                     onkeypress="if(event.key==='Enter') search(this.value)"
                                     oninput="handleSearchInput(this.value)">
-                                <?php if (isset($searchTerm) && $searchTerm): ?>
+                                <?php if ($searchTerm): ?>
                                     <button class="search-clear" onclick="clearSearch()">
                                         <i data-feather="x"></i>
                                     </button>
@@ -863,7 +844,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                 </div>
 
                 <!-- RESULTADOS DE BÚSQUEDA -->
-                <?php if (isset($searchTerm) && $searchTerm): ?>
+                <?php if ($searchTerm): ?>
                     <div class="search-results-info">
                         <div class="search-info-card">
                             <i data-feather="search"></i>
@@ -877,8 +858,8 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                     <div class="content-card">
                         <div class="content-header">
                             <h3>
-                                <?php if (empty($items)): ?>
-                                    <?= isset($searchTerm) && $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?>
+                                <?php if (count($items) === 0): ?>
+                                    <?= $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?>
                                 <?php else: ?>
                                     <?= count($items) ?> elemento<?= count($items) !== 1 ? 's' : '' ?> encontrado<?= count($items) !== 1 ? 's' : '' ?>
                                 <?php endif; ?>
@@ -886,15 +867,15 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                         </div>
 
                         <div class="content-body">
-                            <?php if (empty($items)): ?>
+                            <?php if (count($items) === 0): ?>
                                 <!-- ESTADO VACÍO -->
                                 <div class="empty-state">
                                     <div class="empty-icon">
-                                        <i data-feather="<?= isset($searchTerm) && $searchTerm ? 'search' : 'folder' ?>"></i>
+                                        <i data-feather="<?= $searchTerm ? 'search' : 'folder' ?>"></i>
                                     </div>
-                                    <h3><?= isset($searchTerm) && $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?></h3>
+                                    <h3><?= $searchTerm ? 'Sin resultados' : 'Carpeta vacía' ?></h3>
                                     <p>
-                                        <?php if (isset($searchTerm) && $searchTerm): ?>
+                                        <?php if ($searchTerm): ?>
                                             No se encontraron elementos que coincidan con "<?= htmlspecialchars($searchTerm) ?>". Intente con otros términos de búsqueda.
                                         <?php else: ?>
                                             No hay elementos para mostrar en esta ubicación.
@@ -906,7 +887,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                                         <?php endif; ?>
                                     </p>
 
-                                    <?php if ($canCreate && (!isset($searchTerm) || !$searchTerm)): ?>
+                                    <?php if ($canCreate && !$searchTerm): ?>
                                         <div class="empty-actions">
                                             <?php if (count($pathParts) === 2 && is_numeric($pathParts[1])): ?>
                                                 <button class="btn-create" onclick="createDocumentFolder()">
@@ -961,7 +942,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                                                         <span class="item-folder-type">Carpeta de documentos</span>
                                                     <?php endif; ?>
 
-                                                    <?php if (isset($searchTerm) && $searchTerm && isset($item['location'])): ?>
+                                                    <?php if ($searchTerm && isset($item['location'])): ?>
                                                         <span class="item-location">
                                                             <i data-feather="map-pin" style="width: 12px; height: 12px;"></i>
                                                             <?= htmlspecialchars($item['location']) ?>
@@ -1025,7 +1006,7 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
                                                 </div>
                                                 <div class="list-item-name">
                                                     <div class="name-text"><?= htmlspecialchars($item['name']) ?></div>
-                                                    <?php if (isset($searchTerm) && $searchTerm && isset($item['location'])): ?>
+                                                    <?php if ($searchTerm && isset($item['location'])): ?>
                                                         <div class="location-text"><?= htmlspecialchars($item['location']) ?></div>
                                                     <?php endif; ?>
                                                 </div>
@@ -1228,81 +1209,49 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
         const canCreate = <?= $canCreate ? 'true' : 'false' ?>;
         const canEdit = <?= $canEdit ? 'true' : 'false' ?>;
         const canDelete = <?= $canDelete ? 'true' : 'false' ?>;
-        const currentPath = '<?= htmlspecialchars($currentPath ?? '') ?>';
+        const currentPath = '<?= htmlspecialchars($currentPath) ?>';
     </script>
     <script src="../../assets/js/inbox-visual.js"></script>
 
-    <!-- JAVASCRIPT DIRECTO PARA ELIMINACIÓN -->
+    <!-- JAVASCRIPT PARA ELIMINACIÓN -->
     <script>
-        console.log('🔧 JavaScript directo cargado');
-
-        // Sobrescribir completamente la función deleteDocument
+        // Función mejorada de eliminación
         window.deleteDocument = function(documentId, documentName) {
-            console.log('🗑️ deleteDocument DIRECTO ejecutado:', documentId, documentName);
-
             if (!documentId) {
-                console.error('🗑️ ERROR: ID vacío');
                 alert('Error: ID de documento no válido');
                 return;
             }
 
-            // Confirmaciones
             let confirmMessage = `¿Eliminar documento${documentName ? '\n\n📄 ' + documentName : ' ID: ' + documentId}?\n\n⚠️ Esta acción no se puede deshacer.`;
 
             if (!confirm(confirmMessage)) {
-                console.log('🗑️ Usuario canceló');
                 return;
             }
 
             if (!confirm('¿Está completamente seguro?\n\nEsta es la última oportunidad para cancelar.')) {
-                console.log('🗑️ Usuario canceló segunda confirmación');
                 return;
             }
 
-            console.log('🗑️ Procediendo con eliminación...'); // Obtener path actual por múltiples métodos
-            function getPathFromMultipleSources() {
-                console.log('🔍 Buscando path actual...');
-
-                // Método 1: URL params
+            // Obtener path actual
+            function getCurrentPath() {
                 const urlParams = new URLSearchParams(window.location.search);
                 const urlPath = urlParams.get('path');
-                if (urlPath) {
-                    console.log('✅ Path desde URL:', urlPath);
-                    return urlPath;
-                }
-
-                // Método 2: Variable global
+                if (urlPath) return urlPath;
+                
                 if (typeof currentPath !== 'undefined' && currentPath) {
-                    console.log('✅ Path desde variable global:', currentPath);
                     return currentPath;
                 }
-
-                // Método 3: Breadcrumbs
+                
                 const breadcrumbs = document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]');
                 if (breadcrumbs.length > 0) {
                     const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
-                    const breadcrumbPath = lastBreadcrumb.dataset.breadcrumbPath;
-                    if (breadcrumbPath && breadcrumbPath !== '') {
-                        console.log('✅ Path desde breadcrumb:', breadcrumbPath);
-                        return breadcrumbPath;
-                    }
+                    return lastBreadcrumb.dataset.breadcrumbPath || '';
                 }
-
-                // Método 4: Análisis de URL manual
-                const currentUrl = window.location.href;
-                const match = currentUrl.match(/[?&]path=([^&]+)/);
-                if (match) {
-                    const decodedPath = decodeURIComponent(match[1]);
-                    console.log('✅ Path desde regex URL:', decodedPath);
-                    return decodedPath;
-                }
-
-                console.log('❌ No se encontró path');
+                
                 return '';
             }
 
-            const currentPath = getPathFromMultipleSources();
-            console.log('📍 Path final detectado:', currentPath || 'VACÍO');
+            const currentPath = getCurrentPath();
 
             // Crear formulario
             const form = document.createElement('form');
@@ -1310,117 +1259,24 @@ $pathParts = isset($currentPath) ? ($currentPath ? explode('/', trim($currentPat
             form.action = 'delete.php';
             form.style.display = 'none';
 
-            // Document ID
             const inputDoc = document.createElement('input');
             inputDoc.type = 'hidden';
             inputDoc.name = 'document_id';
             inputDoc.value = documentId;
             form.appendChild(inputDoc);
 
-            // Return path
             if (currentPath) {
                 const inputPath = document.createElement('input');
                 inputPath.type = 'hidden';
                 inputPath.name = 'return_path';
                 inputPath.value = currentPath;
                 form.appendChild(inputPath);
-                console.log('📤 Enviando return_path:', currentPath);
-            } else {
-                console.log('⚠️ Sin return_path - irá al inicio');
             }
 
-            // Agregar al DOM y enviar
             document.body.appendChild(form);
-
-            console.log('📤 Enviando formulario POST a delete.php');
-            console.log('📋 Datos del formulario:');
-            console.log('  - document_id:', documentId);
-            console.log('  - return_path:', currentPath || 'no enviado');
-
-            // Mostrar mensaje de carga
-            const loadingMsg = document.createElement('div');
-            loadingMsg.id = 'deleteLoading';
-            loadingMsg.style.cssText = `
-            position: fixed; top: 20px; right: 20px; z-index: 10000;
-            background: #ffc107; color: #000; padding: 15px 20px;
-            border-radius: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            font-weight: bold;
-        `;
-            loadingMsg.textContent = '🗑️ Eliminando documento...';
-            document.body.appendChild(loadingMsg);
-
-            // Enviar formulario
             form.submit();
         };
-
-        // Verificar que se sobrescribió correctamente
-        if (typeof window.deleteDocument === 'function') {
-            console.log('✅ Función deleteDocument sobrescrita exitosamente');
-        } else {
-            console.error('❌ Error: No se pudo sobrescribir deleteDocument');
-        }
-
-        // Debug de estado actual
-        console.log('📊 Estado del sistema:');
-        console.log('- URL actual:', window.location.href);
-        console.log('- currentPath variable:', typeof currentPath !== 'undefined' ? currentPath : 'undefined');
-        console.log('- Breadcrumbs con path:', document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]').length);
-
-        // Función de test para debugging
-        window.testDeleteFunction = function() {
-            console.log('🧪 TESTING deleteDocument function...');
-
-            // Simular sin eliminar realmente
-            const originalConfirm = window.confirm;
-            let confirmCalls = 0;
-
-            window.confirm = function(message) {
-                confirmCalls++;
-                console.log(`📋 Confirm ${confirmCalls}: ${message}`);
-                return confirmCalls <= 2; // Simular aceptar ambas confirmaciones
-            };
-
-            // Interceptar submit para no enviar realmente
-            const originalSubmit = HTMLFormElement.prototype.submit;
-            HTMLFormElement.prototype.submit = function() {
-                console.log('📤 FORM SUBMIT interceptado (test mode)');
-
-                const formData = new FormData(this);
-                console.log('📋 Datos que se enviarían:');
-                for (let [key, value] of formData.entries()) {
-                    console.log(`  ${key}: ${value}`);
-                }
-
-                // Restaurar funciones
-                window.confirm = originalConfirm;
-                HTMLFormElement.prototype.submit = originalSubmit;
-
-                console.log('✅ Test completado - Ver log arriba');
-                alert('Test completado - Ver consola para detalles');
-            };
-
-            // Ejecutar test
-            deleteDocument(999, 'TEST_DOCUMENT');
-        };
-
-        console.log('🛠️ JavaScript directo inicializado. Usa testDeleteFunction() para probar.');
     </script>
-
-    <!-- ESTILOS PARA NOTIFICACIONES -->
-    <style>
-        #deleteLoading {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 10000;
-            background: #ffc107;
-            color: #000;
-            padding: 15px 20px;
-            border-radius: 5px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            font-weight: bold;
-        }
-    </style>
 </body>
 
 </html>

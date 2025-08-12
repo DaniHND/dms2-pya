@@ -4,29 +4,189 @@ require_once '../../upload_config.php';
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
-require_once '../../includes/group_permissions.php';  // AGREGAR
-require_once '../../includes/permission_check.php';   // AGREGAR
+require_once '../../includes/group_permissions.php';
+require_once '../../includes/permission_check.php';
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-// AGREGAR ESTE BLOQUE COMPLETO
+// ===================================================================
+// VALIDACIÓN DE PERMISOS DE UPLOAD (IGUAL QUE EN INBOX)
+// ===================================================================
+$canUpload = false;
+$noAccess = false;
+$error = '';
+
 try {
+    // Obtener permisos del usuario
+    $userPermissions = getUserGroupPermissions($currentUser['id']);
+    
     if ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin') {
-        if (!getUserGroupPermissions($currentUser['id'])['has_groups']) {
+        // Los admins siempre pueden subir archivos
+        $canUpload = true;
+        
+        if (!$userPermissions['has_groups']) {
             $error = 'ADVERTENCIA: Como administrador debe configurar grupos de usuarios para mejor seguridad.';
         }
     } else {
+        // Usuarios normales: verificar grupos y permisos
         requireActiveGroups();
-        requireUploadPermission();
+        
+        // Verificar específicamente el permiso de upload
+        if (!$userPermissions['has_groups']) {
+            throw new Exception('Su usuario no tiene grupos asignados. Contacte al administrador.');
+        }
+        
+        // Verificar permiso de upload_files o create
+        $canUpload = $userPermissions['permissions']['upload_files'] ?? false;
+        if (!$canUpload) {
+            $canUpload = $userPermissions['permissions']['create'] ?? false;
+        }
+        
+        if (!$canUpload) {
+            $noAccess = true;
+        }
     }
 } catch (Exception $e) {
+    $noAccess = true;
     $error = $e->getMessage();
+    error_log("Error en validación de permisos upload: " . $e->getMessage());
 }
-// FIN DEL BLOQUE AGREGADO
 
-SessionManager::requireLogin();
-$currentUser = SessionManager::getCurrentUser();
+
+
+
+// ===================================================================
+// SI NO TIENE ACCESO, MOSTRAR PANTALLA DE ERROR (COMO EN INBOX)
+// ===================================================================
+if ($noAccess) {
+    ?>
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Subir Documento - DMS2</title>
+        <link rel="stylesheet" href="../../assets/css/main.css">
+        <link rel="stylesheet" href="../../assets/css/dashboard.css">
+        <link rel="stylesheet" href="../../assets/css/inbox-visual.css">
+        <script src="https://unpkg.com/feather-icons"></script>
+    </head>
+    <body class="dashboard-layout">
+        <?php include '../../includes/sidebar.php'; ?>
+
+        <main class="main-content">
+            <!-- HEADER -->
+            <header class="content-header">
+                <div class="header-left">
+                    <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+                        <i data-feather="menu"></i>
+                    </button>
+                    <h1>Subir Documento</h1>
+                </div>
+
+                <div class="header-right">
+                    <div class="header-info">
+                        <div class="user-name-header"><?php echo htmlspecialchars(trim($currentUser['first_name'] . ' ' . $currentUser['last_name'])); ?></div>
+                        <div class="current-time" id="currentTime"></div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn-icon" onclick="showSettings()">
+                            <i data-feather="settings"></i>
+                        </button>
+                        <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                            <i data-feather="log-out"></i>
+                        </a>
+                    </div>
+                </div>
+            </header>
+
+            <div class="container">
+                <div class="page-header">
+                    <p class="page-subtitle">
+                        Su usuario no tiene permisos para subir documentos. Contacte al administrador.
+                    </p>
+                </div>
+
+                <!-- MENSAJE DE SIN ACCESO (IGUAL QUE EN INBOX) -->
+                <div class="content-section">
+                    <div class="content-card">
+                        <div class="content-body">
+                            <div class="empty-state">
+                                <div class="empty-icon">
+                                    <i data-feather="lock"></i>
+                                </div>
+                                <h3>Sin permisos para subir archivos</h3>
+                                <p>
+                                    Su usuario no tiene permisos para subir documentos al sistema.
+                                    <br>Para obtener acceso de subida, contacte al administrador del sistema.
+                                </p>
+                                <?php if ($error): ?>
+                                    <div class="alert alert-error" style="margin-top: 1rem;">
+                                        <i data-feather="alert-circle"></i>
+                                        <?php echo htmlspecialchars($error); ?>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="empty-actions">
+                                    <a href="inbox.php" class="btn-secondary">
+                                        <i data-feather="folder"></i>
+                                        <span>Ver Documentos</span>
+                                    </a>
+                                    <a href="../../dashboard.php" class="btn-secondary">
+                                        <i data-feather="home"></i>
+                                        <span>Volver al Dashboard</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <script>
+            function showSettings() {
+                alert('Configuración estará disponible próximamente');
+            }
+
+            function toggleSidebar() {
+                console.log('Toggle sidebar');
+            }
+
+            function updateTime() {
+                const now = new Date();
+                const options = {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                };
+                const timeString = now.toLocaleDateString('es-ES', options);
+                const element = document.getElementById('currentTime');
+                if (element) element.textContent = timeString;
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                feather.replace();
+                updateTime();
+                setInterval(updateTime, 60000);
+            });
+        </script>
+    </body>
+    </html>
+    <?php
+    exit; // IMPORTANTE: Salir aquí para no mostrar el resto del formulario
+}
+
+
+
+
+
+// ===================================================================
+// CONTINUAR CON EL CÓDIGO NORMAL DE UPLOAD (SOLO SI TIENE PERMISOS)
+// ===================================================================
 
 // Obtener la ruta actual del explorador
 $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
@@ -80,9 +240,14 @@ try {
     error_log("Error determining upload context: " . $e->getMessage());
 }
 
-// Procesar formulario
-$error = '';
+// Procesar formulario (SOLO si llegamos hasta aquí, es decir, SI tiene permisos)
 $success = '';
+
+
+
+
+
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -118,8 +283,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $companyId = intval($_POST['company_id']) ?: $uploadContext['company_id'];
         $departmentId = intval($_POST['department_id']) ?: $uploadContext['department_id'];
         $folderId = intval($_POST['folder_id']) ?: $uploadContext['folder_id'];
-        // AGREGAR ESTAS 3 VALIDACIONES
-       // VALIDACIONES DE PERMISOS (con excepción para admins)
+        
+        // VALIDACIONES DE PERMISOS (solo si tiene grupos)
         $userPermissions = getUserGroupPermissions($currentUser['id']);
         
         if ($userPermissions['has_groups']) {
@@ -135,8 +300,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         // Para admins sin grupos: sin validaciones (acceso completo)
-        // FIN DE VALIDACIONES
-        // FIN DE VALIDACIONES AGREGADAS
 
         $uniqueFileName = uniqid() . '_' . time() . '.' . $fileExtension;
         $uploadDir = '../../uploads/documents/';
@@ -213,12 +376,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Obtener tipos de documentos para el select
+
+
+
+
+// Obtener tipos de documentos para el select (SOLO si tiene permisos)
 try {
     $database = new Database();
     $pdo = $database->getConnection();
 
-    // SOLO REEMPLAZA ESTAS LÍNEAS DE AQUÍ ↓
     $userPermissions = getUserGroupPermissions($currentUser['id']);
 
     if ($userPermissions['has_groups'] && !empty($userPermissions['restrictions']['document_types'])) {
@@ -238,10 +404,6 @@ try {
         $companiesStmt->execute();
         $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
     }
-    // HASTA AQUÍ ↑ (quita las líneas originales de $typesQuery y $companiesQuery)
-
-
-
 
     $departments = [];
     if ($uploadContext['company_id']) {
@@ -268,6 +430,7 @@ try {
         }
         error_log("=== FIN DEBUG DEPARTAMENTOS ===");
     }
+    
     $folders = [];
     if ($uploadContext['department_id']) {
         $foldersQuery = "SELECT id, name, folder_color FROM document_folders WHERE company_id = ? AND department_id = ? AND is_active = 1 ORDER BY name";
@@ -282,6 +445,11 @@ try {
     $folders = [];
 }
 ?>
+
+
+
+
+
 
 <!DOCTYPE html>
 <html lang="es">
@@ -480,6 +648,9 @@ try {
             </div>
         </div>
     </div>
+
+
+
 
     <style>
         .upload-context {
@@ -725,9 +896,117 @@ try {
             max-height: 60vh;
             object-fit: contain;
         }
+
+        .alert {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .alert-error {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+
+        .alert-success {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .preview-btn {
+            background: var(--info-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 1rem;
+            transition: all 0.2s;
+        }
+        
+        .preview-btn:hover {
+            background: var(--info-light);
+            transform: scale(1.1);
+        }
+        
+        .upload-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: rgba(0,0,0,0.1);
+            z-index: 9998;
+            display: none;
+        }
+        
+        .upload-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .file-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-left: auto;
+        }
+        
+        .btn.loading {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+        
+        .btn.loading i {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Mejoras responsive */
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .file-upload-area {
+                min-height: 120px;
+            }
+            
+            .file-upload-content {
+                padding: 1rem;
+            }
+            
+            .preview-modal {
+                max-width: 95vw;
+                margin: 1rem;
+            }
+        }
     </style>
 
-    <script>
+
+
+
+<script>
         let selectedFile = null;
         let tags = [];
 
@@ -805,66 +1084,75 @@ try {
             const extension = file.name.split('.').pop().toLowerCase();
             let iconName = 'file';
 
+            
+
+
+
             if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) {
-                iconName = 'image';
-                // Mostrar vista previa de imagen
-                if (file.size < 5 * 1024 * 1024) { // Solo para archivos menores a 5MB
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        fileIcon.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`;
-                    };
-                    reader.readAsDataURL(file);
-                }
-            } else if (extension === 'pdf') {
-                iconName = 'file-text';
-                fileIcon.style.background = '#ef4444';
-            } else if (['doc', 'docx'].includes(extension)) {
-                iconName = 'file-text';
-                fileIcon.style.background = '#2563eb';
-            } else if (['xls', 'xlsx'].includes(extension)) {
-                iconName = 'grid';
-                fileIcon.style.background = '#10b981';
-            }
+               iconName = 'image';
+               // Mostrar vista previa de imagen
+               if (file.size < 5 * 1024 * 1024) { // Solo para archivos menores a 5MB
+                   const reader = new FileReader();
+                   reader.onload = function(e) {
+                       fileIcon.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`;
+                   };
+                   reader.readAsDataURL(file);
+               }
+           } else if (extension === 'pdf') {
+               iconName = 'file-text';
+               fileIcon.style.background = '#ef4444';
+           } else if (['doc', 'docx'].includes(extension)) {
+               iconName = 'file-text';
+               fileIcon.style.background = '#2563eb';
+           } else if (['xls', 'xlsx'].includes(extension)) {
+               iconName = 'grid';
+               fileIcon.style.background = '#10b981';
+           }
 
-            if (!fileIcon.querySelector('img')) {
-                fileIcon.innerHTML = `<i data-feather="${iconName}"></i>`;
-            }
+           if (!fileIcon.querySelector('img')) {
+               fileIcon.innerHTML = `<i data-feather="${iconName}"></i>`;
+           }
 
-            uploadContent.style.display = 'none';
-            filePreview.style.display = 'flex';
-            fileUploadArea.classList.add('has-file');
+           uploadContent.style.display = 'none';
+           filePreview.style.display = 'flex';
+           fileUploadArea.classList.add('has-file');
 
-            feather.replace();
-        }
+           feather.replace();
+       }
 
-        function removeFile(e) {
-            e.stopPropagation();
-            selectedFile = null;
-            fileInput.value = '';
+       function removeFile(e) {
+           e.stopPropagation();
+           selectedFile = null;
+           fileInput.value = '';
 
-            uploadContent.style.display = 'block';
-            filePreview.style.display = 'none';
-            fileUploadArea.classList.remove('has-file');
+           uploadContent.style.display = 'block';
+           filePreview.style.display = 'none';
+           fileUploadArea.classList.remove('has-file');
 
-            submitBtn.disabled = true;
+           submitBtn.disabled = true;
 
-            // Limpiar vista previa de imagen si existe
-            const fileIcon = document.getElementById('fileIcon');
-            fileIcon.innerHTML = '<i data-feather="file"></i>';
-            fileIcon.style.background = 'var(--primary-color)';
+           // Limpiar vista previa de imagen si existe
+           const fileIcon = document.getElementById('fileIcon');
+           fileIcon.innerHTML = '<i data-feather="file"></i>';
+           fileIcon.style.background = 'var(--primary-color)';
 
-            feather.replace();
-        }
+           feather.replace();
+       }
 
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+       function formatFileSize(bytes) {
+           if (bytes === 0) return '0 Bytes';
+           const k = 1024;
+           const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+           const i = Math.floor(Math.log(bytes) / Math.log(k));
+           return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+       }
 
-        // Vista previa de archivos
+
+
+
+
+
+       // Vista previa de archivos
         function previewFile() {
             if (!selectedFile) return;
 
@@ -941,61 +1229,8 @@ try {
             document.getElementById('tagsValue').value = tags.join(',');
         }
 
-        // Cargar departamentos y carpetas dinámicamente
-        async function loadDepartments() {
-            const companyId = document.getElementById('companySelect').value;
-            const departmentSelect = document.getElementById('departmentSelect');
-            const folderSelect = document.getElementById('folderSelect');
 
-            departmentSelect.innerHTML = '<option value="">Sin departamento</option>';
-            folderSelect.innerHTML = '<option value="">Sin carpeta específica</option>';
 
-            if (!companyId) return;
-
-            try {
-                const response = await fetch(`get_departments.php?company_id=${companyId}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    data.departments.forEach(dept => {
-                        const option = document.createElement('option');
-                        option.value = dept.id;
-                        option.textContent = dept.name;
-                        departmentSelect.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Error loading departments:', error);
-            }
-        }
-
-        async function loadFolders() {
-            const companyId = document.getElementById('companySelect').value;
-            const departmentId = document.getElementById('departmentSelect').value;
-            const folderSelect = document.getElementById('folderSelect');
-
-            folderSelect.innerHTML = '<option value="">Sin carpeta específica</option>';
-
-            if (!companyId || !departmentId) return;
-
-            try {
-                const response = await fetch(`get_folders.php?company_id=${companyId}&department_id=${departmentId}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    data.folders.forEach(folder => {
-                        const option = document.createElement('option');
-                        option.value = folder.id;
-                        option.textContent = folder.name;
-                        folderSelect.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Error loading folders:', error);
-            }
-        }
-
-        // Funciones de sistema
 
         // Cargar departamentos con restricciones de grupo
         async function loadDepartments() {
@@ -1037,6 +1272,7 @@ try {
                 console.error('Error cargando departamentos:', error);
             }
         }
+
         // Cargar carpetas con restricciones de grupo
         async function loadFolders() {
             const companyId = document.getElementById('companySelect').value;
@@ -1099,6 +1335,9 @@ try {
             const element = document.getElementById('currentTime');
             if (element) element.textContent = timeString;
         }
+
+
+
 
         // Cortar y pegar archivos (funcionalidad futura)
         let clipboard = {
@@ -1263,91 +1502,6 @@ try {
             console.log('📤 Sistema de upload iniciado con diseño original');
             console.log('Contexto actual:', '<?= $uploadContext['context_name'] ?>');
         });
-
-        // Agregar estilos CSS adicionales para los nuevos elementos
-        const additionalStyles = `
-            <style>
-                .preview-btn {
-                    background: var(--info-color);
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    width: 32px;
-                    height: 32px;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin-left: 1rem;
-                    transition: all 0.2s;
-                }
-                
-                .preview-btn:hover {
-                    background: var(--info-light);
-                    transform: scale(1.1);
-                }
-                
-                .upload-progress {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 3px;
-                    background: rgba(0,0,0,0.1);
-                    z-index: 9998;
-                    display: none;
-                }
-                
-                .upload-progress-bar {
-                    height: 100%;
-                    background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-                    width: 0%;
-                    transition: width 0.3s ease;
-                }
-                
-                .file-actions {
-                    display: flex;
-                    gap: 0.5rem;
-                    margin-left: auto;
-                }
-                
-                .btn.loading {
-                    pointer-events: none;
-                    opacity: 0.7;
-                }
-                
-                .btn.loading i {
-                    animation: spin 1s linear infinite;
-                }
-                
-                @keyframes spin {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-                
-                /* Mejoras responsive */
-                @media (max-width: 768px) {
-                    .form-row {
-                        grid-template-columns: 1fr;
-                    }
-                    
-                    .file-upload-area {
-                        min-height: 120px;
-                    }
-                    
-                    .file-upload-content {
-                        padding: 1rem;
-                    }
-                    
-                    .preview-modal {
-                        max-width: 95vw;
-                        margin: 1rem;
-                    }
-                }
-            </style>
-        `;
-
-        document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
         // FUNCIÓN DE DEBUG - AGREGAR AL FINAL
         console.log('=== DEBUG PERMISOS INICIO ===');
