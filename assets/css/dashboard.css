@@ -164,11 +164,6 @@ body {
     background: rgba(255, 255, 255, 0.1);
 }
 
-.nav-item.active .nav-link {
-    color: var(--primary-color);
-    background: rgba(236, 183, 6, 0.1);
-    font-weight: 600;
-}
 
 .nav-link svg {
     width: 18px;

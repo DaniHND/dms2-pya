@@ -719,11 +719,7 @@
     background: rgba(255, 255, 255, 0.2);
 }
 
-.nav-item.active .nav-link {
-    color: rgb(212, 175, 55);
-    background: rgba(236, 183, 6, 0.1);
-    font-weight: 600;
-}
+
 
 /* Responsive Design */
 @media (max-width: 1200px) {
