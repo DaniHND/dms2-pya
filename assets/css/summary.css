@@ -1,0 +1,68 @@
+/* summary.css */
+/* Estilos responsive para el panel de resumen */
+
+.results-summary {
+    width: 100%;
+    max-width: 1000px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    transition: background 0.3s;
+}
+
+.summary-stats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.stat-item {
+    flex: 1 1 30%;
+    min-width: 200px;
+    background-color: #f8f9fc;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: transform 0.2s, background-color 0.3s;
+}
+
+.stat-item:hover {
+    transform: translateY(-3px);
+    background-color: #eef2f7;
+}
+
+.stat-item i {
+    display: block;
+    color: #4a90e2;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto 10px;
+}
+
+.stat-number {
+    display: block;
+    font-size: 1.6rem;
+    font-weight: bold;
+    color: #333;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.95rem;
+    color: #777;
+    margin-top: 5px;
+}
+/* Responsive para móviles */
+@media screen and (max-width: 768px) {
+    .summary-stats {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .stat-item {
+        width: 100%;
+    }
+}

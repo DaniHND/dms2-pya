@@ -1,0 +1,556 @@
+/* ===== VISTA_FILTRO.CSS ===== */
+/* CSS reutilizable para vista previa en filtros de reportes - DMS2 */
+
+/* Variables específicas para vista previa (si no están definidas) */
+:root {
+    --preview-bg: #ffffff;
+    --preview-border: #e2e8f0;
+    --preview-primary: #8B4513;
+    --preview-text: #1e293b;
+    --preview-text-muted: #64748b;
+    --preview-success: #10b981;
+    --preview-warning: #f59e0b;
+    --preview-error: #ef4444;
+    --preview-info: #3b82f6;
+    --preview-card-bg: #ffffff;
+    --preview-bg-light: #f8fafc;
+}
+
+/* ===== CONTENEDOR PRINCIPAL DE VISTA PREVIA ===== */
+
+.filter-preview {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    background: var(--preview-card-bg);
+    border: 1px solid var(--preview-border);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ===== HEADER DE VISTA PREVIA ===== */
+
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--preview-border);
+}
+
+.preview-header h4 {
+    margin: 0;
+    color: var(--preview-text);
+    font-size: 1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.preview-header h4 i {
+    width: 18px;
+    height: 18px;
+    color: var(--preview-primary);
+}
+
+.preview-count {
+    background: var(--preview-primary);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* ===== CONTENIDO DE VISTA PREVIA ===== */
+
+.preview-content {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.preview-table-container {
+    overflow-x: auto;
+}
+
+.preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    background: var(--preview-card-bg);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.preview-table th,
+.preview-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--preview-border);
+}
+
+.preview-table th {
+    background: var(--preview-bg-light);
+    color: var(--preview-text);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.preview-table td {
+    color: var(--preview-text-muted);
+}
+
+.preview-table tr:hover {
+    background: var(--preview-bg-light);
+}
+
+.preview-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* ===== CELDAS ESPECIALES PARA VISTA PREVIA ===== */
+
+/* Fecha y hora */
+.datetime-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.datetime-preview strong {
+    color: var(--preview-text);
+    font-size: 0.875rem;
+}
+
+.datetime-preview small {
+    color: var(--preview-text-muted);
+    font-size: 0.75rem;
+}
+
+/* Usuario */
+.user-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.user-preview strong {
+    color: var(--preview-text);
+    font-size: 0.875rem;
+}
+
+.user-preview small {
+    color: var(--preview-text-muted);
+    font-size: 0.75rem;
+}
+
+/* Empresa */
+.company-preview {
+    color: var(--preview-text);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+/* Documento */
+.document-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.document-preview strong {
+    color: var(--preview-text);
+    font-size: 0.875rem;
+}
+
+.document-preview small {
+    color: var(--preview-text-muted);
+    font-size: 0.75rem;
+}
+
+/* Descripción */
+.description-preview {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--preview-text-muted);
+    font-size: 0.875rem;
+    cursor: help;
+}
+
+/* Tamaño de archivo */
+.size-preview {
+    color: var(--preview-text);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+/* Tipo de documento */
+.type-preview {
+    background: var(--preview-primary);
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+/* ===== BADGES DE ACCIONES ===== */
+
+.action-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.action-badge i {
+    width: 12px;
+    height: 12px;
+}
+
+/* Colores para diferentes tipos de acciones */
+.action-badge.success {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--preview-success);
+}
+
+.action-badge.warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--preview-warning);
+}
+
+.action-badge.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--preview-error);
+}
+
+.action-badge.info {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--preview-info);
+}
+
+/* ===== BADGES DE ESTADO ===== */
+
+.status-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.status-badge.active {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--preview-success);
+}
+
+.status-badge.inactive {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--preview-error);
+}
+
+.status-badge.pending {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--preview-warning);
+}
+
+/* ===== FOOTER DE VISTA PREVIA ===== */
+
+.preview-footer {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--preview-border);
+    text-align: center;
+}
+
+.preview-footer p {
+    margin: 0;
+    color: var(--preview-text-muted);
+    font-size: 0.875rem;
+}
+
+.preview-footer strong {
+    color: var(--preview-primary);
+}
+
+/* ===== ESTADO VACÍO ===== */
+
+.preview-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--preview-text-muted);
+}
+
+.preview-empty i {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.preview-empty h4 {
+    margin: 0 0 0.5rem;
+    color: var(--preview-text);
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.preview-empty p {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+/* ===== ESTADÍSTICAS DE VISTA PREVIA ===== */
+
+.preview-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.preview-stat {
+    background: var(--preview-bg-light);
+    padding: 1rem;
+    border-radius: 6px;
+    text-align: center;
+    border: 1px solid var(--preview-border);
+    transition: transform 0.2s ease;
+}
+
+.preview-stat:hover {
+    transform: translateY(-2px);
+}
+
+.preview-stat .stat-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--preview-primary);
+    margin-bottom: 0.25rem;
+    line-height: 1;
+}
+
+.preview-stat .stat-label {
+    font-size: 0.875rem;
+    color: var(--preview-text-muted);
+    font-weight: 500;
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+
+@media (max-width: 768px) {
+    .filter-preview {
+        margin-top: 1rem;
+        padding: 1rem;
+    }
+    
+    .preview-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .preview-table {
+        font-size: 0.75rem;
+    }
+    
+    .preview-table th,
+    .preview-table td {
+        padding: 0.5rem;
+    }
+    
+    .description-preview {
+        max-width: 120px;
+    }
+    
+    .action-badge,
+    .status-badge {
+        font-size: 0.625rem;
+        padding: 0.125rem 0.375rem;
+    }
+    
+    .action-badge i {
+        width: 10px;
+        height: 10px;
+    }
+    
+    .preview-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .preview-table-container {
+        margin: 0 -1rem;
+    }
+    
+    .preview-table th,
+    .preview-table td {
+        padding: 0.375rem;
+    }
+    
+    .description-preview {
+        max-width: 80px;
+    }
+    
+    .datetime-preview,
+    .user-preview,
+    .document-preview {
+        gap: 0.125rem;
+    }
+    
+    .preview-stats {
+        grid-template-columns: 1fr;
+    }
+    
+    .preview-stat {
+        padding: 0.75rem;
+    }
+    
+    .preview-stat .stat-number {
+        font-size: 1.25rem;
+    }
+}
+
+/* ===== SCROLLBAR PERSONALIZADA ===== */
+
+.preview-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.preview-content::-webkit-scrollbar-track {
+    background: var(--preview-bg-light);
+    border-radius: 3px;
+}
+
+.preview-content::-webkit-scrollbar-thumb {
+    background: var(--preview-border);
+    border-radius: 3px;
+}
+
+.preview-content::-webkit-scrollbar-thumb:hover {
+    background: var(--preview-text-muted);
+}
+
+/* ===== ANIMACIONES Y TRANSICIONES ===== */
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.preview-stat {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+.preview-stat:nth-child(1) { animation-delay: 0.1s; }
+.preview-stat:nth-child(2) { animation-delay: 0.2s; }
+.preview-stat:nth-child(3) { animation-delay: 0.3s; }
+.preview-stat:nth-child(4) { animation-delay: 0.4s; }
+
+.preview-table {
+    animation: fadeInUp 0.3s ease-out 0.2s both;
+}
+
+/* ===== ACCESIBILIDAD ===== */
+
+@media (prefers-reduced-motion: reduce) {
+    .filter-preview,
+    .preview-stat,
+    .preview-table {
+        animation: none;
+    }
+}
+
+/* Focus visible para navegación por teclado */
+.preview-table tr:focus-within {
+    background: var(--preview-bg-light);
+    outline: 2px solid var(--preview-primary);
+    outline-offset: -2px;
+}
+
+/* ===== UTILIDADES ADICIONALES ===== */
+
+.preview-highlight {
+    background: rgba(139, 69, 19, 0.1);
+    color: var(--preview-primary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.preview-muted {
+    color: var(--preview-text-muted);
+    font-style: italic;
+}
+
+.preview-bold {
+    color: var(--preview-text);
+    font-weight: 600;
+}
+
+/* Separadores */
+.preview-divider {
+    border-top: 1px solid var(--preview-border);
+    margin: 1rem 0;
+}
+
+/* Loading state */
+.preview-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+    color: var(--preview-text-muted);
+}
+
+.preview-loading::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--preview-border);
+    border-top: 2px solid var(--preview-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
