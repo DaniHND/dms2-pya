@@ -837,3 +837,447 @@ document.addEventListener('DOMContentLoaded', () => {
         '🗑️ Eliminar': canDelete
     });
 });
+
+// ==============================================================
+// PARCHE RÁPIDO: Agregar al final de assets/js/inbox-visual.js
+// ==============================================================
+
+// Sobrescribir la función viewDocument para usar modal
+(function() {
+    console.log('🔧 Aplicando parche para viewDocument modal');
+    
+    // Sobrescribir función global
+    window.viewDocument = function(documentId) {
+        console.log('👁️ viewDocument interceptado - usando modal para ID:', documentId);
+        
+        if (typeof canView !== 'undefined' && !canView) {
+            showNotification('❌ No tienes permisos para ver documentos', 'error');
+            return;
+        }
+        
+        // Usar modal existente
+        if (typeof showPreviewModal === 'function') {
+            showPreviewModal(documentId);
+        } else {
+            // Fallback si no existe showPreviewModal
+            console.warn('⚠️ showPreviewModal no encontrada, usando nueva ventana');
+            window.open(`view.php?id=${documentId}`, '_blank');
+        }
+    };
+    
+    console.log('✅ viewDocument sobrescrita correctamente');
+})();
+
+// ==============================================================
+// MODAL DE VISTA PREVIA - SOLUCIÓN LIMPIA Y UNIFICADA
+// ==============================================================
+
+console.log('🔧 Configurando modal de documentos...');
+
+// Sobrescribir viewDocument para usar modal
+window.viewDocument = function(documentId) {
+    console.log('👁️ Abriendo documento en modal:', documentId);
+    
+    if (typeof canView !== 'undefined' && !canView) {
+        showNotification('❌ No tienes permisos para ver documentos', 'error');
+        return;
+    }
+    
+    showDocumentModal(documentId);
+};
+
+async function showDocumentModal(documentId) {
+    console.log('📖 Mostrando modal para documento:', documentId);
+    
+    // Crear modal si no existe
+    ensureModal();
+    
+    const modal = document.getElementById('documentModal');
+    const title = document.getElementById('modalTitle');
+    const content = document.getElementById('modalContent');
+    
+    // Mostrar loading
+    title.textContent = '🔄 Cargando documento...';
+    content.innerHTML = '<div style="text-align: center; padding: 3rem; color: #64748b;">Cargando documento...</div>';
+    
+    // Mostrar modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    try {
+        console.log('📡 Haciendo petición a preview.php...');
+console.log('🌐 URL completa:', window.location.origin + window.location.pathname.replace('inbox.php', 'preview.php') + `?id=${documentId}`);
+
+const response = await fetch(`preview.php?id=${documentId}`);
+console.log('📊 Response status:', response.status);
+console.log('📊 Response headers:', Object.fromEntries(response.headers.entries()));
+
+if (!response.ok) {
+    const errorText = await response.text();
+    console.log('❌ Error response text:', errorText);
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+}
+
+const responseText = await response.text();
+console.log('📄 Response text raw:', responseText);
+
+let data;
+try {
+    data = JSON.parse(responseText);
+    console.log('📄 Datos parseados:', data);
+} catch (e) {
+    console.log('❌ Error parsing JSON:', e);
+    console.log('📄 Raw response:', responseText);
+    throw new Error('Respuesta no es JSON válido');
+}
+        
+        if (!data.success) {
+            throw new Error(data.message || 'Error desconocido');
+        }
+        
+        const doc = data.document;
+        
+        // Actualizar título
+        title.innerHTML = `
+            📄 ${doc.name}
+            <div style="margin-left: auto; display: flex; gap: 8px;">
+                <button onclick="window.open('view.php?id=${documentId}', '_blank')" 
+                        style="padding: 8px 12px; border: 1px solid #ddd; background: white; cursor: pointer; border-radius: 4px; font-size: 12px;">
+                    🔗 Nueva ventana
+                </button>
+                <button onclick="closeDocumentModal()" 
+                        style="padding: 8px 12px; border: 1px solid #ddd; background: white; cursor: pointer; border-radius: 4px; font-size: 12px;">
+                    ✕ Cerrar
+                </button>
+            </div>
+        `;
+        
+        // Mostrar contenido según tipo
+        // Mostrar contenido según tipo
+console.log('📋 Tipo de archivo detectado:', doc.file_type);
+console.log('📂 Ruta del archivo:', doc.file_path);
+
+if (doc.file_type === 'image') {
+    console.log('🖼️ Mostrando imagen');
+    content.innerHTML = `
+        <div style="text-align: center; padding: 1rem;">
+            <img src="../../${doc.file_path}" 
+                 alt="${doc.name}" 
+                 style="max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"
+                 onload="console.log('✅ Imagen cargada exitosamente');"
+                 onerror="console.error('❌ Error cargando imagen'); this.style.display='none'; document.getElementById('imageError').style.display='block';">
+            
+            <div id="imageError" style="display: none; text-align: center; color: #ef4444; padding: 2rem;">
+                <h3>❌ Error al cargar la imagen</h3>
+                <p style="font-size: 14px; color: #666; margin: 1rem 0;">Ruta: ../../${doc.file_path}</p>
+                <button onclick="window.open('view.php?id=${documentId}', '_blank')" 
+                        style="background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer;">
+                    🔗 Ver en nueva ventana
+                </button>
+            </div>
+        </div>
+    `;
+} else if (doc.file_type === 'pdf') {
+    console.log('📄 Mostrando PDF');
+    content.innerHTML = `
+        <iframe src="../../${doc.file_path}" 
+                style="width: 100%; height: 70vh; border: none; border-radius: 8px;"
+                onload="console.log('✅ PDF cargado exitosamente')">
+        </iframe>
+    `;
+} else {
+    console.log('📄 Mostrando información del archivo');
+    // Para otros tipos, mostrar información del archivo
+    showDocumentInfo(doc, content, documentId);
+}
+        
+        console.log('✅ Modal cargado exitosamente');
+        
+    } catch (error) {
+        console.error('❌ Error al cargar documento:', error);
+        title.textContent = '❌ Error al cargar documento';
+        content.innerHTML = `
+            <div style="text-align: center; padding: 2rem; color: #ef4444;">
+                <h3 style="color: #ef4444;">Error al cargar documento</h3>
+                <p style="margin: 1rem 0;">${error.message}</p>
+                <div style="margin-top: 2rem;">
+                    <button onclick="window.open('view.php?id=${documentId}', '_blank')" 
+                            style="background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; margin: 8px;">
+                        🔗 Abrir en nueva ventana
+                    </button>
+                    <button onclick="closeDocumentModal()" 
+                            style="background: #6b7280; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; margin: 8px;">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function ensureModal() {
+    if (document.getElementById('documentModal')) return;
+    
+    console.log('📦 Creando modal de documentos...');
+    
+    const modal = document.createElement('div');
+    modal.id = 'documentModal';
+    modal.style.cssText = `
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 10000;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background: white; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+            <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="modalTitle" style="margin: 0; flex: 1; display: flex; align-items: center; justify-content: space-between;">Vista Previa</h3>
+            </div>
+            <div style="padding: 20px; max-height: calc(90vh - 100px); overflow-y: auto;">
+                <div id="modalContent"></div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Eventos
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeDocumentModal();
+    });
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.style.display === 'flex') {
+            closeDocumentModal();
+        }
+    });
+    
+    console.log('✅ Modal creado');
+}
+
+function closeDocumentModal() {
+    const modal = document.getElementById('documentModal');
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+        console.log('🔒 Modal cerrado');
+    }
+}
+
+console.log('✅ Sistema de modal de documentos configurado');
+
+// Mensaje de confirmación
+setTimeout(() => {
+    console.log('🎯 viewDocument function:', typeof window.viewDocument);
+    console.log('📋 Modal functions ready:', 
+        typeof showDocumentModal, 
+        typeof ensureModal, 
+        typeof closeDocumentModal
+    );
+}, 1000);
+// PARCHE RÁPIDO PARA PERMISOS DE USUARIO
+// Agregar al final de assets/js/inbox-visual.js
+
+console.log('🔧 Aplicando corrección de permisos de usuario...');
+
+// Debug inicial de permisos
+console.log('🔍 Variables de permisos disponibles:');
+console.log('- canView:', typeof canView !== 'undefined' ? canView : 'undefined');
+console.log('- canDownload:', typeof canDownload !== 'undefined' ? canDownload : 'undefined');
+console.log('- canCreate:', typeof canCreate !== 'undefined' ? canCreate : 'undefined');
+console.log('- canEdit:', typeof canEdit !== 'undefined' ? canEdit : 'undefined');
+console.log('- canDelete:', typeof canDelete !== 'undefined' ? canDelete : 'undefined');
+console.log('- currentUserRole:', typeof currentUserRole !== 'undefined' ? currentUserRole : 'undefined');
+
+// Función para verificar y corregir permisos
+function checkAndFixPermissions() {
+    // Si las variables no están definidas, probablemente hay un problema
+    if (typeof canDelete === 'undefined') {
+        console.error('❌ Variable canDelete no definida');
+        window.canDelete = false;
+    }
+    
+    if (typeof canEdit === 'undefined') {
+        console.error('❌ Variable canEdit no definida');
+        window.canEdit = false;
+    }
+    
+    if (typeof canView === 'undefined') {
+        console.error('❌ Variable canView no definida');
+        window.canView = false;
+    }
+    
+    // Si es admin, forzar todos los permisos
+    if (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin') {
+        console.log('👑 Usuario admin detectado, habilitando todos los permisos');
+        window.canView = true;
+        window.canDownload = true;
+        window.canCreate = true;
+        window.canEdit = true;
+        window.canDelete = true;
+    }
+    
+    console.log('✅ Permisos verificados y corregidos:', {
+        canView: window.canView,
+        canDownload: window.canDownload,
+        canCreate: window.canCreate,
+        canEdit: window.canEdit,
+        canDelete: window.canDelete
+    });
+}
+
+// Función de eliminación corregida
+function deleteDocumentFixed(documentId, documentName) {
+    console.log('🗑️ Función de eliminación corregida ejecutada');
+    console.log('📋 Datos recibidos:', { documentId, documentName });
+    console.log('🔑 Permisos actuales:', { canDelete: window.canDelete, role: currentUserRole });
+    
+    if (!documentId) {
+        console.error('❌ ID de documento vacío');
+        alert('Error: ID de documento no válido');
+        return;
+    }
+    
+    // Verificar permisos
+    if (typeof canDelete !== 'undefined' && !canDelete && currentUserRole !== 'admin') {
+        console.log('🚫 Sin permisos para eliminar');
+        alert('No tienes permisos para eliminar documentos');
+        return;
+    }
+    
+    // Mensaje de confirmación
+    const message = documentName ? 
+        `¿Eliminar documento "${documentName}"?\n\n⚠️ Esta acción no se puede deshacer.` :
+        `¿Eliminar documento ID: ${documentId}?\n\n⚠️ Esta acción no se puede deshacer.`;
+    
+    if (!confirm(message)) {
+        console.log('❌ Usuario canceló eliminación');
+        return;
+    }
+    
+    if (!confirm('¿Está completamente seguro? Esta es la última oportunidad para cancelar.')) {
+        console.log('❌ Usuario canceló en segunda confirmación');
+        return;
+    }
+    
+    console.log('✅ Usuario confirmó eliminación, procediendo...');
+    
+    // Obtener path actual
+    const currentPath = getCurrentPath();
+    console.log('📂 Path actual:', currentPath);
+    
+    // Crear formulario de eliminación
+    try {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'delete.php';
+        form.style.display = 'none';
+        
+        // ID del documento
+        const inputDocId = document.createElement('input');
+        inputDocId.type = 'hidden';
+        inputDocId.name = 'document_id';
+        inputDocId.value = documentId.toString();
+        form.appendChild(inputDocId);
+        
+        // Path de retorno
+        if (currentPath) {
+            const inputReturnPath = document.createElement('input');
+            inputReturnPath.type = 'hidden';
+            inputReturnPath.name = 'return_path';
+            inputReturnPath.value = currentPath;
+            form.appendChild(inputReturnPath);
+        }
+        
+        document.body.appendChild(form);
+        
+        // Mostrar notificación
+        if (typeof showNotification === 'function') {
+            showNotification('🗑️ Eliminando documento...', 'warning', 3000);
+        }
+        
+        console.log('📤 Enviando formulario de eliminación');
+        form.submit();
+        
+    } catch (error) {
+        console.error('❌ Error al crear formulario:', error);
+        alert('Error al eliminar documento: ' + error.message);
+    }
+}
+
+// Función para obtener path actual
+function getCurrentPath() {
+    // Método 1: Desde URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathFromUrl = urlParams.get('path');
+    if (pathFromUrl) return pathFromUrl;
+    
+    // Método 2: Desde variable global
+    if (typeof currentPath !== 'undefined' && currentPath) return currentPath;
+    
+    // Método 3: Desde breadcrumbs
+    const breadcrumbs = document.querySelectorAll('.breadcrumb-item');
+    if (breadcrumbs.length > 0) {
+        const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
+        return lastBreadcrumb.dataset.breadcrumbPath || '';
+    }
+    
+    return '';
+}
+
+// Función de mover documento corregida
+function cutDocumentFixed(docId, docName) {
+    console.log('✂️ Función de cortar documento corregida');
+    
+    if (typeof canEdit !== 'undefined' && !canEdit && currentUserRole !== 'admin') {
+        console.log('🚫 Sin permisos para mover');
+        alert('No tienes permisos para mover documentos');
+        return;
+    }
+    
+    // Llamar función original si existe
+    if (typeof cutDocument === 'function') {
+        cutDocument(docId, docName);
+    } else {
+        console.log('⚠️ Función cutDocument original no encontrada');
+    }
+}
+
+// Sobrescribir funciones problemáticas
+function overrideProblematicFunctions() {
+    // Sobrescribir deleteDocument
+    const originalDelete = window.deleteDocument;
+    window.deleteDocument = function(documentId, documentName) {
+        console.log('🔄 Usando función de eliminación corregida');
+        deleteDocumentFixed(documentId, documentName);
+    };
+    
+    // Sobrescribir cutDocument si existe
+    if (typeof window.cutDocument === 'function') {
+        const originalCut = window.cutDocument;
+        window.cutDocument = function(docId, docName) {
+            console.log('🔄 Usando función de cortar corregida');
+            cutDocumentFixed(docId, docName);
+        };
+    }
+    
+    console.log('✅ Funciones problemáticas sobrescritas');
+}
+
+// Ejecutar correcciones
+checkAndFixPermissions();
+overrideProblematicFunctions();
+
+// Verificar que las funciones funcionan
+console.log('🧪 Probando funciones:');
+console.log('- deleteDocument type:', typeof window.deleteDocument);
+console.log('- cutDocument type:', typeof window.cutDocument);
+
+console.log('✅ Corrección de permisos de usuario aplicada');

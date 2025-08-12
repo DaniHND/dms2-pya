@@ -553,16 +553,11 @@ try {
                                         </td>
                                         <td><?php echo date('d/m/Y H:i', strtotime($group['created_at'])); ?></td>
                                         <td style="text-align: center;">
-                                            <button class="btn-action" 
-                                                    onclick="viewGroupDetails(<?php echo $group['id']; ?>)" 
-                                                    title="Ver detalles">
-                                                <i data-feather="eye"></i>
-                                            </button>
-                                            
+                                          
                                             <a href="permissions.php?group=<?php echo $group['id']; ?>&tab=permissions" 
                                                class="btn-action edit" 
                                                title="Configurar permisos">
-                                                <i data-feather="edit"></i>
+                                                <i data-feather="shield"></i>
                                             </a>
                                             
                                             <button class="btn-action toggle" 

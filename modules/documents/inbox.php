@@ -1211,8 +1211,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
         const canDelete = <?= $canDelete ? 'true' : 'false' ?>;
         const currentPath = '<?= htmlspecialchars($currentPath) ?>';
     </script>
-    <script src="../../assets/js/inbox-visual.js"></script>
-
+<script src="../../assets/js/inbox-visual.js"></script>
     <!-- JAVASCRIPT PARA ELIMINACIÓN -->
     <script>
         // Función mejorada de eliminación
