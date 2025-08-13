@@ -102,6 +102,46 @@ logActivity($currentUser['id'], 'dashboard_access', 'dashboard', null, 'Usuario 
     <link rel="stylesheet" href="assets/css/dashboard.css">
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
+<style>/* Bienvenida mejorada */
+        .welcome-section {
+            background-color: #64748b;
+            border-radius: 1rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .welcome-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            transform: translate(30%, -30%);
+        }
+
+        .welcome-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .welcome-title {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .welcome-subtitle {
+            font-size: 1rem;
+            opacity: 0.9;
+            color: white;
+        }</style>
+
 
 <body class="dashboard-layout">
     <!-- Sidebar -->
@@ -117,6 +157,7 @@ logActivity($currentUser['id'], 'dashboard_access', 'dashboard', null, 'Usuario 
                 </button>
                 <h1>Dashboard</h1>
             </div>
+            
 
             <div class="header-right">
                 <div class="header-info">
@@ -136,6 +177,16 @@ logActivity($currentUser['id'], 'dashboard_access', 'dashboard', null, 'Usuario 
 
         <!-- Contenido del dashboard -->
         <div class="dashboard-content">
+
+
+        <div class="welcome-section">
+                <div class="welcome-content">
+                    <h2 class="welcome-title">¡Bienvenido!</h2>
+                    <p class="welcome-subtitle">Aquí tienes un resumen de tu actividad y estadísticas del sistema</p>
+                </div>
+            </div>
+
+
             <!-- Tarjetas de estadísticas -->
             <div class="stats-grid">
                 <div class="stat-card">

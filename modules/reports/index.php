@@ -147,16 +147,16 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Reportes y Bitácora</h1>
+                <h1>Reportes y Actividades</h1>
             </div>
 
             <div class="header-right">
                 <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars(getFullName()); ?></div>
+                    <div class="user-name-header"><?php echo htmlspecialchars(trim($currentUser['first_name'] . ' ' . $currentUser['last_name'])); ?></div>
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
+                    <button class="btn-icon" onclick="showSettings()">
                         <i data-feather="settings"></i>
                     </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
@@ -231,11 +231,15 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
                     <div class="nav-buttons">
                         <a href="activity_log.php" class="nav-btn">
                             <i data-feather="list"></i>
-                            Actividades
+                            <span>Actividades</span>
                         </a>
-                        <a href="user_reports.php" class="nav-btn user-reports-btn">
+                        <a href="user_reports.php" class="nav-btn">
                             <i data-feather="users"></i>
-                            Reportes por Usuario
+                            <span>Reportes por Usuario</span>
+                        </a>
+                        <a href="documents_report.php" class="nav-btn">
+                            <i data-feather="file-text"></i>
+                            <span>Reportes de Documentos</span>
                         </a>
                     </div>
                 </div>
@@ -365,7 +369,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
     </script>
     
     <style>
-        /* ===== MISMOS COLORES QUE ACTIVITY_LOG.PHP ===== */
+        /* ===== VARIABLES DE COLORES PROFESIONALES ===== */
         :root {
             /* Colores principales del sistema */
             --primary-color: #8b4513;
@@ -375,7 +379,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             --secondary-hover: #b8860b;
             --secondary-light: #faf0d9;
             
-            /* Colores de estadísticas - EXACTOS A LA IMAGEN */
+            /* Colores de estadísticas */
             --brown-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
             --blue-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
             --green-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
@@ -390,6 +394,17 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             --text-primary: #1f2937;
             --text-secondary: #374151;
             --text-muted: #6b7280;
+            
+            /* Grises profesionales */
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
             
             /* Sombras */
             --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -407,7 +422,59 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             background: transparent;
         }
 
-        /* ===== ESTADÍSTICAS IGUAL A LA IMAGEN ===== */
+        /* ===== HEADER SIN COLOR CAFÉ ===== */
+        .content-header {
+    padding: var(--spacing-5) var(--spacing-6);
+    border-bottom: 1px solid #e2e8f0;
+    background: var(--bg-tertiary);
+        }
+
+        /* Remover la línea café del header */
+        .content-header::before {
+            display: none;
+        }
+
+        /* ===== NOMBRE DE USUARIO EN NEGRO ===== */
+        .user-name-header {
+            color: var(--text-primary) !important;
+            font-weight: 600;
+        }
+
+        .current-time {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        /* ===== BOTONES DE HEADER PROFESIONALES ===== */
+        .btn-icon {
+            background: var(--gray-100);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 8px;
+            color: var(--gray-700);
+            transition: all 0.2s ease;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-icon:hover {
+            background: var(--gray-200);
+            border-color: var(--gray-300);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+        }
+
+        .logout-btn {
+            background: #fee2e2;
+            border-color: #fecaca;
+            color: #dc2626;
+        }
+
+        .logout-btn:hover {
+            background: #fecaca;
+            border-color: #f87171;
+        }
+
+        /* ===== ESTADÍSTICAS ===== */
         .stats-section {
             margin-bottom: 32px;
         }
@@ -423,7 +490,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             border-radius: 12px;
             padding: 24px;
             box-shadow: var(--shadow);
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--gray-200);
             transition: all 0.2s ease;
             position: relative;
             overflow: hidden;
@@ -473,7 +540,10 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             flex-shrink: 0;
         }
 
-
+        .brown-stat {
+            background: var(--brown-gradient);
+            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+        }
 
         .blue-stat {
             background: var(--blue-gradient);
@@ -508,39 +578,30 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             font-weight: 500;
         }
 
-        /* ===== FILTROS SECTION CAFÉ ===== */
+        /* ===== NAVEGACIÓN DE REPORTES PROFESIONAL ===== */
         .reports-nav {
-            background: #eeeff1ff;
+            background: var(--bg-primary);
             border-radius: 12px;
             padding: 24px;
             box-shadow: var(--shadow);
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--gray-200);
             position: relative;
             overflow: hidden;
             height: fit-content;
         }
 
-        .reports-nav::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--brown-gradient);
-        }
-
         .reports-nav h3 {
-            background: #4874ccff;;
-            color: white;
+            background: var(--gray-100);
+            color: var(--text-primary);
             margin: 0 0 24px 0;
             padding: 12px 16px;
             border-radius: 8px;
             font-size: 1rem;
-            font-weight: 800;
+            font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
+            border: 1px solid var(--gray-200);
         }
 
         .nav-buttons {
@@ -549,30 +610,62 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             gap: 12px;
         }
 
+        /* ===== BOTONES PROFESIONALES SIN COLOR ===== */
         .nav-btn {
-            background: var(--brown-gradient);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 16px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 2px solid var(--gray-200);
+            border-radius: 10px;
+            padding: 16px 20px;
             text-decoration: none;
             font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 8px;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.2);
-        }
-
-        .user-reports-btn {
-            background: var(--brown-gradient);
+            gap: 12px;
+            transition: all 0.3s ease;
+            box-shadow: var(--shadow-sm);
+            position: relative;
+            overflow: hidden;
         }
 
         .nav-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
-            color: white;
+            background: var(--gray-50);
+            border-color: var(--gray-300);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+            color: var(--text-primary);
             text-decoration: none;
+        }
+
+        .nav-btn:active {
+            transform: translateY(0);
+        }
+
+        .nav-btn i {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .nav-btn span {
+            font-size: 0.95rem;
+            letter-spacing: 0.025em;
+        }
+
+        /* Efecto hover sutil */
+        .nav-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: left 0.5s;
+        }
+
+        .nav-btn:hover::before {
+            left: 100%;
         }
 
         /* ===== GRÁFICO SECTION ===== */
@@ -581,7 +674,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             border-radius: 12px;
             padding: 24px;
             box-shadow: var(--shadow);
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--gray-200);
             position: relative;
             overflow: hidden;
         }
@@ -609,35 +702,9 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
         .chart-canvas {
             background: var(--bg-secondary);
             border-radius: 8px;
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--gray-200);
             width: 100%;
             height: 300px;
-        }
-
-        /* ===== BREADCRUMB ===== */
-        .reports-nav-breadcrumb {
-            margin-bottom: 24px;
-        }
-
-        .breadcrumb-link {
-            background: var(--brown-gradient);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.2);
-            transition: all 0.2s ease;
-        }
-
-        .breadcrumb-link:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
-            color: white;
-            text-decoration: none;
         }
 
         /* ===== GRID LAYOUT ===== */
@@ -647,61 +714,37 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             gap: 24px;
         }
 
-        /* ===== HEADER ===== */
-        .content-header {
-            background: var(--bg-primary);
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            border: 1px solid #e5e7eb;
-            margin-bottom: 24px;
-            position: relative;
-            overflow: hidden;
+        /* ===== SIDEBAR ACTIVO REPORTES - MEJORADO ===== */
+        /* Aplicar solo al módulo de reportes */
+        body.reports-page .sidebar .nav-item .nav-link[href*="reports"] {
+            color: #D4AF37 !important;
+            background: rgba(212, 175, 55, 0.1) !important;
+            font-weight: 600 !important;
         }
 
-        .content-header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--brown-gradient);
+        body.reports-page .sidebar .nav-item .nav-link[href*="reports"] i {
+            color: #D4AF37 !important;
         }
 
-        /* ===== BOTONES DE HEADER ===== */
-        .btn-icon {
-            background: var(--brown-gradient);
-            border: none;
-            border-radius: 8px;
-            padding: 8px;
-            color: white;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.2);
+        /* Asegurar que otros enlaces no se vean afectados */
+        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]) {
+            color: #94a3b8 !important;
+            background: transparent !important;
+            font-weight: 500 !important;
         }
 
-        .btn-icon:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
+        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]) i {
+            color: #94a3b8 !important;
         }
 
-        .logout-btn {
-            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
-            box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+        /* Hover para enlaces no activos */
+        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]):hover {
+            color: #ffffff !important;
+            background: rgba(255, 255, 255, 0.1) !important;
         }
 
-        .logout-btn:hover {
-            box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
-        }
-
-        /* ===== INFORMACIÓN DE USUARIO ===== */
-        .user-name-header {
-            color: var(--primary-color);
-            font-weight: 600;
-        }
-
-        .current-time {
-            color: var(--text-muted);
-            font-size: 0.875rem;
+        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]):hover i {
+            color: #ffffff !important;
         }
 
         /* ===== RESPONSIVE ===== */
@@ -734,6 +777,10 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             .stat-number {
                 font-size: 1.5rem;
             }
+
+            .nav-btn {
+                padding: 14px 16px;
+            }
         }
 
         @media (max-width: 480px) {
@@ -744,27 +791,6 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             .reports-content {
                 padding: 16px;
             }
-        }
-/* ===== FORZAR ESTADO ACTIVO EN SIDEBAR REPORTES ===== */
-        .sidebar .nav-item .nav-link[href*="reports"] {
-            color: var(--primary-color) !important;
-            background: rgba(212, 175, 55, 0.1) !important;
-            font-weight: 600 !important;
-        }
-
-        .sidebar .nav-item .nav-link[href*="reports"] i {
-            color: var(--primary-color) !important;
-        }
-
-        /* Para asegurar que funcione como los otros módulos */
-        body .sidebar .nav-item .nav-link[href*="reports"] {
-            color: #D4AF37 !important;
-            background: rgba(212, 175, 55, 0.1) !important;
-            font-weight: 600 !important;
-        }
-
-        body .sidebar .nav-item .nav-link[href*="reports"] i {
-            color: #D4AF37 !important;
         }
     </style>
 

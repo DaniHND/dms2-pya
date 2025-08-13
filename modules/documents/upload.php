@@ -20,29 +20,29 @@ $error = '';
 try {
     // Obtener permisos del usuario
     $userPermissions = getUserGroupPermissions($currentUser['id']);
-    
+
     if ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin') {
         // Los admins siempre pueden subir archivos
         $canUpload = true;
-        
+
         if (!$userPermissions['has_groups']) {
             $error = 'ADVERTENCIA: Como administrador debe configurar grupos de usuarios para mejor seguridad.';
         }
     } else {
         // Usuarios normales: verificar grupos y permisos
         requireActiveGroups();
-        
+
         // Verificar específicamente el permiso de upload
         if (!$userPermissions['has_groups']) {
             throw new Exception('Su usuario no tiene grupos asignados. Contacte al administrador.');
         }
-        
+
         // Verificar permiso de upload_files o create
         $canUpload = $userPermissions['permissions']['upload_files'] ?? false;
         if (!$canUpload) {
             $canUpload = $userPermissions['permissions']['create'] ?? false;
         }
-        
+
         if (!$canUpload) {
             $noAccess = true;
         }
@@ -60,9 +60,10 @@ try {
 // SI NO TIENE ACCESO, MOSTRAR PANTALLA DE ERROR (COMO EN INBOX)
 // ===================================================================
 if ($noAccess) {
-    ?>
+?>
     <!DOCTYPE html>
     <html lang="es">
+
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -72,6 +73,7 @@ if ($noAccess) {
         <link rel="stylesheet" href="../../assets/css/inbox-visual.css">
         <script src="https://unpkg.com/feather-icons"></script>
     </head>
+
     <body class="dashboard-layout">
         <?php include '../../includes/sidebar.php'; ?>
 
@@ -175,8 +177,9 @@ if ($noAccess) {
             });
         </script>
     </body>
+
     </html>
-    <?php
+<?php
     exit; // IMPORTANTE: Salir aquí para no mostrar el resto del formulario
 }
 
@@ -254,25 +257,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $database = new Database();
         $pdo = $database->getConnection();
 
-        if (!isset($_FILES['document']) || $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception('Error al subir el archivo');
+        if (!isset($_FILES['documents']) || empty($_FILES['documents']['name'][0])) {
+            throw new Exception('No se seleccionaron archivos para subir');
         }
 
-        $file = $_FILES['document'];
+        $files = $_FILES['documents'];
         $maxFileSize = 20 * 1024 * 1024;
-
-        if ($file['size'] > $maxFileSize) {
-            throw new Exception('El archivo es demasiado grande (máximo 20MB)');
-        }
-
         $allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'zip', 'rar'];
-        $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
-        if (!in_array($fileExtension, $allowedExtensions)) {
-            throw new Exception('Tipo de archivo no permitido');
-        }
-
-        $documentName = trim($_POST['document_name']) ?: pathinfo($file['name'], PATHINFO_FILENAME);
+        $documentName = trim($_POST['document_name']) ?: '';
         $description = trim($_POST['description']) ?: '';
         $documentTypeId = intval($_POST['document_type_id']) ?: null;
         $tags = isset($_POST['tags']) && $_POST['tags'] ? explode(',', $_POST['tags']) : [];
@@ -283,12 +276,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $companyId = intval($_POST['company_id']) ?: $uploadContext['company_id'];
         $departmentId = intval($_POST['department_id']) ?: $uploadContext['department_id'];
         $folderId = intval($_POST['folder_id']) ?: $uploadContext['folder_id'];
-        
+
         // VALIDACIONES DE PERMISOS (solo si tiene grupos)
         $userPermissions = getUserGroupPermissions($currentUser['id']);
-        
+
         if ($userPermissions['has_groups']) {
-            // Usuario con grupos - aplicar restricciones
             if (!canUserAccessCompany($currentUser['id'], $companyId)) {
                 throw new Exception('Sin acceso a la empresa seleccionada');
             }
@@ -299,62 +291,119 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Sin acceso al tipo de documento seleccionado');
             }
         }
-        // Para admins sin grupos: sin validaciones (acceso completo)
 
-        $uniqueFileName = uniqid() . '_' . time() . '.' . $fileExtension;
         $uploadDir = '../../uploads/documents/';
-
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0755, true);
         }
 
-        $filePath = $uploadDir . $uniqueFileName;
+        $uploadedFiles = [];
+        $errors = [];
+        $successCount = 0;
 
-        if (!move_uploaded_file($file['tmp_name'], $filePath)) {
-            throw new Exception('Error al guardar el archivo');
-        }
+        // Procesar cada archivo
+        $fileCount = count($files['name']);
+        for ($i = 0; $i < $fileCount; $i++) {
+            if ($files['error'][$i] !== UPLOAD_ERR_OK) {
+                $errors[] = "Error al subir archivo: " . $files['name'][$i];
+                continue;
+            }
 
-        $insertQuery = "
-            INSERT INTO documents (
-                company_id, department_id, folder_id, document_type_id, user_id,
-                name, original_name, file_path, file_size, mime_type, 
-                description, tags, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
-        ";
+            $file = [
+                'name' => $files['name'][$i],
+                'tmp_name' => $files['tmp_name'][$i],
+                'size' => $files['size'][$i],
+                'type' => $files['type'][$i]
+            ];
 
-        $relativePath = 'uploads/documents/' . $uniqueFileName;
+            // Validaciones para cada archivo
+            if ($file['size'] > $maxFileSize) {
+                $errors[] = "Archivo demasiado grande: {$file['name']} (máximo 20MB)";
+                continue;
+            }
 
-        $stmt = $pdo->prepare($insertQuery);
-        $result = $stmt->execute([
-            $companyId,
-            $departmentId,
-            $folderId,
-            $documentTypeId,
-            $currentUser['id'],
-            $documentName,
-            $file['name'],
-            $relativePath,
-            $file['size'],
-            $file['type'],
-            $description,
-            json_encode($tags)
-        ]);
+            $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            if (!in_array($fileExtension, $allowedExtensions)) {
+                $errors[] = "Tipo de archivo no permitido: {$file['name']}";
+                continue;
+            }
 
-        if ($result) {
-            $documentId = $pdo->lastInsertId();
+            // Generar nombre único
+            $uniqueFileName = uniqid() . '_' . time() . '_' . $i . '.' . $fileExtension;
+            $filePath = $uploadDir . $uniqueFileName;
 
-            $logQuery = "
-                INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
-                VALUES (?, 'create', 'documents', ?, ?, NOW())
+            if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+                $errors[] = "Error al guardar archivo: {$file['name']}";
+                continue;
+            }
+
+            // Determinar nombre del documento
+            $currentDocName = $documentName ?: pathinfo($file['name'], PATHINFO_FILENAME);
+            if ($fileCount > 1 && $documentName) {
+                $currentDocName = $documentName . " (" . ($i + 1) . ")";
+            } elseif ($fileCount > 1) {
+                $currentDocName = pathinfo($file['name'], PATHINFO_FILENAME);
+            }
+
+            // Insertar en base de datos
+            $insertQuery = "
+                INSERT INTO documents (
+                    company_id, department_id, folder_id, document_type_id, user_id,
+                    name, original_name, file_path, file_size, mime_type, 
+                    description, tags, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
             ";
-            $logStmt = $pdo->prepare($logQuery);
-            $logStmt->execute([
+
+            $relativePath = 'uploads/documents/' . $uniqueFileName;
+
+            $stmt = $pdo->prepare($insertQuery);
+            $result = $stmt->execute([
+                $companyId,
+                $departmentId,
+                $folderId,
+                $documentTypeId,
                 $currentUser['id'],
-                $documentId,
-                "Documento '{$documentName}' subido en " . $uploadContext['context_name']
+                $currentDocName,
+                $file['name'],
+                $relativePath,
+                $file['size'],
+                $file['type'],
+                $description,
+                json_encode($tags)
             ]);
 
-            $success = 'Documento subido exitosamente';
+            if ($result) {
+                $documentId = $pdo->lastInsertId();
+                $uploadedFiles[] = [
+                    'id' => $documentId,
+                    'name' => $currentDocName,
+                    'original_name' => $file['name']
+                ];
+                $successCount++;
+
+                // Log de actividad
+                $logQuery = "
+                    INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                    VALUES (?, 'create', 'documents', ?, ?, NOW())
+                ";
+                $logStmt = $pdo->prepare($logQuery);
+                $logStmt->execute([
+                    $currentUser['id'],
+                    $documentId,
+                    "Documento '{$currentDocName}' subido en " . $uploadContext['context_name']
+                ]);
+            } else {
+                $errors[] = "Error al guardar en BD: {$file['name']}";
+                unlink($filePath);
+            }
+        }
+
+        // Mensaje de resultado
+        if ($successCount > 0) {
+            $success = "Se subieron exitosamente $successCount archivo(s)";
+            if (!empty($errors)) {
+                $success .= ". Errores: " . implode(', ', $errors);
+            }
 
             // Redirigir de vuelta al explorador
             $redirectUrl = 'inbox.php';
@@ -365,13 +414,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header("Location: $redirectUrl");
             exit;
         } else {
-            throw new Exception('Error al guardar el documento en la base de datos');
+            $error = "No se pudo subir ningún archivo. Errores: " . implode(', ', $errors);
         }
     } catch (Exception $e) {
         $error = $e->getMessage();
 
-        if (isset($filePath) && file_exists($filePath)) {
-            unlink($filePath);
+        // Limpiar archivos subidos en caso de error
+        if (isset($uploadedFiles)) {
+            foreach ($uploadedFiles as $uploadedFile) {
+                $filePath = $uploadDir . basename($uploadedFile['path'] ?? '');
+                if (file_exists($filePath)) {
+                    unlink($filePath);
+                }
+            }
         }
     }
 }
@@ -408,29 +463,8 @@ try {
     $departments = [];
     if ($uploadContext['company_id']) {
         $userPermissions = getUserGroupPermissions($currentUser['id']);
-
-        // DEBUG: Mostrar información
-        error_log("=== DEBUG DEPARTAMENTOS ===");
-        error_log("Usuario ID: " . $currentUser['id']);
-        error_log("Company ID: " . $uploadContext['company_id']);
-        error_log("Tiene grupos: " . ($userPermissions['has_groups'] ? 'SÍ' : 'NO'));
-        error_log("Restricciones: " . json_encode($userPermissions['restrictions']));
-
-        if ($userPermissions['has_groups'] && !empty($userPermissions['restrictions']['departments'])) {
-            error_log("APLICANDO restricciones de departamentos");
-            $departments = getUserAllowedDepartments($currentUser['id'], $uploadContext['company_id']);
-            error_log("Departamentos obtenidos CON restricciones: " . json_encode($departments));
-        } else {
-            error_log("SIN restricciones - obteniendo todos los departamentos");
-            $deptsQuery = "SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name";
-            $deptsStmt = $pdo->prepare($deptsQuery);
-            $deptsStmt->execute([$uploadContext['company_id']]);
-            $departments = $deptsStmt->fetchAll(PDO::FETCH_ASSOC);
-            error_log("Departamentos obtenidos SIN restricciones: " . json_encode($departments));
-        }
-        error_log("=== FIN DEBUG DEPARTAMENTOS ===");
     }
-    
+
     $folders = [];
     if ($uploadContext['department_id']) {
         $foldersQuery = "SELECT id, name, folder_color FROM document_folders WHERE company_id = ? AND department_id = ? AND is_active = 1 ORDER BY name";
@@ -523,78 +557,15 @@ try {
                     <?php endif; ?>
 
                     <form method="POST" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="document_name">Nombre del Documento *</label>
-                                <input type="text" id="document_name" name="document_name" class="form-control" required placeholder="Nombre del documento">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="document_type_id">Tipo de Documento *</label>
-                                <select id="document_type_id" name="document_type_id" class="form-control" required>
-                                    <option value="">Seleccionar tipo</option>
-                                    <?php foreach ($documentTypes as $type): ?>
-                                        <option value="<?= $type['id'] ?>"><?= htmlspecialchars($type['name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="company_id">Empresa *</label>
-                                <select name="company_id" id="companySelect" class="form-control" onchange="loadDepartments()" <?= $uploadContext['company_id'] ? 'disabled' : '' ?> required>
-                                    <option value="">Seleccionar empresa</option>
-                                    <?php foreach ($companies as $company): ?>
-                                        <option value="<?= $company['id'] ?>" <?= $uploadContext['company_id'] == $company['id'] ? 'selected' : '' ?>>
-                                            <?= htmlspecialchars($company['name']) ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <?php if ($uploadContext['company_id']): ?>
-                                    <input type="hidden" name="company_id" value="<?= $uploadContext['company_id'] ?>">
-                                <?php endif; ?>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="department_id">Departamento</label>
-                                <select name="department_id" id="departmentSelect" class="form-control" onchange="loadFolders()" <?= $uploadContext['department_id'] ? 'disabled' : '' ?>>
-                                    <option value="">Sin departamento</option>
-                                    <?php foreach ($departments as $dept): ?>
-                                        <option value="<?= $dept['id'] ?>" <?= $uploadContext['department_id'] == $dept['id'] ? 'selected' : '' ?>>
-                                            <?= htmlspecialchars($dept['name']) ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <?php if ($uploadContext['department_id']): ?>
-                                    <input type="hidden" name="department_id" value="<?= $uploadContext['department_id'] ?>">
-                                <?php endif; ?>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="folder_id">Carpeta (opcional)</label>
-                            <select name="folder_id" id="folderSelect" class="form-control" <?= $uploadContext['folder_id'] ? 'disabled' : '' ?>>
-                                <option value="">Sin carpeta específica</option>
-                                <?php foreach ($folders as $folder): ?>
-                                    <option value="<?= $folder['id'] ?>" <?= $uploadContext['folder_id'] == $folder['id'] ? 'selected' : '' ?>>
-                                        <?= htmlspecialchars($folder['name']) ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <?php if ($uploadContext['folder_id']): ?>
-                                <input type="hidden" name="folder_id" value="<?= $uploadContext['folder_id'] ?>">
-                            <?php endif; ?>
-                        </div>
 
                         <div class="form-group">
                             <label>Archivo *</label>
                             <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('fileInput').click()">
-                                <input type="file" name="document" id="fileInput" class="file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.txt,.zip,.rar" required>
+                                <input type="file" name="documents[]" id="fileInput" class="file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.txt,.zip,.rar" multiple required>
                                 <div class="file-upload-content" id="uploadContent">
                                     <i data-feather="upload-cloud" id="uploadIcon"></i>
-                                    <p id="uploadText">Haz clic para seleccionar o arrastra tu archivo aquí</p>
-                                    <small id="uploadHint">Tamaños permitidos: PDF, DOC, XLS, PPT, imágenes, TXT, ZIP (máx. 20MB)</small>
+                                    <p id="uploadText">Haz clic para seleccionar o arrastra tus archivos aquí</p>
+                                    <small id="uploadHint">Puedes seleccionar múltiples archivos. Tamaños permitidos: PDF, DOC, XLS, PPT, imágenes, TXT, ZIP (máx. 20MB cada uno)</small> <small id="uploadHint">Tamaños permitidos: PDF, DOC, XLS, PPT, imágenes, TXT, ZIP (máx. 20MB)</small>
                                 </div>
                                 <div class="file-preview" id="filePreview" style="display: none;">
                                     <div class="file-info">
@@ -610,7 +581,73 @@ try {
                                         <i data-feather="x"></i>
                                     </button>
                                 </div>
+                            </div><br>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="document_name">Nombre del Documento *</label>
+                                    <input type="text" id="document_name" name="document_name" class="form-control" required placeholder="Nombre del documento">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="document_type_id">Tipo de Documento *</label>
+                                    <select id="document_type_id" name="document_type_id" class="form-control" required>
+                                        <option value="">Seleccionar tipo</option>
+                                        <?php foreach ($documentTypes as $type): ?>
+                                            <option value="<?= $type['id'] ?>"><?= htmlspecialchars($type['name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
                             </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="company_id">Empresa *</label>
+                                    <select name="company_id" id="companySelect" class="form-control" onchange="loadDepartments()" <?= $uploadContext['company_id'] ? 'disabled' : '' ?> required>
+                                        <option value="">Seleccionar empresa</option>
+                                        <?php foreach ($companies as $company): ?>
+                                            <option value="<?= $company['id'] ?>" <?= $uploadContext['company_id'] == $company['id'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars($company['name']) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <?php if ($uploadContext['company_id']): ?>
+                                        <input type="hidden" name="company_id" value="<?= $uploadContext['company_id'] ?>">
+                                    <?php endif; ?>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="department_id">Departamento</label>
+                                    <select name="department_id" id="departmentSelect" class="form-control" onchange="loadFolders()" <?= $uploadContext['department_id'] ? 'disabled' : '' ?>>
+                                        <option value="">Sin departamento</option>
+                                        <?php foreach ($departments as $dept): ?>
+                                            <option value="<?= $dept['id'] ?>" <?= $uploadContext['department_id'] == $dept['id'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars($dept['name']) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <?php if ($uploadContext['department_id']): ?>
+                                        <input type="hidden" name="department_id" value="<?= $uploadContext['department_id'] ?>">
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="folder_id">Carpeta (opcional)</label>
+                                <select name="folder_id" id="folderSelect" class="form-control" <?= $uploadContext['folder_id'] ? 'disabled' : '' ?>>
+                                    <option value="">Sin carpeta específica</option>
+                                    <?php foreach ($folders as $folder): ?>
+                                        <option value="<?= $folder['id'] ?>" <?= $uploadContext['folder_id'] == $folder['id'] ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($folder['name']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <?php if ($uploadContext['folder_id']): ?>
+                                    <input type="hidden" name="folder_id" value="<?= $uploadContext['folder_id'] ?>">
+                                <?php endif; ?>
+                            </div>
+
+
                         </div>
 
                         <div class="form-group">
@@ -938,48 +975,53 @@ try {
             margin-left: 1rem;
             transition: all 0.2s;
         }
-        
+
         .preview-btn:hover {
             background: var(--info-light);
             transform: scale(1.1);
         }
-        
+
         .upload-progress {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             height: 3px;
-            background: rgba(0,0,0,0.1);
+            background: rgba(0, 0, 0, 0.1);
             z-index: 9998;
             display: none;
         }
-        
+
         .upload-progress-bar {
             height: 100%;
             background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
             width: 0%;
             transition: width 0.3s ease;
         }
-        
+
         .file-actions {
             display: flex;
             gap: 0.5rem;
             margin-left: auto;
         }
-        
+
         .btn.loading {
             pointer-events: none;
             opacity: 0.7;
         }
-        
+
         .btn.loading i {
             animation: spin 1s linear infinite;
         }
-        
+
         @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         /* Mejoras responsive */
@@ -987,15 +1029,15 @@ try {
             .form-row {
                 grid-template-columns: 1fr;
             }
-            
+
             .file-upload-area {
                 min-height: 120px;
             }
-            
+
             .file-upload-content {
                 padding: 1rem;
             }
-            
+
             .preview-modal {
                 max-width: 95vw;
                 margin: 1rem;
@@ -1006,7 +1048,7 @@ try {
 
 
 
-<script>
+    <script>
         let selectedFile = null;
         let tags = [];
 
@@ -1084,75 +1126,75 @@ try {
             const extension = file.name.split('.').pop().toLowerCase();
             let iconName = 'file';
 
-            
+
 
 
 
             if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) {
-               iconName = 'image';
-               // Mostrar vista previa de imagen
-               if (file.size < 5 * 1024 * 1024) { // Solo para archivos menores a 5MB
-                   const reader = new FileReader();
-                   reader.onload = function(e) {
-                       fileIcon.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`;
-                   };
-                   reader.readAsDataURL(file);
-               }
-           } else if (extension === 'pdf') {
-               iconName = 'file-text';
-               fileIcon.style.background = '#ef4444';
-           } else if (['doc', 'docx'].includes(extension)) {
-               iconName = 'file-text';
-               fileIcon.style.background = '#2563eb';
-           } else if (['xls', 'xlsx'].includes(extension)) {
-               iconName = 'grid';
-               fileIcon.style.background = '#10b981';
-           }
+                iconName = 'image';
+                // Mostrar vista previa de imagen
+                if (file.size < 5 * 1024 * 1024) { // Solo para archivos menores a 5MB
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        fileIcon.innerHTML = `<img src="${e.target.result}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">`;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            } else if (extension === 'pdf') {
+                iconName = 'file-text';
+                fileIcon.style.background = '#ef4444';
+            } else if (['doc', 'docx'].includes(extension)) {
+                iconName = 'file-text';
+                fileIcon.style.background = '#2563eb';
+            } else if (['xls', 'xlsx'].includes(extension)) {
+                iconName = 'grid';
+                fileIcon.style.background = '#10b981';
+            }
 
-           if (!fileIcon.querySelector('img')) {
-               fileIcon.innerHTML = `<i data-feather="${iconName}"></i>`;
-           }
+            if (!fileIcon.querySelector('img')) {
+                fileIcon.innerHTML = `<i data-feather="${iconName}"></i>`;
+            }
 
-           uploadContent.style.display = 'none';
-           filePreview.style.display = 'flex';
-           fileUploadArea.classList.add('has-file');
+            uploadContent.style.display = 'none';
+            filePreview.style.display = 'flex';
+            fileUploadArea.classList.add('has-file');
 
-           feather.replace();
-       }
+            feather.replace();
+        }
 
-       function removeFile(e) {
-           e.stopPropagation();
-           selectedFile = null;
-           fileInput.value = '';
+        function removeFile(e) {
+            e.stopPropagation();
+            selectedFile = null;
+            fileInput.value = '';
 
-           uploadContent.style.display = 'block';
-           filePreview.style.display = 'none';
-           fileUploadArea.classList.remove('has-file');
+            uploadContent.style.display = 'block';
+            filePreview.style.display = 'none';
+            fileUploadArea.classList.remove('has-file');
 
-           submitBtn.disabled = true;
+            submitBtn.disabled = true;
 
-           // Limpiar vista previa de imagen si existe
-           const fileIcon = document.getElementById('fileIcon');
-           fileIcon.innerHTML = '<i data-feather="file"></i>';
-           fileIcon.style.background = 'var(--primary-color)';
+            // Limpiar vista previa de imagen si existe
+            const fileIcon = document.getElementById('fileIcon');
+            fileIcon.innerHTML = '<i data-feather="file"></i>';
+            fileIcon.style.background = 'var(--primary-color)';
 
-           feather.replace();
-       }
+            feather.replace();
+        }
 
-       function formatFileSize(bytes) {
-           if (bytes === 0) return '0 Bytes';
-           const k = 1024;
-           const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-           const i = Math.floor(Math.log(bytes) / Math.log(k));
-           return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-       }
-
-
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
 
 
 
 
-       // Vista previa de archivos
+
+
+        // Vista previa de archivos
         function previewFile() {
             if (!selectedFile) return;
 

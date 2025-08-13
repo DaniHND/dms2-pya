@@ -178,46 +178,99 @@ function getActionTypes()
 }
 
 // Función para traducir acciones
+// Función para traducir acciones
 function translateAction($action)
 {
     $translations = [
-        'login' => 'Iniciar Sesión',
-        'logout' => 'Cerrar Sesión',
-        'upload' => 'Subir Archivo',
-        'download' => 'Descargar',
-        'delete' => 'Eliminar',
-        'create' => 'Crear',
-        'update' => 'Actualizar',
-        'view' => 'Ver',
-        'share' => 'Compartir',
+        // === ACCIONES PRINCIPALES QUE QUIERES ===
+        'login' => 'Inicio de Sesión',
+        'logout' => 'Salida del Sistema',
+        'upload' => 'Subió Archivo',
+        'download' => 'Descargó Archivo',
+        'delete' => 'Eliminó',
+        'move' => 'Movió',
+        'document_move' => 'Movió Documento',
+        'folder_move' => 'Movió Carpeta',
+        'export_csv' => 'Exportó Reporte CSV',
+        'export_pdf' => 'Exportó Reporte PDF',
+        'export_excel' => 'Exportó Reporte Excel',
+        
+        // === ACCIONES SECUNDARIAS ===
+        'failed_login' => 'Intento de Login Fallido',
+        'password_change' => 'Cambió Contraseña',
+        'permanent_delete' => 'Eliminó Permanentemente',
+        'user_create' => 'Creó Usuario',
+        'user_delete' => 'Eliminó Usuario',
+        'user_update' => 'Actualizó Usuario',
+        'group_create' => 'Creó Grupo',
+        'group_delete' => 'Eliminó Grupo',
+        'permission_change' => 'Cambió Permisos',
+        'company_create' => 'Creó Empresa',
+        'company_delete' => 'Eliminó Empresa',
+        'folder_create' => 'Creó Carpeta',
+        'folder_delete' => 'Eliminó Carpeta',
+        'document_share' => 'Compartió Documento',
+        'document_unshare' => 'Dejó de Compartir',
+        'backup_created' => 'Creó Respaldo',
+        'backup_restored' => 'Restauró Respaldo',
+        'system_config_change' => 'Cambió Configuración',
+        
+        // === ACCIONES ANTIGUAS (compatibilidad) ===
+        'create' => 'Creó',
+        'update' => 'Actualizó',
+        'view' => 'Vio',
+        'share' => 'Compartió',
         'access_denied' => 'Acceso Denegado',
-        'view_activity_log' => 'Ver Log de Actividades',
-        'export_csv' => 'Exportar CSV',
-        'export_pdf' => 'Exportar PDF',
-        'export_excel' => 'Exportar Excel'
+        'view_activity_log' => 'Vio Log de Actividades'
     ];
 
-    return $translations[$action] ?? ucfirst($action);
+    return $translations[$action] ?? ucfirst(str_replace('_', ' ', $action));
 }
 
 // Función para obtener iconos de acciones
 function getActionIcon($action)
 {
     $icons = [
+        // === ICONOS PRINCIPALES ===
         'login' => 'log-in',
         'logout' => 'log-out',
         'upload' => 'upload',
         'download' => 'download',
         'delete' => 'trash-2',
+        'move' => 'move',
+        'document_move' => 'file-plus',
+        'folder_move' => 'folder-plus',
+        'export_csv' => 'file-text',
+        'export_pdf' => 'file',
+        'export_excel' => 'grid',
+        
+        // === ICONOS SECUNDARIOS ===
+        'failed_login' => 'alert-triangle',
+        'password_change' => 'key',
+        'permanent_delete' => 'trash',
+        'user_create' => 'user-plus',
+        'user_delete' => 'user-minus',
+        'user_update' => 'user-check',
+        'group_create' => 'users',
+        'group_delete' => 'user-x',
+        'permission_change' => 'shield',
+        'company_create' => 'building',
+        'company_delete' => 'building',
+        'folder_create' => 'folder-plus',
+        'folder_delete' => 'folder-minus',
+        'document_share' => 'share-2',
+        'document_unshare' => 'share',
+        'backup_created' => 'hard-drive',
+        'backup_restored' => 'refresh-cw',
+        'system_config_change' => 'settings',
+        
+        // === ICONOS ANTIGUOS (compatibilidad) ===
         'create' => 'plus',
         'update' => 'edit',
         'view' => 'eye',
         'share' => 'share-2',
         'access_denied' => 'shield-off',
-        'view_activity_log' => 'activity',
-        'export_csv' => 'file-text',
-        'export_pdf' => 'file',
-        'export_excel' => 'grid'
+        'view_activity_log' => 'activity'
     ];
 
     return $icons[$action] ?? 'circle';
@@ -260,7 +313,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Log de Actividades</h1>
+                <h1>Actividades</h1>
             </div>
 
             <div class="header-right">

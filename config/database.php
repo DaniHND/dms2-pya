@@ -340,17 +340,61 @@ if (!function_exists('fetchAll')) {
 /**
  * Función para registrar actividades del sistema
  */
+// REEMPLAZAR tu función logActivity existente en config/database.php con esta:
+
+/**
+ * Función para registrar actividades del sistema - VERSIÓN FILTRADA
+ */
 if (!function_exists('logActivity')) {
     function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null) {
+        
+        // === FILTROS: Solo registrar estas acciones ===
+        $allowedActions = [
+            // Accesos al sistema
+            'login',
+            'logout', 
+            'failed_login',
+            
+            // Gestión de archivos
+            'upload',
+            'download', 
+            'delete',
+            'move',
+            'document_move',
+            'folder_move',
+            
+            // Exportaciones
+            'export_csv',
+            'export_pdf', 
+            'export_excel',
+            
+            // Gestión importante
+            'user_create',
+            'user_delete',
+            'user_update',
+            'group_create', 
+            'group_delete',
+            'permission_change',
+            'backup_created',
+            'backup_restored',
+            'system_config_change'
+        ];
+        
+        // Si la acción NO está en la lista permitida, no registrar
+        if (!in_array($action, $allowedActions)) {
+            return true; // Devolver true para no generar errores
+        }
+        
+        // Si está permitida, registrar normalmente
         try {
             $database = new Database();
             $pdo = $database->getConnection();
             
-            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent) 
-                      VALUES (?, ?, ?, ?, ?, ?, ?)";
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
             
             $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+            $userAgent = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255);
             
             $stmt = $pdo->prepare($query);
             $stmt->execute([

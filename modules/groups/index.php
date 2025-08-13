@@ -272,21 +272,20 @@ try {
         
         /* Estilo del botón igual a otros módulos */
         .btn.btn-primary {
-            background: #8B4513;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
+           background: linear-gradient(135deg, var(--dms-primary) 0%, var(--dms-primary-hover) 100%);
+        border: none;
+        box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+        padding: 14px 28px;
+        font-weight: 600;
+        font-size: 15px;
+        text-transform: none;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
         }
         .btn.btn-primary:hover {
-            background: #654321;
+          transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
+        background: linear-gradient(135deg, var(--dms-primary-hover) 0%, #4a2c0a 100%);
         }
         
         /* Estilos para header igual a departamentos */
@@ -364,7 +363,7 @@ try {
         }
         
         .btn-icon:hover {
-            background: #f1f5f9;
+            background:  rgba(239, 68, 68, 0.1);
             color: #374151;
         }
         
@@ -406,7 +405,7 @@ try {
         
         .btn-create-group:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
+            box-shadow: 0 6px 20px rgba(238, 236, 234, 0.4);
             background: linear-gradient(135deg, var(--dms-primary-hover) 0%, #4a2c0a 100%);
         }
         

@@ -309,13 +309,7 @@ logActivity($currentUser['id'], 'view_documents_report', 'reports', null, 'Usuar
                         <div class="stat-label">Total Descargas</div>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon"><i data-feather="users"></i></div>
-                    <div class="stat-info">
-                        <div class="stat-number"><?php echo count($stats['user_uploads'] ?? []); ?></div>
-                        <div class="stat-label">Usuarios Activos</div>
-                    </div>
-                </div>
+                
             </div><!-- Filtros -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>

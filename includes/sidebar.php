@@ -137,12 +137,6 @@ function isActive($page, $module = null)
                     </a>
                 </li>
 
-                <li class="nav-item">
-                    <a href="#" class="nav-link" onclick="showComingSoon('Configuración del Sistema')">
-                        <i data-feather="settings"></i>
-                        <span>Configuración</span>
-                    </a>
-                </li>
             <?php endif; ?>
         </ul>
     </nav>
