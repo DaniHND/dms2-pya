@@ -542,7 +542,7 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
 
         .brown-stat {
             background: var(--brown-gradient);
-            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 12px rgba(207, 130, 75, 0.3);
         }
 
         .blue-stat {

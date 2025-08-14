@@ -1,148 +1,160 @@
 <?php
-/**
- * download.php - SISTEMA UNIFICADO DE PERMISOS
- * Solo grupos controlan el acceso - Sin restricciones de empresa
- */
-
-require_once '../../bootstrap.php';
+require_once '../../config/session.php';
+require_once '../../config/database.php';
+require_once '../../includes/group_permissions.php';
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
+// ===================================================================
+// FUNCIÓN getUserPermissions - COPIA DE INBOX.PHP
+// ===================================================================
+function getUserPermissions($userId)
+{
+    if (!$userId) {
+        return ['permissions' => ['download' => false]];
+    }
+
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+
+        // Verificar si es administrador
+        $query = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            // ADMINISTRADORES: ACCESO TOTAL
+            return ['permissions' => ['download' => true]];
+        }
+
+        // USUARIOS NORMALES: SOLO CON GRUPOS Y PERMISO ACTIVADO
+        $groupPermissions = getUserGroupPermissions($userId);
+
+        if (!$groupPermissions['has_groups']) {
+            return ['permissions' => ['download' => false]];
+        }
+
+        $permissions = $groupPermissions['permissions'];
+        return ['permissions' => ['download' => $permissions['download_files'] ?? false]];
+
+    } catch (Exception $e) {
+        error_log("Error getting download permissions: " . $e->getMessage());
+        return ['permissions' => ['download' => false]];
+    }
+}
+
+// ===================================================================
+// VERIFICACIONES DE SEGURIDAD
+// ===================================================================
+
+// Verificar método POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: inbox.php?error=invalid_request');
+    http_response_code(405);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Método no permitido']);
     exit;
 }
 
-if (!isset($_POST['document_id']) || !is_numeric($_POST['document_id'])) {
-    header('Location: inbox.php?error=invalid_document');
+// Obtener ID del documento
+$documentId = isset($_POST['document_id']) ? (int)$_POST['document_id'] : 0;
+
+if (!$documentId) {
+    http_response_code(400);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'ID de documento requerido']);
     exit;
 }
 
-$documentId = intval($_POST['document_id']);
+// Verificar permisos del usuario
+$userPermissions = getUserPermissions($currentUser['id']);
+$canDownload = $userPermissions['permissions']['download'];
+
+// DEBUG: Log para administradores
+if ($currentUser['role'] === 'admin') {
+    error_log("DEBUG DOWNLOAD - Admin {$currentUser['id']} intentando descargar documento {$documentId} - Permiso: " . ($canDownload ? 'SI' : 'NO'));
+}
+
+if (!$canDownload) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Sin permisos para descargar documentos']);
+    exit;
+}
+
+// ===================================================================
+// PROCESAMIENTO DE DESCARGA
+// ===================================================================
 
 try {
     $database = new Database();
     $pdo = $database->getConnection();
 
-    // ===== VERIFICACIÓN DE PERMISOS - SOLO GRUPOS =====
-    $hasDownloadPermission = false;
-
-    if ($currentUser['role'] === 'admin') {
-        $hasDownloadPermission = true;
-    } else {
-        // Verificar sistema unificado
-        if (class_exists('UnifiedPermissionSystem')) {
-            try {
-                $permissionSystem = UnifiedPermissionSystem::getInstance();
-                $userPerms = $permissionSystem->getUserEffectivePermissions($currentUser['id']);
-                $hasDownloadPermission = isset($userPerms['permissions']['download_files']) && 
-                                         $userPerms['permissions']['download_files'] === true;
-            } catch (Exception $e) {
-                error_log('ERROR en verificación de permisos download: ' . $e->getMessage());
-                $hasDownloadPermission = false;
-            }
-        } else {
-            // Sistema legacy
-            $stmt = $pdo->prepare("SELECT ug.module_permissions FROM user_groups ug
-                                   INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-                                   WHERE ugm.user_id = ? AND ug.status = 'active'");
-            $stmt->execute([$currentUser['id']]);
-            $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($groups as $group) {
-                $permissions = json_decode($group['module_permissions'] ?: '{}', true);
-                if (isset($permissions['download_files']) && $permissions['download_files'] === true) {
-                    $hasDownloadPermission = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    if (!$hasDownloadPermission) {
-        header('Location: inbox.php?error=download_disabled');
-        exit;
-    }
-
-    // ===== OBTENER DOCUMENTO - SIN RESTRICCIONES DE EMPRESA =====
-    // Los grupos ya controlan a qué puede acceder el usuario
-    $query = "SELECT d.*, c.name as company_name, dept.name as department_name
-              FROM documents d
-              LEFT JOIN companies c ON d.company_id = c.id
-              LEFT JOIN departments dept ON d.department_id = dept.id
-              WHERE d.id = ? AND d.status = 'active'";
+    // Obtener información del documento
+    $query = "
+        SELECT d.*, c.name as company_name, dept.name as department_name 
+        FROM documents d
+        LEFT JOIN companies c ON d.company_id = c.id
+        LEFT JOIN departments dept ON d.department_id = dept.id
+        WHERE d.id = ? AND d.status = 'active'
+    ";
     
     $stmt = $pdo->prepare($query);
     $stmt->execute([$documentId]);
     $document = $stmt->fetch(PDO::FETCH_ASSOC);
-    
+
     if (!$document) {
-        header('Location: inbox.php?error=document_not_found');
+        http_response_code(404);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Documento no encontrado']);
         exit;
     }
 
-    // ===== VERIFICAR ARCHIVO FÍSICO =====
+    // Construir ruta del archivo
     $filePath = '../../' . $document['file_path'];
     
+    // DEBUG: Log de ruta de archivo
+    error_log("DEBUG DOWNLOAD - Buscando archivo en: " . $filePath);
+    
     if (!file_exists($filePath)) {
-        error_log("Archivo no encontrado: $filePath para documento ID: $documentId");
-        header('Location: inbox.php?error=file_not_found');
+        error_log("ERROR DOWNLOAD - Archivo no encontrado en: " . $filePath);
+        http_response_code(404);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Archivo físico no encontrado']);
         exit;
     }
 
-    // ===== REGISTRAR ACTIVIDAD =====
-    if (function_exists('logActivity')) {
-        logActivity(
-            $currentUser['id'], 
-            'download', 
-            'documents', 
-            $documentId, 
-            "Descarga: {$document['name']} ({$document['company_name']})"
-        );
-    }
+    // Log de actividad exitosa
+    error_log("SUCCESS DOWNLOAD - Usuario {$currentUser['id']} ({$currentUser['role']}) descargó documento {$documentId}: {$document['name']}");
 
-    // ===== PREPARAR Y ENVIAR DESCARGA =====
-    $fileSize = filesize($filePath);
-    $originalName = $document['original_name'] ?: $document['name'];
-    $mimeType = $document['mime_type'] ?: 'application/octet-stream';
+    // ===================================================================
+    // ENVIO DEL ARCHIVO
+    // ===================================================================
 
-    // Limpiar buffer de salida
+    // Limpiar cualquier salida previa
     if (ob_get_level()) {
         ob_end_clean();
     }
 
     // Headers para descarga
-    header('Content-Description: File Transfer');
-    header('Content-Type: ' . $mimeType);
-    header('Content-Disposition: attachment; filename="' . addslashes($originalName) . '"');
-    header('Content-Transfer-Encoding: binary');
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $document['original_name'] . '"');
+    header('Content-Length: ' . filesize($filePath));
+    header('Cache-Control: no-cache, must-revalidate');
+    header('Pragma: no-cache');
     header('Expires: 0');
-    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-    header('Pragma: public');
-    header('Content-Length: ' . $fileSize);
 
     // Enviar archivo
-    if ($fileSize > 8 * 1024 * 1024) { // Mayor a 8MB
-        $handle = fopen($filePath, 'rb');
-        if ($handle) {
-            while (!feof($handle)) {
-                echo fread($handle, 8192);
-                flush();
-            }
-            fclose($handle);
-        } else {
-            readfile($filePath);
-        }
-    } else {
-        readfile($filePath);
-    }
-
+    readfile($filePath);
     exit;
 
 } catch (Exception $e) {
-    error_log("Error en descarga: " . $e->getMessage());
-    header('Location: inbox.php?error=download_failed');
+    error_log("ERROR DOWNLOAD - Exception en descarga de documento $documentId: " . $e->getMessage());
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Error interno del servidor']);
     exit;
 }
 ?>

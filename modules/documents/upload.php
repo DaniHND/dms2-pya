@@ -329,73 +329,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Generar nombre único
-            $uniqueFileName = uniqid() . '_' . time() . '_' . $i . '.' . $fileExtension;
-            $filePath = $uploadDir . $uniqueFileName;
+// Determinar nombre del documento PRIMERO
+$currentDocName = $documentName ?: pathinfo($file['name'], PATHINFO_FILENAME);
+if ($fileCount > 1 && $documentName) {
+    $currentDocName = $documentName . " (" . ($i + 1) . ")";
+} elseif ($fileCount > 1) {
+    $currentDocName = pathinfo($file['name'], PATHINFO_FILENAME);
+}
 
-            if (!move_uploaded_file($file['tmp_name'], $filePath)) {
-                $errors[] = "Error al guardar archivo: {$file['name']}";
-                continue;
-            }
+// Usar el nombre del sistema (sin caracteres especiales para seguridad)
+$systemName = $currentDocName;
+$systemName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $systemName); // Limpiar caracteres especiales
+$systemFileName = $systemName . '.' . $fileExtension;
 
-            // Determinar nombre del documento
-            $currentDocName = $documentName ?: pathinfo($file['name'], PATHINFO_FILENAME);
-            if ($fileCount > 1 && $documentName) {
-                $currentDocName = $documentName . " (" . ($i + 1) . ")";
-            } elseif ($fileCount > 1) {
-                $currentDocName = pathinfo($file['name'], PATHINFO_FILENAME);
-            }
+// Si ya existe, agregar número
+$counter = 1;
+while (file_exists($uploadDir . $systemFileName)) {
+    $systemFileName = $systemName . '_' . $counter . '.' . $fileExtension;
+    $counter++;
+}
 
-            // Insertar en base de datos
-            $insertQuery = "
-                INSERT INTO documents (
-                    company_id, department_id, folder_id, document_type_id, user_id,
-                    name, original_name, file_path, file_size, mime_type, 
-                    description, tags, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
-            ";
+$filePath = $uploadDir . $systemFileName;
 
-            $relativePath = 'uploads/documents/' . $uniqueFileName;
+if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+    $errors[] = "Error al guardar archivo: {$file['name']}";
+    continue;
+}
 
-            $stmt = $pdo->prepare($insertQuery);
-            $result = $stmt->execute([
-                $companyId,
-                $departmentId,
-                $folderId,
-                $documentTypeId,
-                $currentUser['id'],
-                $currentDocName,
-                $file['name'],
-                $relativePath,
-                $file['size'],
-                $file['type'],
-                $description,
-                json_encode($tags)
-            ]);
+// Usar el nombre del sistema (sin caracteres especiales para seguridad)
+$systemName = $currentDocName;
+$systemName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $systemName); // Limpiar caracteres especiales
+$systemFileName = $systemName . '.' . $fileExtension;
 
-            if ($result) {
-                $documentId = $pdo->lastInsertId();
-                $uploadedFiles[] = [
-                    'id' => $documentId,
-                    'name' => $currentDocName,
-                    'original_name' => $file['name']
-                ];
-                $successCount++;
+// Si ya existe, agregar número
+$counter = 1;
+while (file_exists($uploadDir . $systemFileName)) {
+    $systemFileName = $systemName . '_' . $counter . '.' . $fileExtension;
+    $counter++;
+}
 
-                // Log de actividad
-                $logQuery = "
-                    INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
-                    VALUES (?, 'create', 'documents', ?, ?, NOW())
-                ";
-                $logStmt = $pdo->prepare($logQuery);
-                $logStmt->execute([
-                    $currentUser['id'],
-                    $documentId,
-                    "Documento '{$currentDocName}' subido en " . $uploadContext['context_name']
-                ]);
-            } else {
-                $errors[] = "Error al guardar en BD: {$file['name']}";
-                unlink($filePath);
-            }
+$filePath = $uploadDir . $systemFileName;
+
+if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+    $errors[] = "Error al guardar archivo: {$file['name']}";
+    continue;
+}
+
+// Insertar en base de datos
+$insertQuery = "
+    INSERT INTO documents (
+        company_id, department_id, folder_id, document_type_id, user_id,
+        name, original_name, file_path, file_size, mime_type, 
+        description, tags, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
+";
+
+$relativePath = 'uploads/documents/' . $systemFileName;
         }
 
         // Mensaje de resultado

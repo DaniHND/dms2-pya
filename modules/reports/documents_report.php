@@ -644,6 +644,7 @@ logActivity($currentUser['id'], 'view_documents_report', 'reports', null, 'Usuar
                 if (sidebar) sidebar.classList.remove('active');
             }
         });
+        
     </script><style>
        :root {
            --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);

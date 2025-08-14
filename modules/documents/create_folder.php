@@ -1,13 +1,13 @@
 <?php
-/*
- * create_folder.php
- * API para crear carpetas de documentos - VERSIÓN CORREGIDA
+/**
+ * create_folder.php - Crear carpetas de documentos
+ * Ubicación: modules/documents/create_folder.php
  */
 
-// Usar bootstrap para consistencia
-require_once '../../bootstrap.php';
-
-header('Content-Type: application/json');
+// Headers para JSON
+header('Content-Type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 
 // Solo acepta POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -17,165 +17,192 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
+    // Incluir archivos necesarios
+    require_once '../../config/session.php';
+    require_once '../../config/database.php';
+    require_once '../../includes/group_permissions.php';
+
     // Verificar sesión
     SessionManager::requireLogin();
     $currentUser = SessionManager::getCurrentUser();
-    
-    // ===== VERIFICACIÓN DE PERMISOS CORREGIDA =====
-    $hasCreatePermission = false;
-    
-    if ($currentUser['role'] === 'admin') {
-        $hasCreatePermission = true;
-    } else {
-        // Verificar sistema unificado
-        if (class_exists('UnifiedPermissionSystem')) {
-            try {
-                $permissionSystem = UnifiedPermissionSystem::getInstance();
-                $userPerms = $permissionSystem->getUserEffectivePermissions($currentUser['id']);
-                $hasCreatePermission = isset($userPerms['permissions']['create_folders']) && 
-                                       $userPerms['permissions']['create_folders'] === true;
-            } catch (Exception $e) {
-                error_log('ERROR en verificación de permisos create_folder: ' . $e->getMessage());
-                $hasCreatePermission = false;
-            }
-        } else {
-            // Sistema legacy - buscar permisos antiguos
-            $database = new Database();
-            $pdo = $database->getConnection();
-            
-            $permQuery = "
-                SELECT ug.module_permissions 
-                FROM user_groups ug
-                INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-                WHERE ugm.user_id = ? AND ug.status = 'active'
-            ";
-            $permStmt = $pdo->prepare($permQuery);
-            $permStmt->execute([$currentUser['id']]);
-            $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($permissions as $perm) {
-                $permData = json_decode($perm['module_permissions'] ?: '{}', true);
-                // Buscar tanto el permiso nuevo como el viejo
-                if (($permData['create_folders'] ?? false) || ($permData['create'] ?? false)) {
-                    $hasCreatePermission = true;
-                    break;
-                }
-            }
-        }
-    }
-    
-    if (!$hasCreatePermission) {
-        echo json_encode(['success' => false, 'message' => 'No tienes permisos para crear carpetas']);
+
+    if (!$currentUser) {
+        echo json_encode(['success' => false, 'message' => 'Usuario no autenticado']);
         exit;
     }
-    
-    // Obtener datos del formulario
+
+    error_log("CREATE_FOLDER.PHP - Usuario: {$currentUser['username']}, ID: {$currentUser['id']}");
+
+    // ===== OBTENER Y VALIDAR DATOS =====
     $name = trim($_POST['name'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $companyId = intval($_POST['company_id'] ?? 0);
     $departmentId = intval($_POST['department_id'] ?? 0);
     $folderColor = $_POST['folder_color'] ?? '#e74c3c';
     $folderIcon = $_POST['folder_icon'] ?? 'folder';
-    
-    // Validar datos requeridos
+
+    error_log("CREATE_FOLDER.PHP - Datos recibidos: name='$name', company_id=$companyId, department_id=$departmentId");
+
+    // Validaciones básicas
     if (empty($name)) {
         echo json_encode(['success' => false, 'message' => 'El nombre de la carpeta es requerido']);
         exit;
     }
-    
-    if ($companyId <= 0) {
-        echo json_encode(['success' => false, 'message' => 'ID de empresa inválido']);
+
+    if (strlen($name) < 2 || strlen($name) > 100) {
+        echo json_encode(['success' => false, 'message' => 'El nombre debe tener entre 2 y 100 caracteres']);
         exit;
     }
-    
-    if ($departmentId <= 0) {
-        echo json_encode(['success' => false, 'message' => 'ID de departamento inválido']);
+
+    if ($companyId <= 0 || $departmentId <= 0) {
+        echo json_encode(['success' => false, 'message' => 'IDs de empresa y departamento son requeridos']);
         exit;
     }
-    
-    // Verificar que el departamento existe y pertenece a la empresa
+
+    // ===== VERIFICAR PERMISOS =====
+    $hasCreatePermission = false;
+
+    if ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin') {
+        $hasCreatePermission = true;
+        error_log("CREATE_FOLDER.PHP - Usuario es admin, permisos otorgados");
+    } else {
+        // Verificar permisos de grupo
+        try {
+            $groupPermissions = getUserGroupPermissions($currentUser['id']);
+            if ($groupPermissions['has_groups']) {
+                $permissions = $groupPermissions['permissions'];
+                $hasCreatePermission = isset($permissions['create_folders']) && $permissions['create_folders'] === true;
+                error_log("CREATE_FOLDER.PHP - Permisos de grupo: create_folders=" . ($hasCreatePermission ? 'true' : 'false'));
+            } else {
+                error_log("CREATE_FOLDER.PHP - Usuario sin grupos asignados");
+            }
+        } catch (Exception $e) {
+            error_log("CREATE_FOLDER.PHP - Error verificando permisos: " . $e->getMessage());
+        }
+    }
+
+    if (!$hasCreatePermission) {
+        echo json_encode(['success' => false, 'message' => 'No tienes permisos para crear carpetas']);
+        exit;
+    }
+
+    // ===== CONECTAR A BASE DE DATOS =====
     $database = new Database();
     $pdo = $database->getConnection();
+
+    // ===== VERIFICAR QUE EMPRESA Y DEPARTAMENTO EXISTEN =====
+    $checkQuery = "SELECT c.name as company_name, d.name as department_name 
+                   FROM companies c 
+                   INNER JOIN departments d ON c.id = d.company_id 
+                   WHERE c.id = ? AND d.id = ? AND c.status = 'active' AND d.status = 'active'";
     
-    $deptQuery = "SELECT id, name FROM departments WHERE id = ? AND company_id = ? AND status = 'active'";
-    $deptStmt = $pdo->prepare($deptQuery);
-    $deptStmt->execute([$departmentId, $companyId]);
-    $department = $deptStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$department) {
-        echo json_encode(['success' => false, 'message' => 'Departamento no encontrado o inválido']);
+    $stmt = $pdo->prepare($checkQuery);
+    $stmt->execute([$companyId, $departmentId]);
+    $location = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$location) {
+        error_log("CREATE_FOLDER.PHP - ERROR: Empresa o departamento no encontrado: company_id=$companyId, department_id=$departmentId");
+        echo json_encode(['success' => false, 'message' => 'Empresa o departamento no válido']);
         exit;
     }
+
+    error_log("CREATE_FOLDER.PHP - Ubicación válida: {$location['company_name']} → {$location['department_name']}");
+
+    // ===== VERIFICAR NOMBRE DUPLICADO =====
+    $duplicateQuery = "SELECT id FROM document_folders 
+                       WHERE name = ? AND company_id = ? AND department_id = ? AND is_active = 1";
     
-    // Verificar que no existe otra carpeta con el mismo nombre en el mismo departamento
-    $existsQuery = "SELECT id FROM document_folders WHERE name = ? AND company_id = ? AND department_id = ? AND is_active = 1";
-    $existsStmt = $pdo->prepare($existsQuery);
-    $existsStmt->execute([$name, $companyId, $departmentId]);
+    $stmt = $pdo->prepare($duplicateQuery);
+    $stmt->execute([$name, $companyId, $departmentId]);
     
-    if ($existsStmt->fetch()) {
+    if ($stmt->fetch()) {
         echo json_encode(['success' => false, 'message' => 'Ya existe una carpeta con ese nombre en este departamento']);
         exit;
     }
-    
-    // Crear la carpeta
-    $insertQuery = "
-        INSERT INTO document_folders (
+
+    // ===== CREAR CARPETA =====
+    $pdo->beginTransaction();
+
+    try {
+        $insertQuery = "INSERT INTO document_folders (
             name, 
             description, 
             company_id, 
             department_id, 
             folder_color, 
-            folder_icon, 
-            folder_path, 
-            is_active, 
-            created_by, 
-            created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())
-    ";
-    
-    $folderPath = $name; // Ruta simple por ahora
-    
-    $insertStmt = $pdo->prepare($insertQuery);
-    $result = $insertStmt->execute([
-        $name,
-        $description,
-        $companyId,
-        $departmentId,
-        $folderColor,
-        $folderIcon,
-        $folderPath,
-        $currentUser['id']
-    ]);
-    
-    if ($result) {
-        $folderId = $pdo->lastInsertId();
+            folder_icon,
+            folder_path,
+            is_active,
+            created_by,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())";
         
-        // Log de actividad
-        if (function_exists('logActivity')) {
-            logActivity(
+        $folderPath = "/{$location['company_name']}/{$location['department_name']}/{$name}";
+        
+        $stmt = $pdo->prepare($insertQuery);
+        $result = $stmt->execute([
+            $name,
+            $description,
+            $companyId,
+            $departmentId,
+            $folderColor,
+            $folderIcon,
+            $folderPath,
+            $currentUser['id']
+        ]);
+
+        if (!$result) {
+            throw new Exception('Error al insertar la carpeta en la base de datos');
+        }
+
+        $folderId = $pdo->lastInsertId();
+        error_log("CREATE_FOLDER.PHP - Carpeta creada con ID: $folderId");
+
+        // ===== REGISTRAR ACTIVIDAD =====
+        try {
+            $logQuery = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                         VALUES (?, ?, ?, ?, ?, NOW())";
+            $logStmt = $pdo->prepare($logQuery);
+            $logStmt->execute([
                 $currentUser['id'],
-                'create',
+                'folder_created',
                 'document_folders',
                 $folderId,
-                "Carpeta '{$name}' creada en departamento {$department['name']}"
-            );
+                "Creó carpeta '{$name}' en {$location['company_name']} → {$location['department_name']}"
+            ]);
+        } catch (Exception $e) {
+            error_log("CREATE_FOLDER.PHP - Warning: No se pudo registrar actividad: " . $e->getMessage());
         }
+
+        // Confirmar transacción
+        $pdo->commit();
         
+        error_log("CREATE_FOLDER.PHP - Carpeta creada exitosamente");
+
         echo json_encode([
-            'success' => true, 
+            'success' => true,
             'message' => 'Carpeta creada exitosamente',
-            'folder_id' => $folderId,
-            'folder_name' => $name
+            'folder' => [
+                'id' => $folderId,
+                'name' => $name,
+                'description' => $description,
+                'company_name' => $location['company_name'],
+                'department_name' => $location['department_name'],
+                'folder_color' => $folderColor,
+                'folder_icon' => $folderIcon,
+                'folder_path' => $folderPath
+            ]
         ]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Error al crear la carpeta']);
+
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("CREATE_FOLDER.PHP - Error en transacción: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Error al crear la carpeta: ' . $e->getMessage()]);
     }
-    
+
 } catch (Exception $e) {
-    error_log("Error creating folder: " . $e->getMessage());
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Error interno del servidor: ' . $e->getMessage()
-    ]);
+    error_log("CREATE_FOLDER.PHP - Error general: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Error del sistema: ' . $e->getMessage()]);
 }
 ?>

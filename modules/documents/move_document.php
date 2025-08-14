@@ -1,175 +1,131 @@
 <?php
-/*
- * move_document.php
- * API para mover documentos a carpetas
- */
+// Capturar cualquier output que pueda causar problemas
+ob_start();
+
+require_once '../../config/session.php';
+require_once '../../config/database.php';
+require_once '../../includes/group_permissions.php';
+
+// Limpiar cualquier output previo
+ob_clean();
+
+SessionManager::requireLogin();
+$currentUser = SessionManager::getCurrentUser();
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST');
-header('Access-Control-Allow-Headers: Content-Type');
 
-// Solo acepta POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
     echo json_encode(['success' => false, 'message' => 'Método no permitido']);
     exit;
 }
 
-require_once '../../config/session.php';
-require_once '../../config/database.php';
-
 try {
-    // Verificar sesión
-    SessionManager::requireLogin();
-    $currentUser = SessionManager::getCurrentUser();
+    // Leer input
+    $rawInput = file_get_contents('php://input');
     
-    // Obtener datos JSON del POST
-    $input = json_decode(file_get_contents('php://input'), true);
-    
-    if (!$input) {
-        echo json_encode(['success' => false, 'message' => 'Datos JSON inválidos']);
+    if (empty($rawInput)) {
+        echo json_encode(['success' => false, 'message' => 'Sin datos de entrada']);
         exit;
     }
     
-    $documentId = intval($input['document_id'] ?? 0);
-    $folderId = intval($input['folder_id'] ?? 0);
+    $input = json_decode($rawInput, true);
     
-    // Validar datos
-    if ($documentId <= 0) {
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo json_encode(['success' => false, 'message' => 'JSON inválido: ' . json_last_error_msg()]);
+        exit;
+    }
+    
+    $documentId = isset($input['document_id']) ? (int)$input['document_id'] : 0;
+    $targetPath = isset($input['target_path']) ? trim($input['target_path']) : '';
+    
+    if (!$documentId) {
         echo json_encode(['success' => false, 'message' => 'ID de documento inválido']);
         exit;
     }
-    
-    if ($folderId <= 0) {
-        echo json_encode(['success' => false, 'message' => 'ID de carpeta inválido']);
-        exit;
-    }
-    
+
     $database = new Database();
     $pdo = $database->getConnection();
-    
-    // Verificar que el documento existe y que el usuario tiene permisos
-    $docQuery = "
-        SELECT d.id, d.name, d.company_id, d.department_id, d.user_id,
-               c.name as company_name
-        FROM documents d
-        INNER JOIN companies c ON d.company_id = c.id
-        WHERE d.id = ? AND d.status = 'active'
-    ";
-    $docStmt = $pdo->prepare($docQuery);
-    $docStmt->execute([$documentId]);
-    $document = $docStmt->fetch(PDO::FETCH_ASSOC);
-    
+
+    // Verificar que el documento existe
+    $checkQuery = "SELECT * FROM documents WHERE id = ? AND status = 'active'";
+    $stmt = $pdo->prepare($checkQuery);
+    $stmt->execute([$documentId]);
+    $document = $stmt->fetch(PDO::FETCH_ASSOC);
+
     if (!$document) {
         echo json_encode(['success' => false, 'message' => 'Documento no encontrado']);
         exit;
     }
-    
-    // Verificar permisos: admin, dueño del documento, o miembro de grupos con permisos de edición
-    $hasPermission = false;
-    
-    if ($currentUser['role'] === 'admin') {
-        $hasPermission = true;
-    } elseif ($document['user_id'] == $currentUser['id']) {
-        $hasPermission = true;
-    } else {
-        // Verificar permisos de grupo
-        $permQuery = "
-            SELECT ug.module_permissions, ug.access_restrictions
-            FROM user_groups ug
-            INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-            WHERE ugm.user_id = ? AND ug.status = 'active'
-        ";
-        $permStmt = $pdo->prepare($permQuery);
-        $permStmt->execute([$currentUser['id']]);
-        $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        foreach ($permissions as $perm) {
-            $permData = json_decode($perm['module_permissions'] ?: '{}', true);
-            $restrictions = json_decode($perm['access_restrictions'] ?: '{}', true);
-            
-            // Verificar si tiene permiso de editar
-            if ($permData['edit'] ?? false) {
-                // Verificar restricciones de empresa
-                $companyRestriction = $restrictions['companies'] ?? [];
-                if (empty($companyRestriction) || in_array($document['company_id'], $companyRestriction)) {
-                    $hasPermission = true;
-                    break;
-                }
+
+    // Verificar permisos básicos - más simple
+    if ($currentUser['role'] !== 'admin' && $currentUser['role'] !== 'super_admin') {
+        // Para usuarios normales, verificar permisos básicos
+        try {
+            $userPermissions = getUserGroupPermissions($currentUser['id']);
+            if (!$userPermissions['permissions']['edit_files']) {
+                echo json_encode(['success' => false, 'message' => 'Sin permisos para mover documentos']);
+                exit;
             }
+        } catch (Exception $permError) {
+            // Si hay error con permisos, permitir solo a admin
+            echo json_encode(['success' => false, 'message' => 'Error verificando permisos']);
+            exit;
         }
     }
-    
-    if (!$hasPermission) {
-        echo json_encode(['success' => false, 'message' => 'No tienes permisos para mover este documento']);
-        exit;
+
+    // Parsear path destino
+    $pathParts = array_filter(explode('/', trim($targetPath, '/')));
+    $newCompanyId = isset($pathParts[0]) ? (int)$pathParts[0] : $document['company_id'];
+    $newDepartmentId = isset($pathParts[1]) ? (int)$pathParts[1] : $document['department_id'];
+    $newFolderId = null;
+
+    // Si hay carpeta en el path
+    if (isset($pathParts[2]) && strpos($pathParts[2], 'folder_') === 0) {
+        $newFolderId = (int)substr($pathParts[2], 7);
     }
+
+    // Actualizar documento
+    $updateQuery = "UPDATE documents SET 
+                    company_id = ?, 
+                    department_id = ?, 
+                    folder_id = ?,
+                    updated_at = NOW() 
+                    WHERE id = ?";
     
-    // Verificar que la carpeta existe y pertenece a la misma empresa
-    $folderQuery = "
-        SELECT f.id, f.name, f.company_id, f.department_id,
-               d.name as department_name
-        FROM document_folders f
-        INNER JOIN departments d ON f.department_id = d.id
-        WHERE f.id = ? AND f.is_active = 1
-    ";
-    $folderStmt = $pdo->prepare($folderQuery);
-    $folderStmt->execute([$folderId]);
-    $folder = $folderStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$folder) {
-        echo json_encode(['success' => false, 'message' => 'Carpeta no encontrada']);
-        exit;
-    }
-    
-    // Verificar que la carpeta pertenece a la misma empresa que el documento
-    if ($folder['company_id'] != $document['company_id']) {
-        echo json_encode(['success' => false, 'message' => 'No se puede mover el documento a una carpeta de otra empresa']);
-        exit;
-    }
-    
-    // Mover el documento a la carpeta
-    $updateQuery = "
-        UPDATE documents 
-        SET folder_id = ?, 
-            department_id = ?, 
-            updated_at = NOW() 
-        WHERE id = ?
-    ";
-    $updateStmt = $pdo->prepare($updateQuery);
-    $result = $updateStmt->execute([$folderId, $folder['department_id'], $documentId]);
-    
-    if ($result) {
-        // Log de actividad
-        $logQuery = "
-            INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
-            VALUES (?, 'move', 'documents', ?, ?, NOW())
-        ";
-        $logStmt = $pdo->prepare($logQuery);
-        $logStmt->execute([
-            $currentUser['id'],
-            $documentId,
-            "Documento '{$document['name']}' movido a carpeta '{$folder['name']}' en {$folder['department_name']}"
-        ]);
-        
+    $stmt = $pdo->prepare($updateQuery);
+    $success = $stmt->execute([$newCompanyId, $newDepartmentId, $newFolderId, $documentId]);
+
+    if ($success) {
+        // Log básico sin dependencias externas
+        try {
+            $description = "Documento movido: " . $document['name'];
+            $logQuery = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                         VALUES (?, 'move', 'documents', ?, ?, NOW())";
+            $logStmt = $pdo->prepare($logQuery);
+            $logStmt->execute([$currentUser['id'], $documentId, $description]);
+        } catch (Exception $logError) {
+            // Si el log falla, continuar igual
+        }
+
         echo json_encode([
             'success' => true, 
             'message' => 'Documento movido exitosamente',
             'document_id' => $documentId,
-            'folder_id' => $folderId,
-            'folder_name' => $folder['name'],
-            'department_name' => $folder['department_name']
+            'new_path' => $targetPath
         ]);
     } else {
-        echo json_encode(['success' => false, 'message' => 'Error al mover el documento']);
+        echo json_encode(['success' => false, 'message' => 'Error al actualizar documento en BD']);
     }
-    
+
 } catch (Exception $e) {
-    error_log("Error moving document: " . $e->getMessage());
     echo json_encode([
         'success' => false, 
-        'message' => 'Error interno del servidor: ' . $e->getMessage()
+        'message' => 'Error: ' . $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
     ]);
 }
+
+// Terminar output buffering
+ob_end_flush();
 ?>

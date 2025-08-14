@@ -595,7 +595,7 @@ body {
 
 .quick-action-btn:hover {
     background: var(--bg-primary);
-    border-color: var(--primary-color);
+    border-color: blue;
     transform: translateY(-1px);
     box-shadow: var(--card-shadow);
 }
@@ -603,7 +603,7 @@ body {
 .quick-action-btn svg {
     width: 20px;
     height: 20px;
-    color: var(--primary-color);
+    color: blue;
 }
 
 .quick-action-btn span {

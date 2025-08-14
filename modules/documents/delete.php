@@ -1,30 +1,24 @@
 <?php
-
 /**
- * delete.php - Versión corregida sin doble codificación
- * REEMPLAZAR delete.php existente con este código
+ * delete.php - Funcionalidad de eliminación de documentos corregida
+ * Ubicación: modules/documents/delete.php
  */
 
-require_once '../../bootstrap.php';
+require_once '../../config/session.php';
+require_once '../../config/database.php';
+require_once '../../includes/group_permissions.php';
 
 SessionManager::requireLogin();
 $currentUser = SessionManager::getCurrentUser();
 
-// Log inicial
-error_log("DELETE.PHP - Iniciando eliminación para usuario: " . $currentUser['username']);
-error_log("DELETE.PHP - POST data: " . print_r($_POST, true));
-error_log("DELETE.PHP - REQUEST_URI: " . ($_SERVER['REQUEST_URI'] ?? 'N/A'));
-
-// Solo POST
+// Solo permitir POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    error_log("DELETE.PHP - ERROR: Método no es POST");
     header('Location: inbox.php?error=invalid_request');
     exit;
 }
 
 // Verificar document_id
 if (!isset($_POST['document_id']) || !is_numeric($_POST['document_id'])) {
-    error_log("DELETE.PHP - ERROR: document_id inválido");
     header('Location: inbox.php?error=invalid_document_id');
     exit;
 }
@@ -32,8 +26,7 @@ if (!isset($_POST['document_id']) || !is_numeric($_POST['document_id'])) {
 $documentId = intval($_POST['document_id']);
 $returnPath = $_POST['return_path'] ?? '';
 
-error_log("DELETE.PHP - Document ID: $documentId");
-error_log("DELETE.PHP - Return Path recibido: '$returnPath'");
+error_log("DELETE.PHP - Eliminando documento ID: $documentId para usuario: " . $currentUser['username']);
 
 try {
     $database = new Database();
@@ -42,44 +35,20 @@ try {
     // ===== VERIFICACIÓN DE PERMISOS =====
     $hasDeletePermission = false;
 
-    if ($currentUser['role'] === 'admin') {
+    if ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin') {
         $hasDeletePermission = true;
-        error_log("DELETE.PHP - Usuario es admin");
     } else {
-        // Verificar sistema unificado
-        if (class_exists('UnifiedPermissionSystem')) {
-            try {
-                $permissionSystem = UnifiedPermissionSystem::getInstance();
-                $userPerms = $permissionSystem->getUserEffectivePermissions($currentUser['id']);
-                $hasDeletePermission = isset($userPerms['permissions']['delete_files']) &&
-                    $userPerms['permissions']['delete_files'] === true;
-                error_log("DELETE.PHP - Permisos por sistema unificado: " . ($hasDeletePermission ? 'SÍ' : 'NO'));
-            } catch (Exception $e) {
-                error_log('DELETE.PHP - ERROR en verificación de permisos: ' . $e->getMessage());
-                $hasDeletePermission = false;
-            }
-        } else {
-            // Sistema legacy
-            $stmt = $pdo->prepare("SELECT ug.module_permissions FROM user_groups ug
-                                   INNER JOIN user_group_members ugm ON ug.id = ugm.group_id
-                                   WHERE ugm.user_id = ? AND ug.status = 'active'");
-            $stmt->execute([$currentUser['id']]);
-            $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            foreach ($groups as $group) {
-                $permissions = json_decode($group['module_permissions'] ?: '{}', true);
-                if (isset($permissions['delete_files']) && $permissions['delete_files'] === true) {
-                    $hasDeletePermission = true;
-                    break;
-                }
-            }
-            error_log("DELETE.PHP - Permisos por sistema legacy: " . ($hasDeletePermission ? 'SÍ' : 'NO'));
+        // Verificar permisos de grupo
+        $groupPermissions = getUserGroupPermissions($currentUser['id']);
+        if ($groupPermissions['has_groups']) {
+            $permissions = $groupPermissions['permissions'];
+            $hasDeletePermission = isset($permissions['delete_files']) && $permissions['delete_files'] === true;
         }
     }
 
     if (!$hasDeletePermission) {
         error_log("DELETE.PHP - ERROR: Usuario sin permisos de eliminación");
-        header('Location: inbox.php?error=delete_disabled');
+        header('Location: inbox.php?error=no_delete_permission&path=' . urlencode($returnPath));
         exit;
     }
 
@@ -89,45 +58,35 @@ try {
               LEFT JOIN companies c ON d.company_id = c.id
               LEFT JOIN users u ON d.user_id = u.id
               WHERE d.id = ? AND d.status = 'active'";
-
+    
     $stmt = $pdo->prepare($query);
     $stmt->execute([$documentId]);
     $document = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$document) {
         error_log("DELETE.PHP - ERROR: Documento no encontrado o no activo");
-        header('Location: inbox.php?error=document_not_found');
+        header('Location: inbox.php?error=document_not_found&path=' . urlencode($returnPath));
         exit;
     }
 
-    error_log("DELETE.PHP - Documento encontrado: " . $document['name']);
-
-    // ===== VERIFICAR SI PUEDE ELIMINAR ESTE DOCUMENTO =====
-    if ($currentUser['role'] !== 'admin' && $document['user_id'] != $currentUser['id']) {
-        error_log("DELETE.PHP - ERROR: Usuario no es admin ni dueño");
-        header('Location: inbox.php?error=not_owner');
+    // ===== VERIFICAR PROPIEDAD DEL DOCUMENTO =====
+    if ($currentUser['role'] !== 'admin' && $currentUser['role'] !== 'super_admin' && $document['user_id'] != $currentUser['id']) {
+        error_log("DELETE.PHP - ERROR: Usuario no es propietario del documento");
+        header('Location: inbox.php?error=not_document_owner&path=' . urlencode($returnPath));
         exit;
     }
 
-    // ===== INICIAR TRANSACCIÓN =====
+    // ===== ELIMINAR DOCUMENTO =====
     $pdo->beginTransaction();
 
     try {
-        // Marcar documento como eliminado (soft delete)
-        $updateQuery = "UPDATE documents SET 
-                        status = 'deleted', 
-                        updated_at = NOW()";
-
-        // Verificar si existen campos adicionales para eliminación
+        // Verificar si existe columna deleted_at
         $checkColumns = $pdo->query("SHOW COLUMNS FROM documents LIKE 'deleted_at'");
-        if ($checkColumns->rowCount() > 0) {
-            $updateQuery .= ", deleted_at = NOW(), deleted_by = ?";
-            $updateParams = [$currentUser['id'], $documentId];
-        } else {
-            $updateParams = [$documentId];
-        }
+        $hasDeletedAtColumn = $checkColumns->rowCount() > 0;
 
-        $updateQuery .= " WHERE id = ?";
+        // HARD DELETE - Eliminar completamente de la base de datos
+        $updateQuery = "DELETE FROM documents WHERE id = ?";
+        $updateParams = [$documentId];
 
         $stmt = $pdo->prepare($updateQuery);
         $result = $stmt->execute($updateParams);
@@ -136,85 +95,61 @@ try {
             throw new Exception('Error al marcar documento como eliminado');
         }
 
-        error_log("DELETE.PHP - Documento marcado como eliminado exitosamente");
-
         // ===== MANEJAR ARCHIVO FÍSICO =====
+        // ===== ELIMINAR ARCHIVO FÍSICO COMPLETAMENTE =====
         $filePath = '../../' . $document['file_path'];
-
+        
         if (file_exists($filePath)) {
-            // EN LUGAR DE MOVER A CARPETA DELETED, ELIMINAR DIRECTAMENTE
             if (unlink($filePath)) {
-                error_log("DELETE.PHP - Archivo eliminado completamente");
+                error_log("DELETE.PHP - Archivo eliminado completamente del servidor");
             } else {
-                error_log("DELETE.PHP - Error al eliminar archivo físico");
-            }
-            // NO crear ni mover a carpeta deleted
-
-
-            // Mover archivo a carpeta de eliminados
-            $timestamp = time();
-            $originalBasename = basename($document['file_path']);
-            $deletedFileName = $documentId . '_' . $timestamp . '_' . $originalBasename;
-            $deletedFilePath = $deletedDir . $deletedFileName;
-
-            if (rename($filePath, $deletedFilePath)) {
-                error_log("DELETE.PHP - Archivo movido a carpeta de eliminados");
-                // Actualizar ruta en BD si es posible
-                if ($checkColumns->rowCount() > 0) {
-                    $updatePathQuery = "UPDATE documents SET file_path = ? WHERE id = ?";
-                    $stmt = $pdo->prepare($updatePathQuery);
-                    $stmt->execute(['uploads/deleted/' . $deletedFileName, $documentId]);
-                }
-            } else {
-                // Si no se puede mover, eliminar directamente
-                unlink($filePath);
-                error_log("DELETE.PHP - Archivo eliminado directamente");
+                error_log("DELETE.PHP - Warning: No se pudo eliminar el archivo físico");
             }
         }
 
         // ===== REGISTRAR ACTIVIDAD =====
-        if (function_exists('logActivity')) {
-            logActivity(
+        try {
+            $logQuery = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, created_at) 
+                         VALUES (?, ?, ?, ?, ?, NOW())";
+            $logStmt = $pdo->prepare($logQuery);
+            $logStmt->execute([
                 $currentUser['id'],
-                'delete',
+                'document_deleted',
                 'documents',
                 $documentId,
                 "Eliminó documento: {$document['name']} ({$document['company_name']})"
-            );
+            ]);
+        } catch (Exception $e) {
+            // Log de actividad falló, pero no cancelar la eliminación
+            error_log("DELETE.PHP - Warning: No se pudo registrar actividad: " . $e->getMessage());
         }
 
         // Confirmar transacción
         $pdo->commit();
-        error_log("DELETE.PHP - Transacción completada exitosamente");
+        error_log("DELETE.PHP - Documento eliminado exitosamente");
 
-        // ===== CONSTRUIR URL DE REDIRECCIÓN (SIN DOBLE CODIFICACIÓN) =====
-        $redirectUrl = 'inbox.php';
-
+        // ===== REDIRECCIÓN =====
+        $redirectUrl = 'inbox.php?success=document_deleted';
+        
         if (!empty($returnPath)) {
-            // IMPORTANTE: NO volver a codificar si ya está codificado
-            $decodedPath = urldecode($returnPath);
-            error_log("DELETE.PHP - Return path decodificado: '$decodedPath'");
-
-            $redirectUrl .= '?path=' . urlencode($decodedPath);
-            $redirectUrl .= '&success=document_deleted';
-        } else {
-            $redirectUrl .= '?success=document_deleted';
+            $redirectUrl .= '&path=' . urlencode($returnPath);
         }
-
-        $redirectUrl .= '&name=' . urlencode($document['name']);
-
-        error_log("DELETE.PHP - URL de redirección final: " . $redirectUrl);
+        
+        $redirectUrl .= '&deleted_name=' . urlencode($document['name']);
 
         header('Location: ' . $redirectUrl);
         exit;
+
     } catch (Exception $e) {
-        $pdo->rollback();
+        $pdo->rollBack();
         error_log("DELETE.PHP - Error en transacción: " . $e->getMessage());
-        header('Location: inbox.php?error=delete_failed');
+        header('Location: inbox.php?error=delete_failed&path=' . urlencode($returnPath));
         exit;
     }
+
 } catch (Exception $e) {
     error_log("DELETE.PHP - Error general: " . $e->getMessage());
-    header('Location: inbox.php?error=delete_failed');
+    header('Location: inbox.php?error=system_error&path=' . urlencode($returnPath));
     exit;
 }
+?>

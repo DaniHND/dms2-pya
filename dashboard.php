@@ -104,7 +104,7 @@ logActivity($currentUser['id'], 'dashboard_access', 'dashboard', null, 'Usuario 
 </head>
 <style>/* Bienvenida mejorada */
         .welcome-section {
-            background-color: #64748b;
+            background-color: #8491a3ff;
             border-radius: 1rem;
             padding: 2rem;
             margin-bottom: 2rem;
