@@ -746,14 +746,8 @@ if (!function_exists('logActivity')) {
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-
-
-
-
-
                 <h1>Explorador de Documentos</h1>
            </div>
-
            <div class="header-right">
                <div class="header-info">
                    <div class="user-name-header"><?php echo htmlspecialchars(trim($currentUser['first_name'] . ' ' . $currentUser['last_name'])); ?></div>
@@ -769,7 +763,6 @@ if (!function_exists('logActivity')) {
                </div>
            </div>
        </header>
-
        <div class="container">
            <div class="page-header">
                <p class="page-subtitle">
@@ -1023,13 +1016,6 @@ if (!function_exists('logActivity')) {
                                                            <i data-feather="download"></i>
                                                        </button>
                                                    <?php endif; ?>
-
-                                                   <?php if ($canEdit): ?>
-                                                       <button class="action-btn cut-btn" onclick="event.stopPropagation(); cutDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Mover">
-                                                           <i data-feather="move"></i>
-                                                       </button>
-                                                   <?php endif; ?>
-
                                                    <?php if ($canDelete): ?>
                                                        <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
                                                            <i data-feather="trash-2"></i>
@@ -1112,13 +1098,6 @@ if (!function_exists('logActivity')) {
                                                            <i data-feather="download"></i>
                                                        </button>
                                                    <?php endif; ?>
-
-                                                   <?php if ($canEdit): ?>
-                                                       <button class="list-action-btn cut-btn" onclick="event.stopPropagation(); cutDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Mover">
-                                                           <i data-feather="move"></i>
-                                                       </button>
-                                                   <?php endif; ?>
-
                                                    <?php if ($canDelete): ?>
                                                        <button class="list-action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
                                                            <i data-feather="trash-2"></i>
@@ -1229,23 +1208,6 @@ if (!function_exists('logActivity')) {
        </div>
    </div>
 
-   <!-- Indicador de Mover Documentos -->
-   <div id="clipboardIndicator" class="clipboard-indicator" style="display: none;">
-       <div class="clipboard-content">
-           <i data-feather="move"></i>
-           <span>Documento marcado: <strong id="clipboardName"></strong></span>
-           <div class="clipboard-actions">
-               <button onclick="pasteDocument()" class="clipboard-btn paste-btn">
-                   <i data-feather="corner-down-left"></i>
-                   Mover aquí
-               </button>
-               <button onclick="cancelCut()" class="clipboard-btn cancel-btn">
-                   <i data-feather="x"></i>
-                   Cancelar
-               </button>
-           </div>
-       </div>
-   </div>
 
    <!-- ESTILOS ADICIONALES -->
    <style>

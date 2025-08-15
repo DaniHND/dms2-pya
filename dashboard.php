@@ -1002,14 +1002,6 @@ function getFullName()
             align-items: center;
             gap: 1rem;
         }
-
-        .header-left h1 {
-            margin: 0;
-            color: #1f2937;
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
         .header-right {
             display: flex;
             align-items: center;

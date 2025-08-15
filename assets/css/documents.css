@@ -144,12 +144,28 @@
     cursor: pointer;
     width: 100%;
     height: 100%;
+    min-height: 200px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: var(--spacing-4);
+    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+    border: 2px dashed #90caf9;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    color: #0d47a1;
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.1);
 }
+
+.file-upload-area .file-upload-content:hover {
+    background: linear-gradient(135deg, #bbdefb, #90caf9);
+    border-color: #42a5f5;
+    box-shadow: 0 6px 18px rgba(33, 150, 243, 0.2);
+    transform: translateY(-2px);
+}
+
 
 /* Cuando hay archivo, solo el área alrededor del preview es clickeable */
 .file-upload-area:has(.file-preview[style*="flex"]) {
