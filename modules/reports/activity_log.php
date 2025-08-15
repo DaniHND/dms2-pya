@@ -1,14 +1,70 @@
 <?php
 // modules/reports/activity_log.php
 // Log de actividades del sistema - DMS2
-// VERSION CON SEGURIDAD - Usuarios no ven datos de administradores
+// VERSION CON SEGURIDAD Y DISEÑO DE DOCUMENTS_REPORT
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
+// Asegurar que las funciones de base de datos estén disponibles
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = [])
+    {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = [])
+    {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null)
+    {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+
+            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $userAgent = substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 255);
+
+            $stmt = $pdo->prepare($query);
+            return $stmt->execute([$userId, $action, $tableName, $recordId, $description, $ipAddress, $userAgent]);
+        } catch (Exception $e) {
+            error_log('Error in logActivity: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
 // Función helper para obtener nombre completo si no existe
 if (!function_exists('getFullName')) {
-    function getFullName() {
+    function getFullName()
+    {
         $currentUser = SessionManager::getCurrentUser();
         if ($currentUser) {
             return trim($currentUser['first_name'] . ' ' . $currentUser['last_name']);
@@ -56,14 +112,16 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $offs
         if ($currentUser['role'] !== 'admin') {
             $checkQuery = "SELECT role, company_id FROM users WHERE id = :check_user_id";
             $checkResult = fetchOne($checkQuery, ['check_user_id' => $userId]);
-            if (!$checkResult || 
-                $checkResult['role'] === 'admin' || 
-                $checkResult['company_id'] != $currentUser['company_id']) {
+            if (
+                !$checkResult ||
+                $checkResult['role'] === 'admin' ||
+                $checkResult['company_id'] != $currentUser['company_id']
+            ) {
                 // Si intenta ver un admin o usuario de otra empresa, no mostrar nada
                 return [];
             }
         }
-        
+
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
@@ -91,7 +149,7 @@ function getActivities($currentUser, $dateFrom, $dateTo, $userId, $action, $offs
         return fetchAll($query, $params);
     } catch (Exception $e) {
         error_log("Error en getActivities: " . $e->getMessage());
-        return []; // Devolver array vacío en caso de error
+        return [];
     }
 }
 
@@ -113,13 +171,15 @@ function getTotalActivities($currentUser, $dateFrom, $dateTo, $userId, $action)
         if ($currentUser['role'] !== 'admin') {
             $checkQuery = "SELECT role, company_id FROM users WHERE id = :check_user_id";
             $checkResult = fetchOne($checkQuery, ['check_user_id' => $userId]);
-            if (!$checkResult || 
-                $checkResult['role'] === 'admin' || 
-                $checkResult['company_id'] != $currentUser['company_id']) {
+            if (
+                !$checkResult ||
+                $checkResult['role'] === 'admin' ||
+                $checkResult['company_id'] != $currentUser['company_id']
+            ) {
                 return 0; // Si intenta ver un admin, retornar 0
             }
         }
-        
+
         $whereConditions[] = "al.user_id = :user_id";
         $params['user_id'] = $userId;
     }
@@ -178,7 +238,6 @@ function getActionTypes()
 }
 
 // Función para traducir acciones
-// Función para traducir acciones
 function translateAction($action)
 {
     $translations = [
@@ -194,7 +253,7 @@ function translateAction($action)
         'export_csv' => 'Exportó Reporte CSV',
         'export_pdf' => 'Exportó Reporte PDF',
         'export_excel' => 'Exportó Reporte Excel',
-        
+
         // === ACCIONES SECUNDARIAS ===
         'failed_login' => 'Intento de Login Fallido',
         'password_change' => 'Cambió Contraseña',
@@ -214,7 +273,7 @@ function translateAction($action)
         'backup_created' => 'Creó Respaldo',
         'backup_restored' => 'Restauró Respaldo',
         'system_config_change' => 'Cambió Configuración',
-        
+
         // === ACCIONES ANTIGUAS (compatibilidad) ===
         'create' => 'Creó',
         'update' => 'Actualizó',
@@ -243,7 +302,7 @@ function getActionIcon($action)
         'export_csv' => 'file-text',
         'export_pdf' => 'file',
         'export_excel' => 'grid',
-        
+
         // === ICONOS SECUNDARIOS ===
         'failed_login' => 'alert-triangle',
         'password_change' => 'key',
@@ -263,7 +322,7 @@ function getActionIcon($action)
         'backup_created' => 'hard-drive',
         'backup_restored' => 'refresh-cw',
         'system_config_change' => 'settings',
-        
+
         // === ICONOS ANTIGUOS (compatibilidad) ===
         'create' => 'plus',
         'update' => 'edit',
@@ -284,7 +343,9 @@ $users = getUsers($currentUser);
 $actionTypes = getActionTypes();
 
 // Registrar acceso
-logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario accedió al log de actividades');
+if (function_exists('logActivity')) {
+    logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario accedió al log de actividades');
+}
 ?>
 
 <!DOCTYPE html>
@@ -313,7 +374,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Actividades</h1>
+                <h1>Log de Actividades</h1>
             </div>
 
             <div class="header-right">
@@ -378,24 +439,9 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         <div class="stat-label">Días Analizados</div>
                     </div>
                 </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i data-feather="trending-up"></i>
-                    </div>
-                    <div class="stat-info">
-                        <div class="stat-number">
-                            <?php
-                            $days = max(1, (strtotime($dateTo) - strtotime($dateFrom)) / 86400 + 1);
-                            echo number_format($totalRecords / $days, 1);
-                            ?>
-                        </div>
-                        <div class="stat-label">Promedio Diario</div>
-                    </div>
-                </div>
             </div>
 
-            <!-- Filtros automáticos -->
+            <!-- Filtros de búsqueda -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>
                 <div class="filters-row">
@@ -451,95 +497,46 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 </div>
             </div>
 
-            <!-- Tabla de actividades con diseño mejorado -->
+            <!-- Tabla de actividades -->
             <div class="reports-table enhanced-table">
                 <div class="table-header">
                     <h3><i data-feather="activity"></i> Log de Actividades (<?php echo number_format($totalRecords); ?> registros)</h3>
-                    <div class="table-actions">
-                        <span class="pagination-info-header">
-                            Página <?php echo $page; ?> de <?php echo $totalPages; ?>
-                        </span>
-                        <span class="status-indicator active">
-                            <i data-feather="database"></i>
-                            Sistema Activo
-                        </span>
-                    </div>
                 </div>
 
                 <?php if (!empty($activities)): ?>
                     <div class="table-container">
-                        <table class="data-table activity-table enhanced-activity-table">
+                        <table class="data-table simple-activity-table">
                             <thead>
                                 <tr>
-                                    <th><i data-feather="calendar" class="table-icon"></i> Fecha/Hora</th>
-                                    <th><i data-feather="user" class="table-icon"></i> Usuario</th>
+                                    <th>Fecha/Hora</th>
+                                    <th>Usuario</th>
                                     <?php if ($currentUser['role'] === 'admin'): ?>
-                                    <th><i data-feather="building" class="table-icon"></i> Empresa</th>
+                                        <th>Empresa</th>
                                     <?php endif; ?>
-                                    <th><i data-feather="zap" class="table-icon"></i> Acción</th>
-                                    <th><i data-feather="file-text" class="table-icon"></i> Descripción</th>
+                                    <th>Acción</th>
+                                    <th>Descripción</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($activities as $index => $activity): ?>
-                                    <?php 
-                                    $isRecentActivity = (time() - strtotime($activity['created_at'])) < 3600; // Última hora
-                                    $rowClass = $isRecentActivity ? 'recent-activity-row' : '';
-                                    $actionClass = 'action-' . $activity['action'];
-                                    ?>
-                                    <tr class="<?php echo $rowClass; ?>" data-activity-id="<?php echo $activity['id']; ?>">
-                                        <td class="datetime-cell enhanced-datetime-cell">
-                                            <div class="datetime enhanced-datetime">
-                                                <div class="date"><?php echo date('d/m/Y', strtotime($activity['created_at'])); ?></div>
-                                                <div class="time"><?php echo date('H:i:s', strtotime($activity['created_at'])); ?></div>
-                                                <div class="relative-time" title="<?php echo date('d/m/Y H:i:s', strtotime($activity['created_at'])); ?>">
-                                                    <?php 
-                                                    $diff = time() - strtotime($activity['created_at']);
-                                                    if ($diff < 60) echo 'Hace ' . $diff . ' seg';
-                                                    elseif ($diff < 3600) echo 'Hace ' . round($diff/60) . ' min';
-                                                    elseif ($diff < 86400) echo 'Hace ' . round($diff/3600) . ' h';
-                                                    else echo 'Hace ' . round($diff/86400) . ' días';
-                                                    ?>
-                                                </div>
-                                            </div>
-                                            <?php if ($isRecentActivity): ?>
-                                                <div class="recent-badge">
-                                                    <i data-feather="clock"></i>
-                                                    Reciente
-                                                </div>
-                                            <?php endif; ?>
+                                <?php foreach ($activities as $activity): ?>
+                                    <tr>
+                                        <td>
+                                            <?php echo date('d/m/Y H:i:s', strtotime($activity['created_at'])); ?>
                                         </td>
-                                        <td class="user-cell enhanced-user-cell">
-                                            <div class="user-info-enhanced">
-                                                <div class="user-avatar" data-initials="<?php echo strtoupper(substr($activity['first_name'] ?? 'U', 0, 1) . substr($activity['last_name'] ?? 'S', 0, 1)); ?>">
-                                                    <?php echo strtoupper(substr($activity['first_name'] ?? 'U', 0, 1) . substr($activity['last_name'] ?? 'S', 0, 1)); ?>
-                                                </div>
-                                                <div class="user-details">
-                                                    <span class="user-name">
-                                                        <?php echo htmlspecialchars(($activity['first_name'] ?? '') . ' ' . ($activity['last_name'] ?? '')); ?>
-                                                    </span>
-                                                    <small class="username">@<?php echo htmlspecialchars($activity['username'] ?? 'usuario'); ?></small>
-                                                </div>
-                                            </div>
+                                        <td>
+                                            <?php echo htmlspecialchars(($activity['first_name'] ?? '') . ' ' . ($activity['last_name'] ?? '')); ?>
+                                            <br><small>@<?php echo htmlspecialchars($activity['username'] ?? 'usuario'); ?></small>
                                         </td>
                                         <?php if ($currentUser['role'] === 'admin'): ?>
-                                        <td class="company-cell">
-                                            <div class="company-info">
-                                                <i data-feather="building" class="company-icon"></i>
-                                                <span><?php echo htmlspecialchars($activity['company_name'] ?? 'Sin empresa'); ?></span>
-                                            </div>
-                                        </td>
+                                            <td>
+                                                <?php echo htmlspecialchars($activity['company_name'] ?? 'Sin empresa'); ?>
+                                            </td>
                                         <?php endif; ?>
-                                        <td class="action-cell">
-                                            <span class="action-badge <?php echo $actionClass; ?>">
-                                                <i data-feather="<?php echo getActionIcon($activity['action']); ?>"></i>
-                                                <?php echo translateAction($activity['action']); ?>
-                                            </span>
+                                        <td>
+                                            <?php echo translateAction($activity['action']); ?>
                                         </td>
-                                        <td class="description-cell">
-                                            <div class="description-content">
-                                                <?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>
-                                            </div>
+                                        <td>
+                                            <?php echo htmlspecialchars($activity['description'] ?? 'Sin descripción'); ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -547,12 +544,12 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                         </table>
                     </div>
 
-                    <!-- Paginación mejorada -->
+                    <!-- Paginación -->
                     <?php if ($totalPages > 1): ?>
                         <div class="pagination enhanced-pagination">
                             <div class="pagination-info">
                                 <i data-feather="info"></i>
-                                Mostrando <?php echo number_format($offset + 1); ?> - <?php echo number_format(min($offset + $recordsPerPage, $totalRecords)); ?> 
+                                Mostrando <?php echo number_format($offset + 1); ?> - <?php echo number_format(min($offset + $recordsPerPage, $totalRecords)); ?>
                                 de <?php echo number_format($totalRecords); ?> registros
                             </div>
                             <div class="pagination-controls">
@@ -636,107 +633,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             }
         }
 
-        function exportarDatos(formato) {
-            // Obtener parámetros actuales de la URL
-            const urlParams = new URLSearchParams(window.location.search);
-
-            // Construir URL de exportación
-            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&modal=1&' + urlParams.toString();
-
-            if (formato === 'pdf') {
-                // Para PDF, abrir modal
-                abrirModalPDF(exportUrl);
-            } else {
-                // Para CSV y Excel, abrir en nueva ventana para descarga
-                mostrarNotificacion('Preparando descarga...', 'info');
-                window.open(exportUrl.replace('&modal=1', ''), '_blank');
-            }
-        }
-
-        function abrirModalPDF(url) {
-            // Crear modal para PDF dinámicamente (como documents_report.php)
-            const modal = document.createElement('div');
-            modal.className = 'pdf-modal';
-            modal.innerHTML = `
-                <div class="pdf-modal-content">
-                    <div class="pdf-modal-header">
-                        <h3><i data-feather="activity"></i> Log de Actividades - PDF</h3>
-                        <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
-                    </div>
-                    <div class="pdf-modal-body">
-                        <div class="pdf-preview-container">
-                            <div class="pdf-loading">
-                                <div class="loading-spinner"></div>
-                                <p>Generando vista previa del PDF...</p>
-                            </div>
-                            <iframe id="pdfFrame" src="${url.replace('&modal=1', '')}" style="display: none;"></iframe>
-                        </div>
-                        <div class="pdf-actions">
-                            <button class="btn-primary" onclick="descargarPDF('${url.replace('&modal=1', '')}')">
-                                <i data-feather="download"></i> Descargar PDF
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(modal);
-            feather.replace();
-            
-            // Mostrar iframe cuando cargue
-            const iframe = document.getElementById('pdfFrame');
-            iframe.onload = function() {
-                document.querySelector('.pdf-loading').style.display = 'none';
-                iframe.style.display = 'block';
-            };
-            
-            // Manejar errores de carga
-            iframe.onerror = function() {
-                document.querySelector('.pdf-loading').innerHTML = '<div class="loading-spinner"></div><p style="color: #ef4444;">Error al cargar la vista previa. <button onclick="cerrarModalPDF()" style="margin-left: 10px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Cerrar</button></p>';
-            };
-            
-            // Cerrar modal al hacer clic fuera
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) {
-                    cerrarModalPDF();
-                }
-            });
-        }
-
-        function cerrarModalPDF() {
-            const modal = document.querySelector('.pdf-modal');
-            if (modal) {
-                modal.remove();
-            }
-        }
-
-        function descargarPDF(url) {
-            window.open(url, '_blank');
-            mostrarNotificacion('Descargando PDF...', 'success');
-        }
-
-        function mostrarNotificacion(mensaje, tipo = 'info') {
-            // Crear elemento de notificación
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px 20px;
-                background: ${tipo === 'error' ? '#dc3545' : tipo === 'success' ? '#28a745' : '#17a2b8'};
-                color: white;
-                border-radius: 4px;
-                z-index: 1000;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-                font-family: Arial, sans-serif;
-            `;
-            notification.textContent = mensaje;
-            document.body.appendChild(notification);
-            setTimeout(() => notification.remove(), 3000);
-        }
-
-        // Filtros automáticos sin botones
-        // Filtros automáticos sin botones
+        // Filtros automáticos
         document.addEventListener('change', function(e) {
             if (e.target.matches('#date_from, #date_to, #user_id, #action')) {
                 autoFilter();
@@ -758,13 +655,107 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             window.location.href = window.location.pathname + '?' + params.toString();
         }
 
+        // Exportación de datos
+        function exportarDatos(formato) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const exportUrl = 'export.php?format=' + formato + '&type=activity_log&modal=1&' + urlParams.toString();
+
+            if (formato === 'pdf') {
+                abrirModalPDF(exportUrl);
+            } else {
+                mostrarNotificacion('Preparando descarga...', 'info');
+                window.open(exportUrl.replace('&modal=1', ''), '_blank');
+            }
+        }
+
+        function abrirModalPDF(url) {
+            const modal = document.createElement('div');
+            modal.className = 'pdf-modal';
+            modal.innerHTML = `
+                <div class="pdf-modal-content">
+                    <div class="pdf-modal-header">
+                        <h3><i data-feather="activity"></i> Log de Actividades - PDF</h3>
+                        <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
+                    </div>
+                    <div class="pdf-modal-body">
+                        <div class="pdf-preview-container">
+                            <div class="pdf-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Generando vista previa del PDF...</p>
+                            </div>
+                            <iframe id="pdfFrame" src="${url.replace('&modal=1', '')}" style="display: none;"></iframe>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+            feather.replace();
+
+            const iframe = document.getElementById('pdfFrame');
+            iframe.onload = function() {
+                document.querySelector('.pdf-loading').style.display = 'none';
+                iframe.style.display = 'block';
+            };
+
+            iframe.onerror = function() {
+                document.querySelector('.pdf-loading').innerHTML = '<div class="loading-spinner"></div><p style="color: #ef4444;">Error al cargar la vista previa. <button onclick="cerrarModalPDF()" style="margin-left: 10px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Cerrar</button></p>';
+            };
+
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    cerrarModalPDF();
+                }
+            });
+        }
+
+        function imprimirPDF() {
+            const iframe = document.getElementById('pdfFrame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.print();
+            } else {
+                mostrarNotificacion('No se puede imprimir el documento', 'error');
+            }
+        }
+
+        function cerrarModalPDF() {
+            const modal = document.querySelector('.pdf-modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        function descargarPDF(url) {
+            window.open(url, '_blank');
+            mostrarNotificacion('Descargando PDF...', 'success');
+        }
+
+        function mostrarNotificacion(mensaje, tipo = 'info') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${tipo === 'error' ? '#dc3545' : tipo === 'success' ? '#28a745' : '#17a2b8'};
+                color: white;
+                border-radius: 4px;
+                z-index: 1000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                font-family: Arial, sans-serif;
+            `;
+            notification.textContent = mensaje;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 3000);
+        }
+
         function showComingSoon(feature) {
             alert(`${feature} - Próximamente`);
         }
     </script>
 
     <style>
-        /* Colores suaves y congruentes para el sistema */
+        /* Estilos específicos para el log de actividades con diseño de documents_report */
         :root {
             --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
             --secondary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
@@ -776,7 +767,35 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
 
-        /* Mejoras en las estadísticas con gradientes suaves */
+        /* Navegación breadcrumb */
+        .reports-nav-breadcrumb {
+            margin-bottom: 2rem;
+        }
+
+        .breadcrumb-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            color: #374151;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .breadcrumb-link:hover {
+            background: var(--primary-gradient);
+            border-color: #8B4513;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--soft-shadow-lg);
+        }
+
+        /* Estadísticas estilo imagen proporcionada */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -785,105 +804,105 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         }
 
         .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 2px solid #3b82f6;
             border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
+            padding: 2rem;
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
         }
 
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
+        .stat-card:nth-child(2) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(2)::before {
-            background: var(--info-gradient);
+        .stat-card:nth-child(3) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(3)::before {
-            background: var(--success-gradient);
-        }
-
-        .stat-card:nth-child(4)::before {
-            background: var(--warning-gradient);
+        .stat-card:nth-child(4) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
         .stat-card:hover {
             transform: translateY(-2px);
-            box-shadow: var(--soft-shadow-lg);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
         }
 
         .stat-icon {
-            width: 60px;
-            height: 60px;
-            background: var(--primary-gradient);
-            border-radius: 16px;
+            width: 80px;
+            height: 80px;
+            background: #3b82f6;
+            border-radius: 20px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             flex-shrink: 0;
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(2) .stat-icon {
-            background: var(--info-gradient);
-            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(3) .stat-icon {
-            background: var(--success-gradient);
-            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(4) .stat-icon {
-            background: var(--warning-gradient);
-            box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
+        }
+
+        .stat-icon i {
+            width: 40px;
+            height: 40px;
+            stroke-width: 1.5;
+        }
+
+        .stat-info {
+            flex: 1;
         }
 
         .stat-number {
-            font-size: 2rem;
+            font-size: 2.75rem;
             font-weight: 700;
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: #1e40af;
             line-height: 1;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
         }
 
-        /* Tabla mejorada con colores suaves */
-        .enhanced-table {
+        .stat-label {
+            color: #1e40af;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Filtros mejorados */
+        .reports-filters {
             background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
             border-radius: 16px;
-            box-shadow: var(--soft-shadow-lg);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--soft-shadow);
             border: 1px solid #e5e7eb;
-            overflow: hidden;
         }
 
-        .table-header {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            padding: 1.5rem;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .table-header h3 {
-            margin: 0;
+        .reports-filters h3 {
+            margin: 0 0 1.5rem 0;
             color: #1f2937;
             font-size: 1.25rem;
             font-weight: 600;
@@ -892,63 +911,176 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             gap: 0.5rem;
         }
 
-        .table-header i {
+        .reports-filters h3::before {
+            content: '';
+            width: 24px;
+            height: 24px;
+            background: var(--primary-gradient);
+            border-radius: 8px;
+        }
+
+        .filters-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #374151;
+        }
+
+        .filter-group input,
+        .filter-group select {
+            padding: 0.75rem 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            background: white;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .filter-group input:focus,
+        .filter-group select:focus {
+            border-color: #8B4513;
+            box-shadow: 0 0 0 4px rgba(139, 69, 19, 0.1);
+            outline: none;
+        }
+
+        /* Sección de exportación */
+        .export-section {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--soft-shadow);
+            border: 1px solid #e5e7eb;
+        }
+
+        .export-section h3 {
+            margin: 0 0 1.5rem 0;
+            color: #1f2937;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .export-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .export-btn {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 2px solid #e5e7eb;
+            color: #374151;
+            padding: 0.875rem 1.5rem;
+            border-radius: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .export-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--soft-shadow-lg);
+            border-color: #8B4513;
             color: #8B4513;
         }
 
-        .table-actions {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
+        /* Tabla simple sin diseños decorativos para actividades */
+        .simple-activity-table {
+            width: 100%;
+            border-collapse: collapse;
         }
 
-        .pagination-info-header {
+        .simple-activity-table th {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            padding: 1rem 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            font-size: 0.875rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .simple-activity-table td {
+            padding: 1rem 0.75rem;
+            border-bottom: 1px solid #f3f4f6;
+            vertical-align: top;
+            color: #1f2937;
+            font-size: 0.875rem;
+        }
+
+        .simple-activity-table tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        .simple-activity-table small {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        /* Celdas específicas */
+        .date-cell {
+            min-width: 140px;
+        }
+
+        .date-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .date-info .date {
+            font-weight: 500;
+            color: #1f2937;
+            font-size: 0.875rem;
+        }
+
+        .date-info .time {
+            color: #6b7280;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .recent-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
             background: var(--info-gradient);
             color: white;
-            padding: 0.375rem 0.75rem;
-            border-radius: 16px;
-            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.6rem;
             font-weight: 500;
+            margin-top: 0.25rem;
             box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
         }
 
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: var(--success-gradient);
-            color: white;
-            border-radius: 20px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        .recent-badge i {
+            width: 10px;
+            height: 10px;
         }
 
-        /* Avatares de usuario */
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            background: var(--primary-gradient);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-            font-size: 0.875rem;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.3);
-            flex-shrink: 0;
+        .recent-activity-row {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 5%, transparent 5%);
+            border-left: 3px solid #0ea5e9;
         }
 
-        .user-info-enhanced {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            position: relative;
-        }
-
-        .user-details {
+        .user-info {
             display: flex;
             flex-direction: column;
             gap: 2px;
@@ -964,60 +1096,17 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             font-size: 0.75rem;
         }
 
-        /* Actividades recientes */
-        .recent-activity-row {
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 5%, transparent 5%);
-            border-left: 3px solid #0ea5e9;
-        }
-
-        .recent-badge {
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            background: var(--info-gradient);
-            color: white;
-            padding: 2px 6px;
-            border-radius: 8px;
-            font-size: 0.6rem;
-            font-weight: 500;
+        .company-info {
             display: flex;
             align-items: center;
-            gap: 2px;
-            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+            gap: 0.5rem;
+            color: #4f46e5;
+            font-weight: 500;
         }
 
-        .recent-badge i {
-            width: 10px;
-            height: 10px;
-        }
-
-        /* Headers con iconos */
-        .table-icon {
+        .company-icon {
             width: 16px;
             height: 16px;
-            margin-right: 0.5rem;
-            color: #6b7280;
-        }
-
-        .enhanced-activity-table th {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            padding: 1rem 0.75rem;
-            text-align: left;
-            font-weight: 600;
-            color: #374151;
-            font-size: 0.875rem;
-            border-bottom: 2px solid #e5e7eb;
-            white-space: nowrap;
-        }
-
-        .enhanced-activity-table td {
-            padding: 1rem 0.75rem;
-            border-bottom: 1px solid #f3f4f6;
-            vertical-align: middle;
-        }
-
-        .enhanced-activity-table tbody tr:hover {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
         }
 
         /* Badges de acciones mejorados */
@@ -1077,52 +1166,11 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             color: white;
         }
 
-        /* Datetime mejorado */
-        .enhanced-datetime {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            position: relative;
+        .action-view_activity_log {
+            background: var(--secondary-gradient);
+            color: white;
         }
 
-        .enhanced-datetime .date {
-            font-weight: 500;
-            color: #1f2937;
-            font-size: 0.875rem;
-        }
-
-        .enhanced-datetime .time {
-            color: #6b7280;
-            font-size: 0.75rem;
-            font-family: monospace;
-        }
-
-        .relative-time {
-            font-size: 0.7rem;
-            color: #8B4513;
-            font-weight: 500;
-            background: rgba(139, 69, 19, 0.1);
-            padding: 2px 6px;
-            border-radius: 8px;
-            align-self: flex-start;
-        }
-
-        /* Empresa info */
-        .company-info {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            color: #4f46e5;
-            font-weight: 500;
-        }
-
-        .company-icon {
-            width: 16px;
-            height: 16px;
-            color: #6b7280;
-        }
-
-        /* Descripción */
         .description-content {
             max-width: 300px;
             word-wrap: break-word;
@@ -1235,137 +1283,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             box-shadow: 0 6px 12px rgba(139, 69, 19, 0.4);
         }
 
-        /* Filtros mejorados */
-        .reports-filters {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .reports-filters::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
-        }
-
-        .reports-filters h3 {
-            margin: 0 0 1.5rem 0;
-            color: #1f2937;
-            font-size: 1.25rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .reports-filters h3::before {
-            content: '';
-            width: 24px;
-            height: 24px;
-            background: var(--primary-gradient);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .filters-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .filter-group label {
-            font-weight: 600;
-            font-size: 0.875rem;
-            color: #374151;
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
-        }
-
-        .filter-group label::before {
-            content: '';
-            width: 8px;
-            height: 8px;
-            background: var(--primary-gradient);
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .filter-group input,
-        .filter-group select {
-            padding: 0.75rem 1rem;
-            border: 2px solid #e5e7eb;
-            border-radius: 12px;
-            font-size: 0.875rem;
-            background: white;
-            transition: all 0.3s ease;
-            box-shadow: var(--soft-shadow);
-        }
-
-        .filter-group input:focus,
-        .filter-group select:focus {
-            border-color: #8B4513;
-            box-shadow: 0 0 0 4px rgba(139, 69, 19, 0.1);
-            transform: translateY(-1px);
-            outline: none;
-        }
-
-        /* Botones de exportación mejorados */
-        .export-section {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
-        }
-
-        .export-buttons {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .export-btn {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border: 2px solid #e5e7eb;
-            color: #374151;
-            padding: 0.875rem 1.5rem;
-            border-radius: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.3s ease;
-            box-shadow: var(--soft-shadow);
-        }
-
-        .export-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--soft-shadow-lg);
-            border-color: #8B4513;
-            color: #8B4513;
-        }
-
-        /* Modal PDF estilos mantenidos */
+        /* Modal PDF */
         .pdf-modal {
             position: fixed;
             top: 0;
@@ -1458,8 +1376,13 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         #pdfFrame {
@@ -1475,32 +1398,60 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             margin-top: 20px;
             padding-top: 15px;
             border-top: 1px solid #e5e7eb;
+            flex-wrap: wrap;
         }
 
-        .pdf-actions button {
-            padding: 10px 20px;
+        .pdf-actions .export-btn {
+            padding: 8px 16px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             font-weight: 500;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: #3b82f6;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            min-width: 100px;
+            justify-content: center;
             color: white;
         }
 
-        .btn-primary:hover {
-            background: #2563eb;
+        /* Botón Imprimir - marrón/gris oscuro */
+        .pdf-actions .export-btn:first-child {
+            background: #6b7280;
+        }
+
+        .pdf-actions .export-btn:first-child:hover {
+            background: #4b5563;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(107, 114, 128, 0.3);
+        }
+
+        /* Botón Descargar - verde */
+        .pdf-actions .export-btn:last-child {
+            background: #16a34a;
+        }
+
+        .pdf-actions .export-btn:last-child:hover {
+            background: #15803d;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(22, 163, 74, 0.3);
+        }
+
+        .pdf-actions .export-btn i {
+            width: 16px;
+            height: 16px;
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
 
         /* Animaciones suaves */
@@ -1509,6 +1460,7 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
                 opacity: 0;
                 transform: translateY(20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -1519,51 +1471,61 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             animation: fadeInUp 0.6s ease-out;
         }
 
-        .stat-card:nth-child(1) { animation-delay: 0.1s; }
-        .stat-card:nth-child(2) { animation-delay: 0.2s; }
-        .stat-card:nth-child(3) { animation-delay: 0.3s; }
-        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+        .stat-card:nth-child(1) {
+            animation-delay: 0.1s;
+        }
 
-        .enhanced-activity-table tbody tr {
+        .stat-card:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .stat-card:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+
+        .stat-card:nth-child(4) {
+            animation-delay: 0.4s;
+        }
+
+        .activity-table tbody tr {
             animation: fadeInUp 0.4s ease-out;
         }
 
-        /* Responsividad mejorada */
+        /* Responsividad */
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
                 gap: 1rem;
             }
-            
-            .stat-card {
-                padding: 1rem;
+
+            .filters-row {
+                grid-template-columns: 1fr;
+                gap: 1rem;
             }
-            
-            .stat-icon {
-                width: 50px;
-                height: 50px;
-            }
-            
-            .stat-number {
-                font-size: 1.5rem;
-            }
-            
-            .user-avatar {
-                width: 32px;
-                height: 32px;
-                font-size: 0.75rem;
-            }
-            
-            .enhanced-activity-table th:nth-child(3),
-            .enhanced-activity-table td:nth-child(3) {
-                display: none; /* Ocultar empresa en móvil */
-            }
-            
-            .table-actions {
+
+            .export-buttons {
                 flex-direction: column;
-                gap: 0.5rem;
             }
-            
+
+            .stat-card {
+                padding: 1.5rem;
+            }
+
+            .stat-icon {
+                width: 60px;
+                height: 60px;
+            }
+
+            .stat-number {
+                font-size: 2rem;
+            }
+
+            .simple-activity-table th:nth-child(3),
+            .simple-activity-table td:nth-child(3) {
+                display: none;
+                /* Ocultar empresa en móvil */
+            }
+
             .enhanced-pagination {
                 flex-direction: column;
                 gap: 1rem;
@@ -1574,16 +1536,340 @@ logActivity($currentUser['id'], 'view_activity_log', 'reports', null, 'Usuario a
             .stats-grid {
                 grid-template-columns: 1fr;
             }
-            
-            .enhanced-activity-table th:nth-child(5),
-            .enhanced-activity-table td:nth-child(5) {
-                display: none; /* Ocultar descripción en móvil pequeño */
+
+            .simple-activity-table th:nth-child(5),
+            .simple-activity-table td:nth-child(5) {
+                display: none;
+                /* Ocultar descripción en móvil pequeño */
             }
-            
-            .filters-row {
-                grid-template-columns: 1fr;
+
+            .reports-content {
+                padding: 1rem;
             }
+
+            .pdf-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .pdf-actions .export-btn {
+                width: 100%;
+                min-width: auto;
+            }
+        }
+
+        /* Efectos de hover mejorados */
+        .breadcrumb-link,
+        .export-btn,
+        .btn-empty-action {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .breadcrumb-link::before,
+        .export-btn::before,
+        .btn-empty-action::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .breadcrumb-link:hover::before,
+        .export-btn:hover::before,
+        .btn-empty-action:hover::before {
+            left: 100%;
+        }
+
+        /* Mejoras en accesibilidad */
+        .filter-group input:focus,
+        .filter-group select:focus,
+        .export-btn:focus,
+        .btn-empty-action:focus {
+            outline: 2px solid #8B4513;
+            outline-offset: 2px;
+        }
+
+        /* Animaciones de entrada para elementos dinámicos */
+        .stat-card,
+        .reports-filters,
+        .export-section,
+        .enhanced-table {
+            opacity: 0;
+            animation: slideInUp 0.6s ease-out forwards;
+        }
+
+        .stat-card:nth-child(1) {
+            animation-delay: 0.1s;
+        }
+
+        .stat-card:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .stat-card:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+
+        .stat-card:nth-child(4) {
+            animation-delay: 0.4s;
+        }
+
+        .reports-filters {
+            animation-delay: 0.5s;
+        }
+
+        .export-section {
+            animation-delay: 0.6s;
+        }
+
+        .enhanced-table {
+            animation-delay: 0.7s;
+        }
+
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Estilos para hacer activo el enlace de reportes en sidebar */
+        .sidebar .nav-item .nav-link[href*="reports"] {
+            color: var(--primary-color) !important;
+            background: rgba(212, 175, 55, 0.1) !important;
+            font-weight: 600 !important;
+        }
+
+        .sidebar .nav-item .nav-link[href*="reports"] i {
+            color: var(--primary-color) !important;
+        }
+
+        /* Indicadores adicionales para actividades recientes */
+        .recent-activity-row::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--info-gradient);
+            border-radius: 0 4px 4px 0;
+        }
+
+        /* Mejoras en la tabla de actividades */
+        .activity-table tbody tr {
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .activity-table tbody tr:hover {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            transform: translateX(2px);
+        }
+
+        /* Efectos de hover en las tarjetas de estadísticas */
+        .stat-card:hover .stat-icon {
+            transform: scale(1.05);
+        }
+
+        .stat-card:hover .stat-number {
+            transform: scale(1.02);
+        }
+
+        /* Indicadores de carga mejorados */
+        .loading-spinner {
+            position: relative;
+        }
+
+        .loading-spinner::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        /* Mejoras para badges de acciones */
+        .action-badge {
+            transition: all 0.2s ease;
+        }
+
+        .action-badge:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Tooltips para información adicional */
+        .user-info,
+        .date-info,
+        .action-badge {
+            position: relative;
+        }
+
+        /* Mejoras en el estado de carga */
+        .pdf-loading p {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        /* Estilos adicionales para navegación */
+        .breadcrumb-link i {
+            transition: transform 0.3s ease;
+        }
+
+        .breadcrumb-link:hover i {
+            transform: translateX(-2px);
+        }
+
+        /* Mejoras en la información de paginación */
+        .pagination-info i {
+            color: #8B4513;
+        }
+
+        /* Estados de focus mejorados */
+        .pagination-btn:focus {
+            outline: 2px solid #8B4513;
+            outline-offset: 2px;
+        }
+
+        /* Animaciones para elementos interactivos */
+        .action-badge,
+        .recent-badge {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        /* Mejoras específicas para el diseño responsive */
+        @media (max-width: 640px) {
+            .table-header {
+                padding: 1rem;
+            }
+
+            .table-header h3 {
+                font-size: 1.125rem;
+            }
+
+            .simple-activity-table th,
+            .simple-activity-table td {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.825rem;
+            }
+
+            .stat-icon {
+                width: 50px;
+                height: 50px;
+            }
+
+            .stat-icon i {
+                width: 24px;
+                height: 24px;
+            }
+
+            .stat-number {
+                font-size: 1.75rem;
+            }
+
+            .recent-badge {
+                font-size: 0.5rem;
+                padding: 0.125rem 0.375rem;
+            }
+        }
+
+        /* Efectos adicionales para mejorar la experiencia visual */
+        .reports-content>* {
+            opacity: 0;
+            animation: fadeInSequence 0.6s ease-out forwards;
+        }
+
+        .reports-nav-breadcrumb {
+            animation-delay: 0.1s;
+        }
+
+        .stats-grid {
+            animation-delay: 0.2s;
+        }
+
+        .reports-filters {
+            animation-delay: 0.3s;
+        }
+
+        .export-section {
+            animation-delay: 0.4s;
+        }
+
+        .enhanced-table {
+            animation-delay: 0.5s;
+        }
+
+        @keyframes fadeInSequence {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Mejoras finales en la consistencia visual */
+        .reports-filters,
+        .export-section,
+        .enhanced-table {
+            border: 1px solid rgba(139, 69, 19, 0.1);
+        }
+
+        .reports-filters h3,
+        .export-section h3,
+        .table-header h3 {
+            color: #8B4513;
+        }
+
+        /* Asegurar que los colores sean consistentes con documents_report */
+        .filter-group input:focus,
+        .filter-group select:focus {
+            border-color: #8B4513;
+            box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+        }
+
+        /* Estado final del diseño */
+        body.dashboard-layout {
+            background: #f8fafc;
+        }
+
+        .reports-content {
+            background: transparent;
+            padding: 2rem;
         }
     </style>
 </body>
+
 </html>

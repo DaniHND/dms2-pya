@@ -1,18 +1,61 @@
 <?php
 // modules/reports/user_reports.php
-// Reportes de usuarios - Versión corregida para errores
+// Reportes de usuarios - VERSION CON DISEÑO DE DOCUMENTS_REPORT
 
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
-// Verificar autenticación
-SessionManager::requireLogin();
-$currentUser = SessionManager::getCurrentUser();
+// Asegurar que las funciones de base de datos estén disponibles
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
 
-// Parámetros de filtrado
-$dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
-$dateTo = $_GET['date_to'] ?? date('Y-m-d');
-$selectedUserId = $_GET['user_id'] ?? '';
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+            
+            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $userAgent = substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 255);
+            
+            $stmt = $pdo->prepare($query);
+            return $stmt->execute([$userId, $action, $tableName, $recordId, $description, $ipAddress, $userAgent]);
+        } catch (Exception $e) {
+            error_log('Error in logActivity: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
 
 // Función helper para obtener nombre completo
 if (!function_exists('getFullName')) {
@@ -26,101 +69,142 @@ if (!function_exists('getFullName')) {
     }
 }
 
-// Obtener datos detallados de usuarios CON último acceso - CON VALIDACIÓN
-$usersData = [];
-try {
-    $whereClause = "WHERE u.status = 'active'";
-    $params = [];
-    
-    if ($currentUser['role'] !== 'admin') {
-        $whereClause .= " AND u.company_id = ? AND u.role != 'admin'";
-        $params[] = $currentUser['company_id'];
+// Verificar autenticación
+SessionManager::requireLogin();
+$currentUser = SessionManager::getCurrentUser();
+
+// Parámetros de filtrado
+$dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+$dateTo = $_GET['date_to'] ?? date('Y-m-d');
+$selectedUserId = $_GET['user_id'] ?? '';
+
+// Función para obtener usuarios con filtros de seguridad
+function getUsers($currentUser)
+{
+    try {
+        if ($currentUser['role'] === 'admin') {
+            $query = "SELECT id, username, first_name, last_name 
+                      FROM users 
+                      WHERE status = 'active' 
+                      ORDER BY first_name, last_name";
+            return fetchAll($query);
+        } else {
+            // Usuario normal NO puede ver administradores
+            $query = "SELECT id, username, first_name, last_name 
+                      FROM users 
+                      WHERE company_id = :company_id 
+                      AND status = 'active' 
+                      AND role != 'admin'
+                      ORDER BY first_name, last_name";
+            return fetchAll($query, ['company_id' => $currentUser['company_id']]);
+        }
+    } catch (Exception $e) {
+        error_log("Error obteniendo usuarios: " . $e->getMessage());
+        return [];
     }
-    
-    if (!empty($selectedUserId)) {
-        $whereClause .= " AND u.id = ?";
-        $params[] = $selectedUserId;
-    }
-    
-    // Consulta básica sin subconsultas complejas
-    $query = "SELECT 
-                u.id,
-                u.username,
-                u.first_name,
-                u.last_name,
-                u.email,
-                u.role,
-                u.created_at as registration_date,
-                COALESCE(c.name, 'Sin empresa') as company_name
-              FROM users u
-              LEFT JOIN companies c ON u.company_id = c.id
-              $whereClause
-              ORDER BY u.first_name, u.last_name";
-    
-    $result = fetchAll($query, $params);
-    
-    // VALIDAR QUE EL RESULTADO SEA UN ARRAY
-    $usersData = is_array($result) ? $result : [];
-    
-    // Si tenemos usuarios, ahora calculamos las estadísticas una por una de forma segura
-    if (!empty($usersData)) {
-        foreach ($usersData as $index => $user) {
-            
-            // Documentos subidos en el período (corregir campo: uploaded_by en vez de user_id)
-            try {
-                $docsResult = fetchOne("SELECT COUNT(*) as count FROM documents WHERE uploaded_by = ? AND created_at >= ? AND created_at <= ? AND status = 'active'", 
-                    [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
-                $usersData[$index]['documents_uploaded_period'] = $docsResult['count'] ?? 0;
-            } catch (Exception $e) {
-                $usersData[$index]['documents_uploaded_period'] = 0;
-            }
-            
-            // Total documentos (corregir campo: uploaded_by)
-            try {
-                $totalDocsResult = fetchOne("SELECT COUNT(*) as count FROM documents WHERE uploaded_by = ? AND status = 'active'", [$user['id']]);
-                $usersData[$index]['total_documents'] = $totalDocsResult['count'] ?? 0;
-            } catch (Exception $e) {
-                $usersData[$index]['total_documents'] = 0;
-            }
-            
-            // Descargas en el período (verificar si existe la tabla activity_logs)
-            try {
-                $downloadsResult = fetchOne("SELECT COUNT(*) as count FROM activity_logs WHERE user_id = ? AND action IN ('download', 'view_document') AND created_at >= ? AND created_at <= ?", 
-                    [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
-                $usersData[$index]['downloads_count'] = $downloadsResult['count'] ?? 0;
-            } catch (Exception $e) {
-                $usersData[$index]['downloads_count'] = 0;
-            }
-            
-            // Último acceso (verificar si existe la tabla activity_logs)
-            try {
-                $lastAccessResult = fetchOne("SELECT MAX(created_at) as last_access FROM activity_logs WHERE user_id = ? AND action IN ('login', 'view', 'access')", [$user['id']]);
-                if ($lastAccessResult && $lastAccessResult['last_access']) {
-                    $usersData[$index]['last_access'] = $lastAccessResult['last_access'];
-                } else {
-                    // Si no hay registros de actividad, usar la fecha de registro
+}
+
+// Función para obtener datos detallados de usuarios
+function getUsersData($currentUser, $dateFrom, $dateTo, $selectedUserId)
+{
+    try {
+        $whereClause = "WHERE u.status = 'active'";
+        $params = [];
+        
+        if ($currentUser['role'] !== 'admin') {
+            $whereClause .= " AND u.company_id = ? AND u.role != 'admin'";
+            $params[] = $currentUser['company_id'];
+        }
+        
+        if (!empty($selectedUserId)) {
+            $whereClause .= " AND u.id = ?";
+            $params[] = $selectedUserId;
+        }
+        
+        // Consulta básica sin subconsultas complejas
+        $query = "SELECT 
+                    u.id,
+                    u.username,
+                    u.first_name,
+                    u.last_name,
+                    u.email,
+                    u.role,
+                    u.created_at as registration_date,
+                    COALESCE(c.name, 'Sin empresa') as company_name
+                  FROM users u
+                  LEFT JOIN companies c ON u.company_id = c.id
+                  $whereClause
+                  ORDER BY u.first_name, u.last_name";
+        
+        $result = fetchAll($query, $params);
+        $usersData = is_array($result) ? $result : [];
+        
+        // Si tenemos usuarios, calculamos las estadísticas una por una
+        if (!empty($usersData)) {
+            foreach ($usersData as $index => $user) {
+                
+                // Documentos subidos en el período
+                try {
+                    $docsResult = fetchOne("SELECT COUNT(*) as count FROM documents WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND status = 'active'", 
+                        [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                    $usersData[$index]['documents_uploaded_period'] = $docsResult['count'] ?? 0;
+                } catch (Exception $e) {
+                    $usersData[$index]['documents_uploaded_period'] = 0;
+                }
+                
+                // Total documentos
+                try {
+                    $totalDocsResult = fetchOne("SELECT COUNT(*) as count FROM documents WHERE user_id = ? AND status = 'active'", [$user['id']]);
+                    $usersData[$index]['total_documents'] = $totalDocsResult['count'] ?? 0;
+                } catch (Exception $e) {
+                    $usersData[$index]['total_documents'] = 0;
+                }
+                
+                // Descargas en el período
+                try {
+                    $downloadsResult = fetchOne("SELECT COUNT(*) as count FROM activity_logs WHERE user_id = ? AND action IN ('download', 'view_document') AND created_at >= ? AND created_at <= ?", 
+                        [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                    $usersData[$index]['downloads_count'] = $downloadsResult['count'] ?? 0;
+                } catch (Exception $e) {
+                    $usersData[$index]['downloads_count'] = 0;
+                }
+                
+                // Último acceso
+                try {
+                    $lastAccessResult = fetchOne("SELECT MAX(created_at) as last_access FROM activity_logs WHERE user_id = ? AND action IN ('login', 'view', 'access')", [$user['id']]);
+                    if ($lastAccessResult && $lastAccessResult['last_access']) {
+                        $usersData[$index]['last_access'] = $lastAccessResult['last_access'];
+                    } else {
+                        $usersData[$index]['last_access'] = $user['registration_date'];
+                    }
+                } catch (Exception $e) {
                     $usersData[$index]['last_access'] = $user['registration_date'];
                 }
-            } catch (Exception $e) {
-                $usersData[$index]['last_access'] = $user['registration_date'];
-            }
-            
-            // Total actividades en el período
-            try {
-                $activitiesResult = fetchOne("SELECT COUNT(*) as count FROM activity_logs WHERE user_id = ? AND created_at >= ? AND created_at <= ?", 
-                    [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
-                $usersData[$index]['total_activities'] = $activitiesResult['count'] ?? 0;
-            } catch (Exception $e) {
-                $usersData[$index]['total_activities'] = 0;
+                
+                // Total actividades en el período
+                try {
+                    $activitiesResult = fetchOne("SELECT COUNT(*) as count FROM activity_logs WHERE user_id = ? AND created_at >= ? AND created_at <= ?", 
+                        [$user['id'], $dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                    $usersData[$index]['total_activities'] = $activitiesResult['count'] ?? 0;
+                } catch (Exception $e) {
+                    $usersData[$index]['total_activities'] = 0;
+                }
             }
         }
+        
+        return $usersData;
+        
+    } catch (Exception $e) {
+        error_log("Error obteniendo datos detallados: " . $e->getMessage());
+        return [];
     }
-    
-} catch (Exception $e) {
-    error_log("Error obteniendo datos detallados: " . $e->getMessage());
-    $usersData = [];
 }
-// Stats - CON VALIDACIONES
+
+// Obtener datos
+$users = getUsers($currentUser);
+$usersData = getUsersData($currentUser, $dateFrom, $dateTo, $selectedUserId);
+
+// Calcular estadísticas
 $totalUsers = is_array($usersData) ? count($usersData) : 0;
 
 $activeUsers = 0;
@@ -149,7 +233,7 @@ if (function_exists('logActivity')) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reportes de Usuarios - DMS2</title>
+    <title>Reporte de Usuarios - DMS2</title>
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
@@ -169,7 +253,7 @@ if (function_exists('logActivity')) {
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Reportes de Usuarios</h1>
+                <h1>Reporte de Usuarios</h1>
             </div>
 
             <div class="header-right">
@@ -190,20 +274,6 @@ if (function_exists('logActivity')) {
 
         <!-- Contenido de reportes -->
         <div class="reports-content">
-            <!-- Debug Info - TEMPORAL -->
-            <?php if (isset($_GET['debug'])): ?>
-                <div style="background: #f8f9fa; border: 1px solid #dee2e6; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
-                    <strong>Debug Info:</strong><br>
-                    Total usuarios: <?php echo count($users); ?><br>
-                    Total datos detallados: <?php echo count($usersData); ?><br>
-                    Usuario actual: <?php echo htmlspecialchars($currentUser['role']); ?><br>
-                    Fechas: <?php echo htmlspecialchars($dateFrom); ?> a <?php echo htmlspecialchars($dateTo); ?><br>
-                    <?php if (!empty($usersData)): ?>
-                        Primer usuario: <?php echo htmlspecialchars($usersData[0]['first_name'] ?? 'N/A'); ?><br>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
-
             <!-- Navegación de reportes -->
             <div class="reports-nav-breadcrumb">
                 <a href="index.php" class="breadcrumb-link">
@@ -212,7 +282,7 @@ if (function_exists('logActivity')) {
                 </a>
             </div>
 
-            <!-- Estadísticas generales -->
+            <!-- Estadísticas resumen -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon">
@@ -255,7 +325,7 @@ if (function_exists('logActivity')) {
                 </div>
             </div>
 
-            <!-- Filtros automáticos -->
+            <!-- Filtros de búsqueda -->
             <div class="reports-filters">
                 <h3>Filtros de Búsqueda</h3>
                 <div class="filters-row">
@@ -295,120 +365,94 @@ if (function_exists('logActivity')) {
                         <i data-feather="grid"></i>
                         Descargar Excel
                     </button>
-                    <button class="export-btn" onclick="exportarDatos('pdf')">
+                    <button class="export-btn pdf" onclick="exportarDatos('pdf')">
                         <i data-feather="file"></i>
                         Descargar PDF
                     </button>
                 </div>
             </div>
 
-            <!-- Tabla de usuarios detallada -->
-            <!-- Tabla de usuarios detallada CON CLASES DE ACTIVITY_LOG -->
-            <div class="activity-table-container">
-                <div class="activity-controls">
-                    <h3>
-                        <i data-feather="users"></i>
-                        Actividad de Usuarios
-                        <?php if ($selectedUserId): ?>
-                            <?php
-                            $selectedUser = array_filter($users, function ($u) use ($selectedUserId) {
-                                return $u['id'] == $selectedUserId;
-                            });
-                            $selectedUser = reset($selectedUser);
-                            if ($selectedUser) {
-                                echo ' - ' . htmlspecialchars($selectedUser['first_name'] . ' ' . $selectedUser['last_name']);
-                            }
-                            ?>
-                        <?php endif; ?>
-                    </h3>
-                    <div class="activity-info">
-                        <span class="record-count"><?php echo number_format($totalUsers); ?> usuarios</span>
-                    </div>
+            <!-- Tabla de usuarios -->
+            <div class="reports-table enhanced-table">
+                <div class="table-header">
+                    <h3><i data-feather="users"></i> Reporte de Usuarios (<?php echo number_format($totalUsers); ?> registros)</h3>
                 </div>
 
-                <div class="table-responsive">
-                    <table class="activity-table">
-                        <thead>
-                            <tr>
-                                <th>Nombre</th>
-                                <th>Usuario</th>
-                                <th>Email</th>
-                                <th>Empresa</th>
-                                <th>Rol</th>
-                                <th>Docs. Subidos</th>
-                                <th>Descargas</th>
-                                <th>Último Acceso</th>
-                                <th>Fecha Registro</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (!empty($usersData) && is_array($usersData)): ?>
+                <?php if (!empty($usersData) && is_array($usersData)): ?>
+                    <div class="table-container">
+                        <table class="data-table simple-users-table">
+                            <thead>
+                                <tr>
+                                    <th>Usuario</th>
+                                    <th>Email</th>
+                                    <?php if ($currentUser['role'] === 'admin'): ?>
+                                        <th>Empresa</th>
+                                    <?php endif; ?>
+                                    <th>Rol</th>
+                                    <th>Docs. Subidos</th>
+                                    <th>Descargas</th>
+                                    <th>Último Acceso</th>
+                                    <th>Fecha Registro</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                                 <?php foreach ($usersData as $user): ?>
                                     <tr>
                                         <td>
-                                            <div class="user-info">
-                                                <span class="user-name"><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></span>
-                                                <small class="username">@<?php echo htmlspecialchars($user['username']); ?></small>
-                                            </div>
+                                            <?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?>
+                                            <br><small>@<?php echo htmlspecialchars($user['username']); ?></small>
                                         </td>
                                         <td>
-                                            <code class="ip-address">@<?php echo htmlspecialchars($user['username']); ?></code>
+                                            <?php echo htmlspecialchars($user['email']); ?>
+                                        </td>
+                                        <?php if ($currentUser['role'] === 'admin'): ?>
+                                            <td>
+                                                <?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?>
+                                            </td>
+                                        <?php endif; ?>
+                                        <td>
+                                            <?php echo ucfirst($user['role']); ?>
                                         </td>
                                         <td>
-                                            <span class="company-name"><?php echo htmlspecialchars($user['email']); ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="company-name"><?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="action-badge action-<?php echo strtolower($user['role']); ?>">
-                                                <?php echo ucfirst($user['role']); ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div class="activity-details">
-                                                <span class="badge badge-info"><?php echo number_format($user['documents_uploaded_period'] ?? 0); ?></span>
-                                                <?php if (isset($user['total_documents']) && $user['total_documents'] > 0): ?>
-                                                    <small style="display: block; color: #666; font-size: 0.7rem; margin-top: 2px;">(<?php echo number_format($user['total_documents']); ?> total)</small>
-                                                <?php endif; ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="badge badge-success"><?php echo number_format($user['downloads_count'] ?? 0); ?></span>
-                                        </td>
-                                        <td>
-                                            <?php if (isset($user['last_access']) && $user['last_access'] && $user['last_access'] != $user['registration_date']): ?>
-                                                <div class="datetime-info">
-                                                    <span class="date"><?php echo date('d/m/Y', strtotime($user['last_access'])); ?></span>
-                                                    <small class="time"><?php echo date('H:i:s', strtotime($user['last_access'])); ?></small>
-                                                </div>
-                                            <?php else: ?>
-                                                <span class="text-muted">Sin acceso</span>
+                                            <?php echo number_format($user['documents_uploaded_period'] ?? 0); ?>
+                                            <?php if (isset($user['total_documents']) && $user['total_documents'] > 0): ?>
+                                                <br><small>(<?php echo number_format($user['total_documents']); ?> total)</small>
                                             <?php endif; ?>
                                         </td>
                                         <td>
-                                            <div class="datetime-info">
-                                                <span class="date"><?php echo date('d/m/Y', strtotime($user['registration_date'])); ?></span>
-                                                <small class="time"><?php echo date('H:i:s', strtotime($user['registration_date'])); ?></small>
-                                            </div>
+                                            <?php echo number_format($user['downloads_count'] ?? 0); ?>
+                                        </td>
+                                        <td>
+                                            <?php if (isset($user['last_access']) && $user['last_access'] && $user['last_access'] != $user['registration_date']): ?>
+                                                <?php echo date('d/m/Y H:i', strtotime($user['last_access'])); ?>
+                                            <?php else: ?>
+                                                Sin acceso
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php echo date('d/m/Y H:i', strtotime($user['registration_date'])); ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="9" class="empty-state">
-                                        <div class="empty-content">
-                                            <i data-feather="search"></i>
-                                            <h4>No se encontraron usuarios</h4>
-                                            <p>No hay usuarios que coincidan con los filtros seleccionados.</p>
-                                            <a href="user_reports.php" class="btn btn-primary">Ver todos los usuarios</a>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
+                            </tbody>
+                        </table>
+                    </div>
+
+                <?php else: ?>
+                    <div class="empty-state enhanced-empty-state">
+                        <div class="empty-content">
+                            <div class="empty-icon">
+                                <i data-feather="users"></i>
+                            </div>
+                            <h4>No se encontraron usuarios</h4>
+                            <p>No hay usuarios que coincidan con los filtros seleccionados.</p>
+                            <button class="btn-empty-action" onclick="autoFilter()">
+                                <i data-feather="refresh-cw"></i>
+                                Recargar datos
+                            </button>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </main>
@@ -448,7 +492,7 @@ if (function_exists('logActivity')) {
             }
         }
 
-        // Filtros automáticos sin botones
+        // Filtros automáticos
         document.addEventListener('change', function(e) {
             if (e.target.matches('#date_from, #date_to, #user_id')) {
                 autoFilter();
@@ -468,6 +512,7 @@ if (function_exists('logActivity')) {
             window.location.href = window.location.pathname + '?' + params.toString();
         }
 
+        // Exportación de datos
         function exportarDatos(formato) {
             const urlParams = new URLSearchParams(window.location.search);
             const exportUrl = 'export.php?format=' + formato + '&type=user_reports&modal=1&' + urlParams.toString();
@@ -486,20 +531,25 @@ if (function_exists('logActivity')) {
             modal.innerHTML = `
                 <div class="pdf-modal-content">
                     <div class="pdf-modal-header">
-                        <h3><i data-feather="users"></i> Reportes de Usuarios - PDF</h3>
+                        <h3><i data-feather="users"></i> Reporte de Usuarios - PDF</h3>
                         <button class="pdf-modal-close" onclick="cerrarModalPDF()">&times;</button>
                     </div>
                     <div class="pdf-modal-body">
                         <div class="pdf-preview-container">
                             <div class="pdf-loading">
                                 <div class="loading-spinner"></div>
-                                <p>Generando reporte PDF...</p>
+                                <p>Generando vista previa del PDF...</p>
                             </div>
                             <iframe id="pdfFrame" src="${url.replace('&modal=1', '')}" style="display: none;"></iframe>
                         </div>
                         <div class="pdf-actions">
-                            <button class="btn-primary" onclick="descargarPDF('${url.replace('&modal=1', '')}')">
-                                <i data-feather="download"></i> Descargar PDF
+                            <button class="export-btn" onclick="imprimirPDF()">
+                                <i data-feather="printer"></i>
+                                Imprimir
+                            </button>
+                            <button class="export-btn" onclick="descargarPDF('${url.replace('&modal=1', '')}')">
+                                <i data-feather="download"></i>
+                                Descargar PDF
                             </button>
                         </div>
                     </div>
@@ -524,6 +574,15 @@ if (function_exists('logActivity')) {
                     cerrarModalPDF();
                 }
             });
+        }
+
+        function imprimirPDF() {
+            const iframe = document.getElementById('pdfFrame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.print();
+            } else {
+                mostrarNotificacion('No se puede imprimir el documento', 'error');
+            }
         }
 
         function cerrarModalPDF() {
@@ -562,20 +621,48 @@ if (function_exists('logActivity')) {
         }
     </script>
 
-    <!-- CSS Incluido del mensaje anterior -->
     <style>
-        /* Todo el CSS del mensaje anterior va aquí */
+        /* Estilos específicos para el reporte de usuarios con diseño de documents_report */
         :root {
             --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
             --secondary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
             --success-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
             --warning-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
             --info-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+            --danger-gradient: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
             --soft-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
 
-        /* [Todo el resto del CSS del mensaje anterior] */
+        /* Navegación breadcrumb */
+        .reports-nav-breadcrumb {
+            margin-bottom: 2rem;
+        }
+
+        .breadcrumb-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            color: #374151;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .breadcrumb-link:hover {
+            background: var(--primary-gradient);
+            border-color: #8B4513;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--soft-shadow-lg);
+        }
+
+        /* Estadísticas estilo imagen proporcionada */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -584,104 +671,105 @@ if (function_exists('logActivity')) {
         }
 
         .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 2px solid #3b82f6;
             border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
+            padding: 2rem;
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
         }
 
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
+        .stat-card:nth-child(2) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(2)::before {
-            background: var(--info-gradient);
+        .stat-card:nth-child(3) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(3)::before {
-            background: var(--success-gradient);
-        }
-
-        .stat-card:nth-child(4)::before {
-            background: var(--warning-gradient);
+        .stat-card:nth-child(4) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
         .stat-card:hover {
             transform: translateY(-2px);
-            box-shadow: var(--soft-shadow-lg);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
         }
 
         .stat-icon {
-            width: 60px;
-            height: 60px;
-            background: var(--primary-gradient);
-            border-radius: 16px;
+            width: 80px;
+            height: 80px;
+            background: #3b82f6;
+            border-radius: 20px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             flex-shrink: 0;
-            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(2) .stat-icon {
-            background: var(--info-gradient);
-            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(3) .stat-icon {
-            background: var(--success-gradient);
-            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
         .stat-card:nth-child(4) .stat-icon {
-            background: var(--warning-gradient);
-            box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
+        }
+
+        .stat-icon i {
+            width: 40px;
+            height: 40px;
+            stroke-width: 1.5;
+        }
+
+        .stat-info {
+            flex: 1;
         }
 
         .stat-number {
-            font-size: 2rem;
+            font-size: 2.75rem;
             font-weight: 700;
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: #1e40af;
             line-height: 1;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
         }
 
-        .enhanced-table {
+        .stat-label {
+            color: #1e40af;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Filtros mejorados */
+        .reports-filters {
             background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
             border-radius: 16px;
-            box-shadow: var(--soft-shadow-lg);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--soft-shadow);
             border: 1px solid #e5e7eb;
-            overflow: hidden;
         }
 
-        .table-header {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            padding: 1.5rem;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .table-header h3 {
-            margin: 0;
+        .reports-filters h3 {
+            margin: 0 0 1.5rem 0;
             color: #1f2937;
             font-size: 1.25rem;
             font-weight: 600;
@@ -690,43 +778,155 @@ if (function_exists('logActivity')) {
             gap: 0.5rem;
         }
 
-        .table-header i {
+        .reports-filters h3::before {
+            content: '';
+            width: 24px;
+            height: 24px;
+            background: var(--primary-gradient);
+            border-radius: 8px;
+        }
+
+        .filters-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #374151;
+        }
+
+        .filter-group input,
+        .filter-group select {
+            padding: 0.75rem 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            background: white;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .filter-group input:focus,
+        .filter-group select:focus {
+            border-color: #8B4513;
+            box-shadow: 0 0 0 4px rgba(139, 69, 19, 0.1);
+            outline: none;
+        }
+
+        /* Sección de exportación */
+        .export-section {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--soft-shadow);
+            border: 1px solid #e5e7eb;
+        }
+
+        .export-section h3 {
+            margin: 0 0 1.5rem 0;
+            color: #1f2937;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .export-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .export-btn {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 2px solid #e5e7eb;
+            color: #374151;
+            padding: 0.875rem 1.5rem;
+            border-radius: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            box-shadow: var(--soft-shadow);
+        }
+
+        .export-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--soft-shadow-lg);
+            border-color: #8B4513;
             color: #8B4513;
         }
 
-        .status-indicator {
+        /* Tabla simple sin diseños decorativos */
+        .simple-users-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .simple-users-table th {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            padding: 1rem 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            font-size: 0.875rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .simple-users-table td {
+            padding: 1rem 0.75rem;
+            border-bottom: 1px solid #f3f4f6;
+            vertical-align: top;
+            color: #1f2937;
+            font-size: 0.875rem;
+        }
+
+        .simple-users-table tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        .simple-users-table small {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        
+
+        /* Celdas específicas para usuarios */
+        .user-cell {
+            min-width: 250px;
+            position: relative;
+        }
+
+        .user-info {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: var(--success-gradient);
-            color: white;
-            border-radius: 20px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+            gap: 0.75rem;
         }
 
         .user-avatar {
-            width: 40px;
-            height: 40px;
+            width: 50px;
+            height: 50px;
             background: var(--primary-gradient);
-            border-radius: 12px;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             font-weight: 600;
-            font-size: 0.875rem;
-            box-shadow: 0 2px 4px rgba(139, 69, 19, 0.3);
+            font-size: 1rem;
+            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
             flex-shrink: 0;
-        }
-
-        .user-info-enhanced {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            position: relative;
         }
 
         .user-details {
@@ -735,75 +935,73 @@ if (function_exists('logActivity')) {
             gap: 2px;
         }
 
-        .top-user-badge {
+        .user-name {
+            font-weight: 500;
+            color: #1f2937;
+            font-size: 0.95rem;
+        }
+
+        .username {
+            color: #6b7280;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+
+        .active-badge {
             position: absolute;
-            top: -5px;
-            right: -5px;
-            width: 20px;
-            height: 20px;
-            background: var(--warning-gradient);
-            border-radius: 50%;
+            top: 5px;
+            right: 5px;
+            background: var(--success-gradient);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.6rem;
+            font-weight: 500;
             display: flex;
             align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.75rem;
-            box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+            gap: 0.25rem;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
         }
 
-        .top-user-row {
-            background: linear-gradient(135deg, #fef3c7 0%, #fbbf24 5%, transparent 5%);
+        .active-badge i {
+            width: 10px;
+            height: 10px;
         }
 
-        .table-icon {
+        .active-user-row {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 5%, transparent 5%);
+            border-left: 3px solid #10b981;
+        }
+
+        .email-cell {
+            min-width: 200px;
+        }
+
+        .email-address {
+            color: #4f46e5;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .company-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #4f46e5;
+            font-weight: 500;
+        }
+
+        .company-icon {
             width: 16px;
             height: 16px;
-            margin-right: 0.5rem;
-            color: #6b7280;
         }
 
-        .enhanced-activity-table th {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            padding: 1rem 0.75rem;
-            text-align: left;
-            font-weight: 600;
-            color: #374151;
-            font-size: 0.875rem;
-            border-bottom: 2px solid #e5e7eb;
-            white-space: nowrap;
-        }
-
-        .enhanced-activity-table td {
-            padding: 1rem 0.75rem;
-            border-bottom: 1px solid #f3f4f6;
-            vertical-align: middle;
-        }
-
-        .enhanced-activity-table tbody tr:hover {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-        }
-
-        .username-badge {
-            background: rgba(139, 69, 19, 0.1);
-            color: #8B4513;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-family: monospace;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-
-        .company-name {
-            color: #374151;
-            font-weight: 500;
-            font-size: 0.875rem;
-        }
-
+        /* Badges de roles mejorados */
         .role-badge {
             display: inline-flex;
             align-items: center;
             gap: 0.375rem;
-            padding: 0.375rem 0.75rem;
+            padding: 0.5rem 0.875rem;
             border-radius: 20px;
             font-size: 0.75rem;
             font-weight: 500;
@@ -811,7 +1009,7 @@ if (function_exists('logActivity')) {
         }
 
         .role-admin {
-            background: var(--info-gradient);
+            background: var(--danger-gradient);
             color: white;
         }
 
@@ -825,31 +1023,8 @@ if (function_exists('logActivity')) {
             color: white;
         }
 
-        .badge-documents {
-            background: var(--info-gradient);
-            color: white;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.8rem;
-            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
-        }
-
-        .badge-downloads {
-            background: var(--success-gradient);
-            color: white;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.8rem;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
-        }
-
-        .total-documents {
-            display: block;
-            color: #6b7280;
-            font-size: 0.7rem;
-            margin-top: 2px;
+        .documents-cell {
+            min-width: 120px;
         }
 
         .documents-stats {
@@ -859,20 +1034,48 @@ if (function_exists('logActivity')) {
             gap: 2px;
         }
 
-        .enhanced-datetime {
+        .documents-badge {
+            background: var(--info-gradient);
+            color: white;
+            padding: 0.375rem 0.75rem;
+            border-radius: 16px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+        }
+
+        .total-documents {
+            color: #6b7280;
+            font-size: 0.7rem;
+            margin-top: 2px;
+        }
+
+        .downloads-badge {
+            background: var(--success-gradient);
+            color: white;
+            padding: 0.375rem 0.75rem;
+            border-radius: 16px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+
+        .date-info {
             display: flex;
             flex-direction: column;
             gap: 2px;
         }
 
-        .relative-time {
-            font-size: 0.7rem;
-            color: #8B4513;
+        .date-info .date {
             font-weight: 500;
-            background: rgba(139, 69, 19, 0.1);
-            padding: 2px 6px;
-            border-radius: 8px;
-            align-self: flex-start;
+            color: #1f2937;
+            font-size: 0.875rem;
+        }
+
+        .date-info .time {
+            color: #6b7280;
+            font-size: 0.75rem;
+            font-family: monospace;
         }
 
         .no-access {
@@ -883,6 +1086,12 @@ if (function_exists('logActivity')) {
             font-size: 0.8rem;
         }
 
+        .no-access i {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Estado vacío mejorado */
         .enhanced-empty-state {
             text-align: center;
             padding: 4rem 2rem;
@@ -926,112 +1135,6 @@ if (function_exists('logActivity')) {
         .btn-empty-action:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 12px rgba(139, 69, 19, 0.4);
-        }
-
-        .reports-filters {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .reports-filters::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
-        }
-
-        .reports-filters h3 {
-            margin: 0 0 1.5rem 0;
-            color: #1f2937;
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        .filters-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 1rem;
-        }
-
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .filter-group label {
-            font-weight: 500;
-            color: #374151;
-            font-size: 0.875rem;
-        }
-
-        .filter-group input,
-        .filter-group select {
-            padding: 0.75rem;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .filter-group input:focus,
-        .filter-group select:focus {
-            outline: none;
-            border-color: #8B4513;
-            box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
-        }
-
-        .export-section {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--soft-shadow);
-            border: 1px solid #e5e7eb;
-        }
-
-        .export-section h3 {
-            margin: 0 0 1.5rem 0;
-            color: #1f2937;
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        .export-buttons {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .export-btn {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border: 2px solid #e5e7eb;
-            color: #374151;
-            padding: 0.875rem 1.5rem;
-            border-radius: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.3s ease;
-            box-shadow: var(--soft-shadow);
-        }
-
-        .export-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--soft-shadow-lg);
-            border-color: #8B4513;
-            color: #8B4513;
         }
 
         /* Modal PDF */
@@ -1127,23 +1230,8 @@ if (function_exists('logActivity')) {
         }
 
         @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-
-            to {
-                opacity: 1;
-            }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         #pdfFrame {
@@ -1159,70 +1247,362 @@ if (function_exists('logActivity')) {
             margin-top: 20px;
             padding-top: 15px;
             border-top: 1px solid #e5e7eb;
+            flex-wrap: wrap;
         }
 
-        .pdf-actions button {
-            padding: 10px 20px;
+        .pdf-actions .export-btn {
+            padding: 8px 16px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             font-weight: 500;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: #3b82f6;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            min-width: 100px;
+            justify-content: center;
             color: white;
         }
 
-        .btn-primary:hover {
-            background: #2563eb;
+        /* Botón Imprimir - marrón/gris oscuro */
+        .pdf-actions .export-btn:first-child {
+            background: #6b7280;
         }
 
-        /* Responsive */
-        @media (max-width: 1200px) {
+        .pdf-actions .export-btn:first-child:hover {
+            background: #4b5563;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(107, 114, 128, 0.3);
+        }
 
-            .enhanced-activity-table th:nth-child(4),
-            .enhanced-activity-table td:nth-child(4) {
-                display: none;
+        /* Botón Descargar - verde */
+        .pdf-actions .export-btn:last-child {
+            background: #16a34a;
+        }
+
+        .pdf-actions .export-btn:last-child:hover {
+            background: #15803d;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(22, 163, 74, 0.3);
+        }
+
+        .pdf-actions .export-btn i {
+            width: 16px;
+            height: 16px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Animaciones suaves */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
 
-        @media (max-width: 968px) {
-
-            .enhanced-activity-table th:nth-child(7),
-            .enhanced-activity-table td:nth-child(7) {
-                display: none;
-            }
-
-            .enhanced-activity-table th:nth-child(8),
-            .enhanced-activity-table td:nth-child(8) {
-                display: none;
-            }
+        .stat-card {
+            animation: fadeInUp 0.6s ease-out;
         }
 
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+        .users-table tbody tr {
+            animation: fadeInUp 0.4s ease-out;
+        }
+
+        /* Responsividad */
         @media (max-width: 768px) {
-
-            .enhanced-activity-table th:nth-child(3),
-            .enhanced-activity-table td:nth-child(3) {
-                display: none;
-            }
-
-            .enhanced-activity-table th:nth-child(6),
-            .enhanced-activity-table td:nth-child(6) {
-                display: none;
-            }
-
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
                 gap: 1rem;
             }
 
+            .filters-row {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .export-buttons {
+                flex-direction: column;
+            }
+
             .stat-card {
+                padding: 1.5rem;
+            }
+
+            .stat-icon {
+                width: 60px;
+                height: 60px;
+            }
+
+            .stat-number {
+                font-size: 2rem;
+            }
+
+            .user-avatar {
+                width: 40px;
+                height: 40px;
+                font-size: 0.875rem;
+            }
+
+            .users-table th:nth-child(3),
+            .users-table td:nth-child(3) {
+                display: none; /* Ocultar empresa en móvil */
+            }
+
+            .users-table th:nth-child(6),
+            .users-table td:nth-child(6) {
+                display: none; /* Ocultar descargas en móvil */
+            }
+        }
+
+        @media (max-width: 480px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .users-table th:nth-child(7),
+            .users-table td:nth-child(7) {
+                display: none; /* Ocultar último acceso en móvil pequeño */
+            }
+
+            .users-table th:nth-child(8),
+            .users-table td:nth-child(8) {
+                display: none; /* Ocultar fecha registro en móvil pequeño */
+            }
+
+            .reports-content {
                 padding: 1rem;
+            }
+
+            .pdf-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .pdf-actions .export-btn {
+                width: 100%;
+                min-width: auto;
+            }
+        }
+
+        /* Efectos de hover mejorados */
+        .breadcrumb-link,
+        .export-btn,
+        .btn-empty-action {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .breadcrumb-link::before,
+        .export-btn::before,
+        .btn-empty-action::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .breadcrumb-link:hover::before,
+        .export-btn:hover::before,
+        .btn-empty-action:hover::before {
+            left: 100%;
+        }
+
+        /* Mejoras en accesibilidad */
+        .filter-group input:focus,
+        .filter-group select:focus,
+        .export-btn:focus,
+        .btn-empty-action:focus {
+            outline: 2px solid #8B4513;
+            outline-offset: 2px;
+        }
+
+        /* Animaciones de entrada para elementos dinámicos */
+        .stat-card,
+        .reports-filters,
+        .export-section,
+        .enhanced-table {
+            opacity: 0;
+            animation: slideInUp 0.6s ease-out forwards;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+        .reports-filters { animation-delay: 0.5s; }
+        .export-section { animation-delay: 0.6s; }
+        .enhanced-table { animation-delay: 0.7s; }
+
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Estilos para hacer activo el enlace de reportes en sidebar */
+        .sidebar .nav-item .nav-link[href*="reports"] {
+            color: var(--primary-color) !important;
+            background: rgba(212, 175, 55, 0.1) !important;
+            font-weight: 600 !important;
+        }
+
+        .sidebar .nav-item .nav-link[href*="reports"] i {
+            color: var(--primary-color) !important;
+        }
+
+        /* Indicadores adicionales para usuarios activos */
+        .active-user-row::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--success-gradient);
+            border-radius: 0 4px 4px 0;
+        }
+
+        /* Mejoras en la tabla de usuarios */
+        .users-table tbody tr {
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .users-table tbody tr:hover {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            transform: translateX(2px);
+        }
+
+        /* Efectos de hover en las tarjetas de estadísticas */
+        .stat-card:hover .stat-icon {
+            transform: scale(1.05);
+        }
+
+        .stat-card:hover .stat-number {
+            transform: scale(1.02);
+        }
+
+        /* Indicadores de carga mejorados */
+        .loading-spinner {
+            position: relative;
+        }
+
+        .loading-spinner::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        /* Mejoras para badges de roles */
+        .role-badge {
+            transition: all 0.2s ease;
+        }
+
+        .role-badge:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Mejoras en badges de documentos y descargas */
+        .documents-badge,
+        .downloads-badge {
+            transition: all 0.2s ease;
+        }
+
+        .documents-badge:hover,
+        .downloads-badge:hover {
+            transform: scale(1.05);
+        }
+
+        /* Estados de focus mejorados para elementos interactivos */
+        .user-avatar:focus,
+        .role-badge:focus,
+        .documents-badge:focus,
+        .downloads-badge:focus {
+            outline: 2px solid #8B4513;
+            outline-offset: 2px;
+        }
+
+        /* Mejoras en el estado de carga */
+        .pdf-loading p {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        /* Estilos adicionales para navegación */
+        .breadcrumb-link i {
+            transition: transform 0.3s ease;
+        }
+
+        .breadcrumb-link:hover i {
+            transform: translateX(-2px);
+        }
+
+        /* Animaciones para elementos interactivos */
+        .active-badge,
+        .role-badge,
+        .documents-badge,
+        .downloads-badge {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        /* Mejoras específicas para el diseño responsive */
+        @media (max-width: 640px) {
+            .table-header {
+                padding: 1rem;
+            }
+
+            .table-header h3 {
+                font-size: 1.125rem;
+            }
+
+            .users-table th,
+            .users-table td {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.825rem;
             }
 
             .stat-icon {
@@ -1230,8 +1610,18 @@ if (function_exists('logActivity')) {
                 height: 50px;
             }
 
+            .stat-icon i {
+                width: 24px;
+                height: 24px;
+            }
+
             .stat-number {
-                font-size: 1.5rem;
+                font-size: 1.75rem;
+            }
+
+            .active-badge {
+                font-size: 0.5rem;
+                padding: 0.125rem 0.375rem;
             }
 
             .user-avatar {
@@ -1241,46 +1631,131 @@ if (function_exists('logActivity')) {
             }
         }
 
-        @media (max-width: 580px) {
+        /* Efectos adicionales para mejorar la experiencia visual */
+        .reports-content > * {
+            opacity: 0;
+            animation: fadeInSequence 0.6s ease-out forwards;
+        }
 
-            .enhanced-activity-table th:nth-child(5),
-            .enhanced-activity-table td:nth-child(5) {
-                display: none;
+        .reports-nav-breadcrumb { animation-delay: 0.1s; }
+        .stats-grid { animation-delay: 0.2s; }
+        .reports-filters { animation-delay: 0.3s; }
+        .export-section { animation-delay: 0.4s; }
+        .enhanced-table { animation-delay: 0.5s; }
+
+        @keyframes fadeInSequence {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
             }
-
-            .enhanced-activity-table th:nth-child(9),
-            .enhanced-activity-table td:nth-child(9) {
-                display: none;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
 
-        @media (max-width: 480px) {
-            .pdf-modal-content {
-                width: 95%;
-                height: 95%;
-                margin: 2.5% auto;
-            }
+        /* Mejoras finales en la consistencia visual */
+        .reports-filters,
+        .export-section,
+        .enhanced-table {
+            border: 1px solid rgba(139, 69, 19, 0.1);
+        }
 
-            .pdf-modal-header,
-            .pdf-modal-body {
-                padding: 15px;
-            }
+        .reports-filters h3,
+        .export-section h3,
+        .table-header h3 {
+            color: #8B4513;
+        }
 
-            .pdf-modal-header h3 {
-                font-size: 1rem;
-            }
+        /* Asegurar que los colores sean consistentes con documents_report */
+        .filter-group input:focus,
+        .filter-group select:focus {
+            border-color: #8B4513;
+            box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+        }
 
-            .pdf-actions {
-                flex-direction: column;
-            }
+        /* Estado final del diseño */
+        body.dashboard-layout {
+            background: #f8fafc;
+        }
 
-            .pdf-actions button {
-                width: 100%;
-                justify-content: center;
+        .reports-content {
+            background: transparent;
+            padding: 2rem;
+        }
+
+        /* Mejoras adicionales para usuarios con muchos datos */
+        .user-info {
+            position: relative;
+        }
+
+        .user-cell:hover .user-avatar {
+            transform: scale(1.05);
+        }
+
+        /* Indicadores de estado para diferentes tipos de usuarios */
+        .role-admin .user-avatar {
+            background: var(--danger-gradient);
+            box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+        }
+
+        .role-manager .user-avatar {
+            background: var(--warning-gradient);
+            box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3);
+        }
+
+        .role-user .user-avatar {
+            background: var(--success-gradient);
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+        }
+
+        /* Mejoras en tooltips para información adicional */
+        .email-address,
+        .user-name,
+        .role-badge {
+            position: relative;
+        }
+
+        /* Estados hover mejorados para toda la fila */
+        .users-table tbody tr:hover .user-avatar {
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(139, 69, 19, 0.4);
+        }
+
+        .users-table tbody tr:hover .role-badge {
+            transform: scale(1.02);
+        }
+
+        .users-table tbody tr:hover .documents-badge,
+        .users-table tbody tr:hover .downloads-badge {
+            transform: scale(1.02);
+        }
+
+        /* Mejoras finales en la accesibilidad */
+        .users-table tbody tr:focus-within {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            outline: 2px solid #8B4513;
+            outline-offset: -2px;
+        }
+
+        /* Ajustes para pantallas muy pequeñas */
+        @media (max-width: 320px) {
+            .user-cell {
+                min-width: 180px;
+            }
+            
+            .user-avatar {
+                width: 28px;
+                height: 28px;
+                font-size: 0.7rem;
+            }
+            
+            .user-name {
+                font-size: 0.8rem;
+            }
+            
+            .username {
+                font-size: 0.7rem;
             }
         }
     </style>

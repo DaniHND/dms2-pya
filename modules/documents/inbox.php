@@ -1306,12 +1306,6 @@ if (!function_exists('logActivity')) {
            flex-direction: column;
            gap: 0.25rem;
            min-width: 160px
-
-
-
-
-
-
            }
 
        .filter-group label {

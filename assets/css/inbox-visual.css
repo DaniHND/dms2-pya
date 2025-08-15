@@ -303,9 +303,13 @@
    ==================================================================== */
 
 .content-header {
-    padding: var(--spacing-5) var(--spacing-6);
-    border-bottom: 1px solid #e2e8f0;
-    background: var(--bg-tertiary);
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-bottom: 1px solid #e5e7eb;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--soft-shadow);
 }
 
 .content-header h3 {

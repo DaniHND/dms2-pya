@@ -337,15 +337,14 @@ body {
 
 /* Header del contenido */
 .content-header {
-    background: var(--bg-primary);
-    padding: var(--spacing-6) var(--spacing-8);
-    border-bottom: 1px solid #e2e8f0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: sticky;
-    top: 0;
-    z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            height: 80px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 24px;
 }
 
 .header-left {

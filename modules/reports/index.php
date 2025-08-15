@@ -2,34 +2,79 @@
 require_once '../../config/session.php';
 require_once '../../config/database.php';
 
-SessionManager::requireLogin();
-$currentUser = SessionManager::getCurrentUser();
+// Asegurar que las funciones de base de datos estén disponibles
+if (!function_exists('fetchOne')) {
+    function fetchOne($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchOne: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+if (!function_exists('fetchAll')) {
+    function fetchAll($query, $params = []) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log('Error in fetchAll: ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+if (!function_exists('logActivity')) {
+    function logActivity($userId, $action, $tableName = null, $recordId = null, $description = null) {
+        try {
+            $database = new Database();
+            $pdo = $database->getConnection();
+            
+            $query = "INSERT INTO activity_logs (user_id, action, table_name, record_id, description, ip_address, user_agent, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+            
+            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $userAgent = substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 255);
+            
+            $stmt = $pdo->prepare($query);
+            return $stmt->execute([$userId, $action, $tableName, $recordId, $description, $ipAddress, $userAgent]);
+        } catch (Exception $e) {
+            error_log('Error in logActivity: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
 
 // Función helper para nombres completos
-function getFullName($firstName = null, $lastName = null)
-{
-    global $currentUser;
-
-    // Si no se pasan parámetros, usar el usuario actual
-    if ($firstName === null && $lastName === null) {
-        $firstName = $currentUser['first_name'] ?? '';
-        $lastName = $currentUser['last_name'] ?? '';
+if (!function_exists('getFullName')) {
+    function getFullName()
+    {
+        $currentUser = SessionManager::getCurrentUser();
+        if ($currentUser) {
+            return trim($currentUser['first_name'] . ' ' . $currentUser['last_name']);
+        }
+        return 'Usuario';
     }
-
-    return trim($firstName . ' ' . $lastName);
 }
 
-// Verificar permisos básicos
-if ($currentUser['role'] !== 'admin') {
-    // Aquí puedes agregar lógica de permisos si necesitas
-}
+SessionManager::requireLogin();
+$currentUser = SessionManager::getCurrentUser();
 
 // Función para obtener estadísticas generales
 function getReportStats($userId, $companyId, $role)
 {
     $stats = [];
 
-    // Total de actividades
+    // Total de actividades (últimos 30 días)
     if ($role === 'admin') {
         $query = "SELECT COUNT(*) as total FROM activity_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
         $params = [];
@@ -41,19 +86,6 @@ function getReportStats($userId, $companyId, $role)
     }
     $result = fetchOne($query, $params);
     $stats['activities_30_days'] = $result['total'] ?? 0;
-
-    // Actividades hoy
-    if ($role === 'admin') {
-        $query = "SELECT COUNT(*) as total FROM activity_logs WHERE DATE(created_at) = CURDATE()";
-        $params = [];
-    } else {
-        $query = "SELECT COUNT(*) as total FROM activity_logs al 
-                  LEFT JOIN users u ON al.user_id = u.id 
-                  WHERE u.company_id = :company_id AND DATE(al.created_at) = CURDATE()";
-        $params = ['company_id' => $companyId];
-    }
-    $result = fetchOne($query, $params);
-    $stats['activities_today'] = $result['total'] ?? 0;
 
     // Usuarios activos (últimos 7 días)
     if ($role === 'admin') {
@@ -71,12 +103,12 @@ function getReportStats($userId, $companyId, $role)
 
     // Documentos este mes
     if ($role === 'admin') {
-        $query = "SELECT COUNT(*) as total FROM documents WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        $query = "SELECT COUNT(*) as total FROM documents WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status = 'active'";
         $params = [];
     } else {
         $query = "SELECT COUNT(*) as total FROM documents d 
-                  LEFT JOIN users u ON d.uploaded_by = u.id 
-                  WHERE u.company_id = :company_id AND d.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                  LEFT JOIN users u ON d.user_id = u.id 
+                  WHERE u.company_id = :company_id AND d.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND d.status = 'active'";
         $params = ['company_id' => $companyId];
     }
     $result = fetchOne($query, $params);
@@ -117,8 +149,14 @@ function getChartData($userId, $role, $companyId, $days = 7)
 $stats = getReportStats($currentUser['id'], $currentUser['company_id'], $currentUser['role']);
 $chartData = getChartData($currentUser['id'], $currentUser['role'], $currentUser['company_id']);
 
+// Calcular días analizados y promedio diario
+$daysAnalyzed = 7;
+$dailyAverage = $stats['activities_30_days'] > 0 ? round($stats['activities_30_days'] / 30, 1) : 0;
+
 // Registrar acceso a reportes
-logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedió al módulo de reportes');
+if (function_exists('logActivity')) {
+    logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedió al módulo de reportes');
+}
 ?>
 
 <!DOCTYPE html>
@@ -131,11 +169,12 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="../../assets/css/reports.css">
+    <link rel="stylesheet" href="../../assets/css/modal.css">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
-<body class="dashboard-layout reports-page">
+<body class="dashboard-layout">
     <!-- Sidebar -->
     <?php include '../../includes/sidebar.php'; ?>
 
@@ -152,11 +191,11 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
 
             <div class="header-right">
                 <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars(trim($currentUser['first_name'] . ' ' . $currentUser['last_name'])); ?></div>
+                    <div class="user-name-header"><?php echo htmlspecialchars(getFullName()); ?></div>
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showSettings()">
+                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
                         <i data-feather="settings"></i>
                     </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
@@ -166,398 +205,307 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             </div>
         </header>
 
-        <!-- Contenido del dashboard de reportes -->
+        <!-- Contenido de reportes -->
         <div class="reports-content">
-        
-
-            <!-- Grid de estadísticas principales -->
-            <div class="stats-section">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-icon brown-stat">
-                                <i data-feather="activity"></i>
-                            </div>
-                            <div class="stat-info">
-                                <div class="stat-number"><?php echo number_format($stats['activities_30_days'] ?? 0); ?></div>
-                                <div class="stat-label">Total Actividades</div>
-                            </div>
-                        </div>
+            <!-- Estadísticas resumen -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="activity"></i>
                     </div>
-
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-icon blue-stat">
-                                <i data-feather="users"></i>
-                            </div>
-                            <div class="stat-info">
-                                <div class="stat-number"><?php echo number_format($stats['active_users'] ?? 0); ?></div>
-                                <div class="stat-label">Usuarios Activos</div>
-                            </div>
-                        </div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo number_format($stats['activities_30_days'] ?? 0); ?></div>
+                        <div class="stat-label">Total Actividades</div>
                     </div>
+                </div>
 
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-icon green-stat">
-                                <i data-feather="calendar"></i>
-                            </div>
-                            <div class="stat-info">
-                                <div class="stat-number">8</div>
-                                <div class="stat-label">Días Analizados</div>
-                            </div>
-                        </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="users"></i>
                     </div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo number_format($stats['active_users'] ?? 0); ?></div>
+                        <div class="stat-label">Usuarios Activos</div>
+                    </div>
+                </div>
 
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-icon orange-stat">
-                                <i data-feather="trending-up"></i>
-                            </div>
-                            <div class="stat-info">
-                                <div class="stat-number">8.4</div>
-                                <div class="stat-label">Promedio Diario</div>
-                            </div>
-                        </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="calendar"></i>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo number_format($daysAnalyzed); ?></div>
+                        <div class="stat-label">Días Analizados</div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i data-feather="trending-up"></i>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $dailyAverage; ?></div>
+                        <div class="stat-label">Promedio Diario</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Grid principal de reportes -->
-            <div class="reports-grid">
-                <!-- Navegación de tipos de reportes -->
-                <div class="reports-nav">
-                    <h3><i data-feather="filter"></i> Tipos de Reportes</h3>
-                    <div class="nav-buttons">
-                        <a href="activity_log.php" class="nav-btn">
-                            <i data-feather="list"></i>
-                            <span>Actividades</span>
-                        </a>
-                        <a href="user_reports.php" class="nav-btn">
-                            <i data-feather="users"></i>
-                            <span>Reportes por Usuario</span>
-                        </a>
-                        <a href="documents_report.php" class="nav-btn">
-                            <i data-feather="file-text"></i>
-                            <span>Reportes de Documentos</span>
-                        </a>
-                    </div>
-                </div>
+            <!-- Sección de navegación de reportes -->
+            <div class="reports-nav-section">
+                <h3>Tipos de Reportes</h3>
+                <div class="nav-buttons-grid">
+                    <a href="activity_log.php" class="nav-btn-card">
+                        <div class="nav-btn-content">
+                            <h4>Reporte de Actividades</h4>
+                            <p>Registro detallado de todas las acciones del sistema</p>
+                        </div>
+                        <div class="nav-btn-arrow">
+                            <i data-feather="chevron-right"></i>
+                        </div>
+                    </a>
 
-                <!-- Área principal con gráfico -->
-                <div class="charts-section">
+                    <a href="user_reports.php" class="nav-btn-card">
+
+                        <div class="nav-btn-content">
+                            <h4>Reporte de Usuarios</h4>
+                            <p>Estadísticas y actividad por usuario del sistema</p>
+                        </div>
+                        <div class="nav-btn-arrow">
+                            <i data-feather="chevron-right"></i>
+                        </div>
+                    </a>
+
+                    <a href="documents_report.php" class="nav-btn-card">
+
+                        <div class="nav-btn-content">
+                            <h4>Reporte de Documentos</h4>
+                            <p>Análisis completo de documentos y descargas</p>
+                        </div>
+                        <div class="nav-btn-arrow">
+                            <i data-feather="chevron-right"></i>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Gráfico de actividad -->
+            <div class="chart-section">
+                <div class="chart-card">
+                    <h3><i data-feather="bar-chart-2"></i> Actividad de los Últimos 7 Días</h3>
                     <div class="chart-container">
-                        <h3><i data-feather="bar-chart-2"></i> Actividad de los Últimos 7 Días</h3>
-                        <canvas id="activityChart" class="chart-canvas"></canvas>
+                        <canvas id="activityChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
     </main>
 
-    <!-- Scripts -->
     <script>
-        // Inicializar Feather Icons
-        feather.replace();
+        // Variables de configuración
+        var chartData = <?php echo json_encode($chartData ?? []); ?>;
 
-        // Función para actualizar la hora
+        // Inicializar página
+        document.addEventListener('DOMContentLoaded', function() {
+            feather.replace();
+            updateTime();
+            setInterval(updateTime, 1000);
+            initChart();
+        });
+
         function updateTime() {
-            const now = new Date();
-            const timeString = now.toLocaleString('es-ES', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
             const timeElement = document.getElementById('currentTime');
             if (timeElement) {
-                timeElement.textContent = timeString;
+                const now = new Date();
+                const timeString = now.toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                const dateString = now.toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                timeElement.textContent = `${dateString} ${timeString}`;
             }
         }
 
-        // Actualizar tiempo cada minuto
-        updateTime();
-        setInterval(updateTime, 60000);
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            if (window.innerWidth <= 768) {
+                sidebar.classList.toggle('active');
+            }
+        }
 
-        // Configuración del gráfico de actividad
-        const chartData = <?php echo json_encode($chartData ?? []); ?>;
-
-        if (chartData && chartData.length > 0) {
-            const ctx = document.getElementById('activityChart');
-            if (ctx) {
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: chartData.map(item => {
-                            const date = new Date(item.date);
-                            return date.toLocaleDateString('es-ES', {
-                                month: 'short',
-                                day: 'numeric'
-                            });
-                        }),
-                        datasets: [{
-                            label: 'Actividades',
-                            data: chartData.map(item => item.count),
-                            borderColor: '#8B4513',
-                            backgroundColor: 'rgba(139, 69, 19, 0.1)',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.4,
-                            pointBackgroundColor: '#8B4513',
-                            pointBorderColor: '#ffffff',
-                            pointBorderWidth: 2,
-                            pointRadius: 6,
-                            pointHoverRadius: 8
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                display: false
-                            },
-                            tooltip: {
-                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                titleColor: '#ffffff',
-                                bodyColor: '#ffffff',
-                                cornerRadius: 8,
-                                displayColors: false
-                            }
+        function initChart() {
+            if (chartData && chartData.length > 0) {
+                const ctx = document.getElementById('activityChart');
+                if (ctx) {
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: chartData.map(item => {
+                                const date = new Date(item.date);
+                                return date.toLocaleDateString('es-ES', {
+                                    month: 'short',
+                                    day: 'numeric'
+                                });
+                            }),
+                            datasets: [{
+                                label: 'Actividades',
+                                data: chartData.map(item => item.count),
+                                borderColor: '#8B4513',
+                                backgroundColor: 'rgba(139, 69, 19, 0.1)',
+                                borderWidth: 3,
+                                fill: true,
+                                tension: 0.4,
+                                pointBackgroundColor: '#8B4513',
+                                pointBorderColor: '#ffffff',
+                                pointBorderWidth: 2,
+                                pointRadius: 6,
+                                pointHoverRadius: 8
+                            }]
                         },
-                        scales: {
-                            x: {
-                                grid: {
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
                                     display: false
                                 },
-                                ticks: {
-                                    color: '#64748b'
+                                tooltip: {
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    titleColor: '#ffffff',
+                                    bodyColor: '#ffffff',
+                                    cornerRadius: 8,
+                                    displayColors: false,
+                                    callbacks: {
+                                        title: function(context) {
+                                            return context[0].label;
+                                        },
+                                        label: function(context) {
+                                            return `Actividades: ${context.parsed.y}`;
+                                        }
+                                    }
                                 }
                             },
-                            y: {
-                                beginAtZero: true,
-                                grid: {
-                                    color: 'rgba(0, 0, 0, 0.05)'
+                            scales: {
+                                x: {
+                                    grid: {
+                                        color: 'rgba(0, 0, 0, 0.1)'
+                                    },
+                                    ticks: {
+                                        color: '#6b7280'
+                                    }
                                 },
-                                ticks: {
-                                    color: '#64748b'
+                                y: {
+                                    beginAtZero: true,
+                                    grid: {
+                                        color: 'rgba(0, 0, 0, 0.1)'
+                                    },
+                                    ticks: {
+                                        color: '#6b7280',
+                                        stepSize: 1
+                                    }
                                 }
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
         }
 
-        // Función para toggle del sidebar
-        function toggleSidebar() {
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-
-            if (sidebar && mainContent) {
-                sidebar.classList.toggle('collapsed');
-                mainContent.classList.toggle('sidebar-collapsed');
-            }
-        }
-
-        // Función placeholder para "próximamente"
         function showComingSoon(feature) {
-            alert(`${feature} estará disponible próximamente.`);
+            alert(`${feature} - Próximamente`);
         }
     </script>
-    
+
     <style>
-        /* ===== VARIABLES DE COLORES PROFESIONALES ===== */
+        /* Estilos específicos para el índice de reportes con diseño de documents_report */
         :root {
-            /* Colores principales del sistema */
-            --primary-color: #8b4513;
-            --primary-hover: #a0522d;
-            --primary-light: #f5e6d3;
-            --secondary-color: #d4af37;
-            --secondary-hover: #b8860b;
-            --secondary-light: #faf0d9;
-            
-            /* Colores de estadísticas */
-            --brown-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
-            --blue-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-            --green-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
-            --orange-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
-            
-            /* Fondos */
-            --bg-primary: #ffffff;
-            --bg-secondary: #f8fafc;
-            --bg-tertiary: #f1f5f9;
-            
-            /* Texto */
-            --text-primary: #1f2937;
-            --text-secondary: #374151;
-            --text-muted: #6b7280;
-            
-            /* Grises profesionales */
-            --gray-50: #f9fafb;
-            --gray-100: #f3f4f6;
-            --gray-200: #e5e7eb;
-            --gray-300: #d1d5db;
-            --gray-400: #9ca3af;
-            --gray-500: #6b7280;
-            --gray-600: #4b5563;
-            --gray-700: #374151;
-            --gray-800: #1f2937;
-            
-            /* Sombras */
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --primary-gradient: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
+            --secondary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+            --success-gradient: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            --warning-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            --info-gradient: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+            --danger-gradient: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+            --soft-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
 
-        /* Layout principal */
-        .dashboard-layout {
-            background: var(--bg-secondary);
-        }
-
-        .reports-content {
-            padding: 24px;
-            background: transparent;
-        }
-
-        /* ===== HEADER SIN COLOR CAFÉ ===== */
-        .content-header {
-    padding: var(--spacing-5) var(--spacing-6);
-    border-bottom: 1px solid #e2e8f0;
-    background: var(--bg-tertiary);
-        }
-
-        /* Remover la línea café del header */
-        .content-header::before {
-            display: none;
-        }
-
-        /* ===== NOMBRE DE USUARIO EN NEGRO ===== */
-        .user-name-header {
-            color: var(--text-primary) !important;
-            font-weight: 600;
-        }
-
-        .current-time {
-            color: var(--text-muted);
-            font-size: 0.875rem;
-        }
-
-        /* ===== BOTONES DE HEADER PROFESIONALES ===== */
-        .btn-icon {
-            background: var(--gray-100);
-            border: 1px solid var(--gray-200);
-            border-radius: 8px;
-            padding: 8px;
-            color: var(--gray-700);
-            transition: all 0.2s ease;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .btn-icon:hover {
-            background: var(--gray-200);
-            border-color: var(--gray-300);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow);
-        }
-
-        .logout-btn {
-            background: #fee2e2;
-            border-color: #fecaca;
-            color: #dc2626;
-        }
-
-        .logout-btn:hover {
-            background: #fecaca;
-            border-color: #f87171;
-        }
-
-        /* ===== ESTADÍSTICAS ===== */
-        .stats-section {
-            margin-bottom: 32px;
-        }
-
+        /* Estadísticas estilo imagen proporcionada */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 24px;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
         }
 
         .stat-card {
-            background: var(--bg-primary);
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--gray-200);
-            transition: all 0.2s ease;
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 2px solid #3b82f6;
+            border-radius: 16px;
+            padding: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
         }
 
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--brown-gradient);
+        .stat-card:nth-child(2) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(2)::before {
-            background: var(--blue-gradient);
+        .stat-card:nth-child(3) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
-        .stat-card:nth-child(3)::before {
-            background: var(--green-gradient);
-        }
-
-        .stat-card:nth-child(4)::before {
-            background: var(--orange-gradient);
+        .stat-card:nth-child(4) {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: #3b82f6;
         }
 
         .stat-card:hover {
             transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .stat-header {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
         }
 
         .stat-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 12px;
+            width: 80px;
+            height: 80px;
+            background: #3b82f6;
+            border-radius: 20px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             flex-shrink: 0;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
-        .brown-stat {
-            background: var(--brown-gradient);
-            box-shadow: 0 4px 12px rgba(207, 130, 75, 0.3);
+        .stat-card:nth-child(2) .stat-icon {
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
-        .blue-stat {
-            background: var(--blue-gradient);
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        .stat-card:nth-child(3) .stat-icon {
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
-        .green-stat {
-            background: var(--green-gradient);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        .stat-card:nth-child(4) .stat-icon {
+            background: #3b82f6;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.25);
         }
 
-        .orange-stat {
-            background: var(--orange-gradient);
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        .stat-icon i {
+            width: 40px;
+            height: 40px;
+            stroke-width: 1.5;
         }
 
         .stat-info {
@@ -565,221 +513,269 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
         }
 
         .stat-number {
-            font-size: 2rem;
+            font-size: 2.75rem;
             font-weight: 700;
-            color: var(--text-primary);
+            color: #1e40af;
             line-height: 1;
-            margin-bottom: 4px;
+            margin-bottom: 0.5rem;
         }
 
         .stat-label {
-            color: var(--text-muted);
+            color: #1e40af;
             font-size: 0.875rem;
-            font-weight: 500;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
-        /* ===== NAVEGACIÓN DE REPORTES PROFESIONAL ===== */
-        .reports-nav {
-            background: var(--bg-primary);
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--gray-200);
-            position: relative;
-            overflow: hidden;
-            height: fit-content;
+        /* Sección de navegación de reportes */
+        .reports-nav-section {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--soft-shadow);
+            border: 1px solid #e5e7eb;
         }
 
-        .reports-nav h3 {
-            background: var(--gray-100);
-            color: var(--text-primary);
-            margin: 0 0 24px 0;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 1rem;
+        .reports-nav-section h3 {
+            margin: 0 0 1.5rem 0;
+            color: #1f2937;
+            font-size: 1.25rem;
             font-weight: 600;
             display: flex;
             align-items: center;
-            gap: 8px;
-            border: 1px solid var(--gray-200);
+            gap: 0.5rem;
         }
 
-        .nav-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
+        .reports-nav-section h3::before {
+            content: '';
+            width: 24px;
+            height: 24px;
+            background: var(--primary-gradient);
+            border-radius: 8px;
         }
 
-        /* ===== BOTONES PROFESIONALES SIN COLOR ===== */
-        .nav-btn {
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            border: 2px solid var(--gray-200);
-            border-radius: 10px;
-            padding: 16px 20px;
+        .nav-buttons-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .nav-btn-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 1.5rem;
             text-decoration: none;
-            font-weight: 500;
+            color: #374151;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 1rem;
             transition: all 0.3s ease;
-            box-shadow: var(--shadow-sm);
+            box-shadow: var(--soft-shadow);
             position: relative;
             overflow: hidden;
         }
 
-        .nav-btn:hover {
-            background: var(--gray-50);
-            border-color: var(--gray-300);
+        .nav-btn-card:hover {
             transform: translateY(-2px);
-            box-shadow: var(--shadow);
-            color: var(--text-primary);
+            box-shadow: var(--soft-shadow-lg);
+            border-color: #8B4513;
             text-decoration: none;
+            color: #374151;
         }
 
-        .nav-btn:active {
-            transform: translateY(0);
-        }
-
-        .nav-btn i {
-            width: 20px;
-            height: 20px;
-            flex-shrink: 0;
-        }
-
-        .nav-btn span {
-            font-size: 0.95rem;
-            letter-spacing: 0.025em;
-        }
-
-        /* Efecto hover sutil */
-        .nav-btn::before {
+        .nav-btn-card::before {
             content: '';
             position: absolute;
             top: 0;
             left: -100%;
             width: 100%;
             height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
             transition: left 0.5s;
         }
 
-        .nav-btn:hover::before {
+        .nav-btn-card:hover::before {
             left: 100%;
         }
 
-        /* ===== GRÁFICO SECTION ===== */
-        .charts-section {
-            background: var(--bg-primary);
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--gray-200);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .charts-section::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--blue-gradient);
-        }
-
-        .chart-container h3 {
-            color: var(--text-primary);
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin: 0 0 20px 0;
+        .nav-btn-icon {
+            width: 60px;
+            height: 60px;
+            background: var(--primary-gradient);
+            border-radius: 16px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: center;
+            color: white;
+            flex-shrink: 0;
+            box-shadow: 0 4px 8px rgba(139, 69, 19, 0.3);
         }
 
-        .chart-canvas {
-            background: var(--bg-secondary);
-            border-radius: 8px;
-            border: 1px solid var(--gray-200);
-            width: 100%;
-            height: 300px;
+        .nav-btn-card:nth-child(2) .nav-btn-icon {
+            background: var(--info-gradient);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
         }
 
-        /* ===== GRID LAYOUT ===== */
-        .reports-grid {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 24px;
+        .nav-btn-card:nth-child(3) .nav-btn-icon {
+            background: var(--success-gradient);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+         }
+
+        .nav-btn-icon i {
+            width: 30px;
+            height: 30px;
         }
 
-        /* ===== SIDEBAR ACTIVO REPORTES - MEJORADO ===== */
-        /* Aplicar solo al módulo de reportes */
-        body.reports-page .sidebar .nav-item .nav-link[href*="reports"] {
-            color: #D4AF37 !important;
-            background: rgba(212, 175, 55, 0.1) !important;
-            font-weight: 600 !important;
+        .nav-btn-content {
+            flex: 1;
         }
 
-        body.reports-page .sidebar .nav-item .nav-link[href*="reports"] i {
-            color: #D4AF37 !important;
+        .nav-btn-content h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1f2937;
         }
 
-        /* Asegurar que otros enlaces no se vean afectados */
-        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]) {
-            color: #94a3b8 !important;
-            background: transparent !important;
-            font-weight: 500 !important;
+        .nav-btn-content p {
+            margin: 0;
+            font-size: 0.875rem;
+            color: #6b7280;
+            line-height: 1.4;
         }
 
-        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]) i {
-            color: #94a3b8 !important;
+        .nav-btn-arrow {
+            color: #9ca3af;
+            transition: all 0.3s ease;
         }
 
-        /* Hover para enlaces no activos */
-        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]):hover {
-            color: #ffffff !important;
-            background: rgba(255, 255, 255, 0.1) !important;
+        .nav-btn-card:hover .nav-btn-arrow {
+            color: #13738bff;
+            transform: translateX(4px);
         }
 
-        body.reports-page .sidebar .nav-item .nav-link:not([href*="reports"]):hover i {
-            color: #ffffff !important;
+        .nav-btn-arrow i {
+            width: 20px;
+            height: 20px;
         }
 
-        /* ===== RESPONSIVE ===== */
+        /* Sección de gráfico */
+        .chart-section {
+            margin-bottom: 2rem;
+        }
+
+        .chart-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: var(--soft-shadow-lg);
+            border: 1px solid #e5e7eb;
+        }
+
+        .chart-card h3 {
+            margin: 0 0 1.5rem 0;
+            color: #1f2937;
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .chart-card h3 i {
+            color: #8B4513;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            background: #f8fafc;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            padding: 1rem;
+        }
+
+        /* Animaciones */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .stat-card {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+        .nav-btn-card {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .nav-btn-card:nth-child(1) { animation-delay: 0.5s; }
+        .nav-btn-card:nth-child(2) { animation-delay: 0.6s; }
+        .nav-btn-card:nth-child(3) { animation-delay: 0.7s; }
+
+        .chart-card {
+            animation: fadeInUp 0.6s ease-out;
+            animation-delay: 0.8s;
+        }
+
+        /* Responsividad */
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
-                gap: 16px;
+                gap: 1rem;
             }
 
-            .reports-grid {
+            .nav-buttons-grid {
                 grid-template-columns: 1fr;
-                gap: 16px;
+                gap: 1rem;
             }
 
             .stat-card {
-                padding: 16px;
-            }
-
-            .stat-header {
-                flex-direction: column;
-                text-align: center;
-                gap: 12px;
+                padding: 1.5rem;
             }
 
             .stat-icon {
+                width: 60px;
+                height: 60px;
+            }
+
+            .stat-number {
+                font-size: 2rem;
+            }
+
+            .nav-btn-card {
+                padding: 1.25rem;
+            }
+
+            .nav-btn-icon {
                 width: 50px;
                 height: 50px;
             }
 
-            .stat-number {
-                font-size: 1.5rem;
+            .nav-btn-content h4 {
+                font-size: 1rem;
             }
 
-            .nav-btn {
-                padding: 14px 16px;
+            .nav-btn-content p {
+                font-size: 0.8rem;
+            }
+
+            .chart-container {
+                height: 300px;
             }
         }
 
@@ -789,8 +785,211 @@ logActivity($currentUser['id'], 'view_reports', 'reports', null, 'Usuario accedi
             }
 
             .reports-content {
-                padding: 16px;
+                padding: 1rem;
             }
+
+            .stat-card {
+                padding: 1rem;
+            }
+
+            .stat-icon {
+                width: 50px;
+                height: 50px;
+            }
+
+            .stat-number {
+                font-size: 1.75rem;
+            }
+
+            .nav-btn-card {
+                flex-direction: column;
+                text-align: center;
+                gap: 1rem;
+            }
+
+            .nav-btn-arrow {
+                display: none;
+            }
+
+            .chart-container {
+                height: 250px;
+            }
+        }
+
+        /* Efectos de hover en las tarjetas de estadísticas */
+        .stat-card:hover .stat-icon {
+            transform: scale(1.05);
+        }
+
+        .stat-card:hover .stat-number {
+            transform: scale(1.02);
+        }
+
+        /* Efectos de hover en las tarjetas de navegación */
+        .nav-btn-card:hover .nav-btn-icon {
+            transform: scale(1.05);
+        }
+
+        .nav-btn-card:hover .nav-btn-content h4 {
+            color: #8B4513;
+        }
+
+        /* Estilos para hacer activo el enlace de reportes en sidebar */
+        .sidebar .nav-item .nav-link[href*="reports"] {
+            color: var(--primary-color) !important;
+            background: rgba(212, 175, 55, 0.1) !important;
+            font-weight: 600 !important;
+        }
+
+        .sidebar .nav-item .nav-link[href*="reports"] i {
+            color: var(--primary-color) !important;
+        }
+
+        /* Mejoras en accesibilidad */
+        .nav-btn-card:focus {
+            outline: 2px solid #8B4513;
+            outline-offset: 2px;
+        }
+
+        /* Indicadores de carga para el gráfico */
+        .chart-container canvas {
+            border-radius: 8px;
+        }
+
+        /* Animaciones de entrada para elementos dinámicos */
+        .reports-content > * {
+            opacity: 0;
+            animation: fadeInSequence 0.6s ease-out forwards;
+        }
+
+        .stats-grid { animation-delay: 0.1s; }
+        .reports-nav-section { animation-delay: 0.3s; }
+        .chart-section { animation-delay: 0.5s; }
+
+        @keyframes fadeInSequence {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Mejoras finales en la consistencia visual */
+        .reports-nav-section,
+        .chart-card {
+            border: 1px solid rgba(139, 69, 19, 0.1);
+        }
+
+        .reports-nav-section h3,
+        .chart-card h3 {
+            color: #8B4513;
+        }
+
+        /* Estado final del diseño */
+        body.dashboard-layout {
+            background: #f8fafc;
+        }
+
+        .reports-content {
+            background: transparent;
+            padding: 2rem;
+        }
+
+        /* Mejoras específicas para el gráfico */
+        .chart-container {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        }
+
+        /* Tooltips mejorados para los botones */
+        .nav-btn-card {
+            position: relative;
+        }
+
+        /* Estados de loading para datos dinámicos */
+        .stat-number {
+            transition: all 0.3s ease;
+        }
+
+        .stat-number:hover {
+            transform: scale(1.02);
+        }
+
+        /* Mejoras en la visualización del gráfico */
+        #activityChart {
+            border-radius: 8px;
+        }
+
+        /* Ajustes finales para pantallas muy pequeñas */
+        @media (max-width: 320px) {
+            .stat-card {
+                padding: 0.75rem;
+            }
+            
+            .stat-icon {
+                width: 40px;
+                height: 40px;
+            }
+            
+            .stat-number {
+                font-size: 1.5rem;
+            }
+            
+            .nav-btn-card {
+                padding: 1rem;
+            }
+        }
+
+        /* Efectos adicionales para mejorar la experiencia visual */
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 0;
+            height: 0;
+            border-left: 15px solid transparent;
+            border-top: 15px solid rgba(255, 255, 255, 0.2);
+            border-radius: 0 16px 0 0;
+        }
+
+        /* Animación de entrada para el contenido principal */
+        .reports-content {
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Sombras mejoradas para mayor profundidad visual */
+        .stat-card:hover,
+        .nav-btn-card:hover,
+        .chart-card:hover {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        /* Mejoras en la tipografía */
+        .stat-label,
+        .nav-btn-content p {
+            letter-spacing: 0.025em;
+        }
+
+        /* Transiciones suaves para todos los elementos interactivos */
+        .stat-card,
+        .nav-btn-card,
+        .chart-card,
+        .stat-icon,
+        .nav-btn-icon,
+        .nav-btn-arrow {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
     </style>
 
