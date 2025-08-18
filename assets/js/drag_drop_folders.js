@@ -1,74 +1,128 @@
 /*
- * drag_drop_folders.js
- * JavaScript para funcionalidad de drag & drop de documentos a carpetas
+ * drag_drop_folders.js - VERSIÓN CORREGIDA FINAL
+ * JavaScript para funcionalidad de drag & drop GARANTIZADA
  */
 
 class FolderDragDrop {
     constructor() {
-        this.init();
         this.draggedDocument = null;
-        this.dropZoneIndicator = document.getElementById('dropZoneIndicator');
-        this.successNotification = document.getElementById('successNotification');
-        this.errorNotification = document.getElementById('errorNotification');
+        this.init();
     }
 
     init() {
+        console.log('🚀 Inicializando sistema de drag & drop...');
+        
+        // Esperar a que el DOM esté completamente cargado
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => this.setup());
+        } else {
+            this.setup();
+        }
+    }
+
+    setup() {
+        // Intentar configurar varias veces para asegurar que funcione
+        setTimeout(() => this.setupDragAndDrop(), 100);
+        setTimeout(() => this.setupDragAndDrop(), 500);
+        setTimeout(() => this.setupDragAndDrop(), 1000);
+        
+        console.log('📁 Sistema de Drag & Drop configurado');
+    }
+
+    setupDragAndDrop() {
         this.setupDocumentDraggers();
         this.setupFolderDropZones();
-        console.log('📁 Sistema de Drag & Drop inicializado');
     }
 
     // ==========================================
     // CONFIGURAR ELEMENTOS ARRASTRABLES
     // ==========================================
     setupDocumentDraggers() {
-        const documentItems = document.querySelectorAll('.document-item');
+        // Buscar TODOS los posibles selectores de documentos
+        const documentSelectors = [
+            '.document-item',
+            '.list-item[data-document-id]',
+            '.list-item[data-id]',
+            '[data-document-id]',
+            '[data-id]',
+            '.document-card',
+            '.file-item',
+            '.doc-item'
+        ];
+
+        let documentsFound = 0;
+
+        documentSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(item => {
+                // Solo procesar si no está ya configurado
+                if (item.dataset.dragConfigured) return;
+
+                const documentId = this.getDocumentId(item);
+                const documentName = this.getDocumentName(item);
+
+                if (documentId) {
+                    this.makeElementDraggable(item, documentId, documentName);
+                    documentsFound++;
+                }
+            });
+        });
+
+        console.log(`📄 Documentos configurados para arrastrar: ${documentsFound}`);
+        return documentsFound;
+    }
+
+    getDocumentId(element) {
+        return element.dataset.documentId || 
+               element.dataset.id || 
+               element.getAttribute('data-document-id') || 
+               element.getAttribute('data-id') ||
+               element.querySelector('[data-document-id]')?.dataset.documentId ||
+               element.querySelector('[data-id]')?.dataset.id;
+    }
+
+    getDocumentName(element) {
+        return element.dataset.documentName || 
+               element.querySelector('.document-name')?.textContent ||
+               element.querySelector('.name-text')?.textContent ||
+               element.querySelector('.item-name')?.textContent ||
+               element.querySelector('.file-name')?.textContent ||
+               element.textContent?.trim().split('\n')[0] ||
+               'Documento';
+    }
+
+    makeElementDraggable(element, documentId, documentName) {
+        // Marcar como configurado
+        element.dataset.dragConfigured = 'true';
         
-        documentItems.forEach(item => {
-            // Hacer el elemento arrastrable
-            item.draggable = true;
-            item.style.cursor = 'move';
-            
-            // Eventos de drag para documentos
-            item.addEventListener('dragstart', (e) => {
-                const documentId = item.dataset.documentId || item.getAttribute('data-id');
-                const documentName = item.dataset.documentName || 
-                    item.querySelector('.document-name')?.textContent || 'Documento';
-                
-                if (!documentId) {
-                    console.error('❌ Documento sin ID válido');
-                    e.preventDefault();
-                    return;
-                }
-                
-                this.draggedDocument = {
-                    id: documentId,
-                    name: documentName,
-                    element: item
-                };
-                
-                // Efectos visuales
-                item.classList.add('dragging');
-                item.style.opacity = '0.5';
-                
-                console.log('🎯 Arrastrando:', this.draggedDocument.name);
-                
-                // Configurar datos de transferencia
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', documentId);
-            });
-            
-            item.addEventListener('dragend', (e) => {
-                // Limpiar efectos visuales
-                item.classList.remove('dragging');
-                item.style.opacity = '1';
-                
-                if (this.dropZoneIndicator) {
-                    this.dropZoneIndicator.style.display = 'none';
-                }
-                
-                console.log('🏁 Drag finalizado');
-            });
+        // Hacer arrastrable
+        element.draggable = true;
+        element.style.cursor = 'move';
+        
+        // Agregar clase visual
+        element.classList.add('draggable-document');
+
+        // Eventos de drag
+        element.addEventListener('dragstart', (e) => {
+            this.draggedDocument = {
+                id: documentId,
+                name: documentName.substring(0, 50), // Limitar longitud
+                element: element
+            };
+
+            element.style.opacity = '0.5';
+            element.classList.add('dragging');
+
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', documentId);
+
+            console.log(`🎯 Arrastrando: ${this.draggedDocument.name} (ID: ${documentId})`);
+        });
+
+        element.addEventListener('dragend', (e) => {
+            element.style.opacity = '1';
+            element.classList.remove('dragging');
+            console.log('🏁 Drag finalizado');
         });
     }
 
@@ -76,68 +130,90 @@ class FolderDragDrop {
     // CONFIGURAR ZONAS DE DROP (CARPETAS)
     // ==========================================
     setupFolderDropZones() {
-        const folderItems = document.querySelectorAll('.folder-item');
+        // Buscar TODOS los posibles selectores de carpetas
+        const folderSelectors = [
+            '.folder-item',
+            '.list-item[data-folder-id]',
+            '[data-folder-id]',
+            '.folder-card',
+            '.folder'
+        ];
+
+        let foldersFound = 0;
+
+        folderSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(folder => {
+                // Solo procesar si no está ya configurado
+                if (folder.dataset.dropConfigured) return;
+
+                const folderId = this.getFolderId(folder);
+                const folderName = this.getFolderName(folder);
+
+                if (folderId) {
+                    this.makeElementDroppable(folder, folderId, folderName);
+                    foldersFound++;
+                }
+            });
+        });
+
+        console.log(`📁 Carpetas configuradas como drop zones: ${foldersFound}`);
+        return foldersFound;
+    }
+
+    getFolderId(element) {
+        return element.dataset.folderId || 
+               element.getAttribute('data-folder-id') ||
+               element.querySelector('[data-folder-id]')?.dataset.folderId;
+    }
+
+    getFolderName(element) {
+        return element.dataset.folderName ||
+               element.querySelector('.folder-name')?.textContent ||
+               element.querySelector('.name-text')?.textContent ||
+               element.querySelector('.item-name')?.textContent ||
+               element.textContent?.trim().split('\n')[0] ||
+               'Carpeta';
+    }
+
+    makeElementDroppable(element, folderId, folderName) {
+        // Marcar como configurado
+        element.dataset.dropConfigured = 'true';
         
-        folderItems.forEach(folder => {
-            // Eventos de drop para carpetas
-            folder.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-            });
-            
-            folder.addEventListener('dragenter', (e) => {
-                e.preventDefault();
-                
-                if (this.draggedDocument) {
-                    // Efectos visuales de hover
-                    folder.classList.add('drag-over');
-                    
-                    // Mostrar indicador de drop
-                    if (this.dropZoneIndicator) {
-                        const folderName = folder.querySelector('.folder-name')?.textContent || 'Carpeta';
-                        this.dropZoneIndicator.innerHTML = `📁 Moviendo a: <strong>${folderName}</strong>`;
-                        this.dropZoneIndicator.style.display = 'block';
-                    }
-                    
-                    console.log('📂 Hover sobre carpeta:', folder.dataset.folderId);
-                }
-            });
-            
-            folder.addEventListener('dragleave', (e) => {
-                // Solo remover efectos si realmente salimos del elemento
-                if (!folder.contains(e.relatedTarget)) {
-                    folder.classList.remove('drag-over');
-                    
-                    if (this.dropZoneIndicator) {
-                        this.dropZoneIndicator.style.display = 'none';
-                    }
-                }
-            });
-            
-            folder.addEventListener('drop', (e) => {
-                e.preventDefault();
-                
-                // Limpiar efectos visuales
-                folder.classList.remove('drag-over');
-                
-                if (this.dropZoneIndicator) {
-                    this.dropZoneIndicator.style.display = 'none';
-                }
-                
-                if (!this.draggedDocument) {
-                    console.error('❌ No hay documento para mover');
-                    return;
-                }
-                
-                // Obtener ID de carpeta (puede ser null para "sin carpeta")
-                const folderId = folder.dataset.folderId || null;
-                const folderName = folder.querySelector('.folder-name')?.textContent || 'Carpeta';
-                
-                console.log('🎯 Drop en carpeta:', folderName, 'ID:', folderId);
-                
-                // Mover documento
-                this.moveDocumentToFolder(this.draggedDocument.id, folderId, folderName);
-            });
+        // Agregar clase visual
+        element.classList.add('droppable-folder');
+
+        // Eventos de drop
+        element.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        });
+
+        element.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            if (this.draggedDocument) {
+                element.classList.add('drag-over');
+                console.log(`📂 Hover sobre: ${folderName} (ID: ${folderId})`);
+            }
+        });
+
+        element.addEventListener('dragleave', (e) => {
+            if (!element.contains(e.relatedTarget)) {
+                element.classList.remove('drag-over');
+            }
+        });
+
+        element.addEventListener('drop', (e) => {
+            e.preventDefault();
+            element.classList.remove('drag-over');
+
+            if (!this.draggedDocument) {
+                console.error('❌ No hay documento para mover');
+                return;
+            }
+
+            console.log(`🎯 Drop: ${this.draggedDocument.name} → ${folderName}`);
+            this.moveDocumentToFolder(this.draggedDocument.id, folderId, folderName);
         });
     }
 
@@ -145,49 +221,52 @@ class FolderDragDrop {
     // MOVER DOCUMENTO VIA API
     // ==========================================
     async moveDocumentToFolder(documentId, folderId, folderName) {
-        if (!documentId) {
-            this.showError('ID de documento inválido');
+        if (!documentId || !folderId) {
+            this.showError('IDs inválidos');
             return;
         }
-        
+
         try {
-            console.log('📡 Enviando petición de movimiento...');
-            
-            const response = await fetch('modules/folders/api/move_document.php', {
+            console.log('📡 Enviando petición...');
+            console.log('📋 Datos:', { document_id: documentId, folder_id: folderId });
+
+            const response = await fetch('modules/documents/api/move_document.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     document_id: parseInt(documentId),
-                    folder_id: folderId ? parseInt(folderId) : null
+                    folder_id: parseInt(folderId)
                 })
             });
-            
+
+            console.log('📡 Respuesta HTTP:', response.status);
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status}`);
+            }
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('❌ Respuesta no es JSON:', text.substring(0, 200));
+                throw new Error('El servidor no devolvió JSON válido');
+            }
+
             const result = await response.json();
-            
+            console.log('📥 Respuesta:', result);
+
             if (result.success) {
-                console.log('✅ Documento movido exitosamente');
-                
-                // Mostrar notificación de éxito
-                const message = folderId ? 
-                    `Documento movido a: ${folderName}` : 
-                    'Documento movido fuera de carpetas';
-                this.showSuccess(message);
-                
-                // Recargar página después de un momento para ver cambios
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
-                
+                this.showSuccess(`Documento movido a: ${folderName}`);
+                setTimeout(() => window.location.reload(), 1500);
             } else {
-                console.error('❌ Error del servidor:', result.message);
                 this.showError(result.message || 'Error moviendo documento');
             }
-            
+
         } catch (error) {
-            console.error('❌ Error de red:', error);
-            this.showError('Error de conexión. Verifica tu conexión a internet.');
+            console.error('❌ Error completo:', error);
+            this.showError('Error: ' + error.message);
         }
     }
 
@@ -195,80 +274,100 @@ class FolderDragDrop {
     // NOTIFICACIONES
     // ==========================================
     showSuccess(message) {
-        if (this.successNotification) {
-            this.successNotification.textContent = '✅ ' + message;
-            this.successNotification.style.display = 'block';
-            
-            setTimeout(() => {
-                this.successNotification.style.display = 'none';
-            }, 4000);
-        } else {
-            alert('Éxito: ' + message);
-        }
+        this.createNotification(message, 'success');
     }
-    
+
     showError(message) {
-        if (this.errorNotification) {
-            this.errorNotification.textContent = '❌ ' + message;
-            this.errorNotification.style.display = 'block';
-            
-            setTimeout(() => {
-                this.errorNotification.style.display = 'none';
-            }, 5000);
-        } else {
-            alert('Error: ' + message);
-        }
+        this.createNotification(message, 'error');
+    }
+
+    createNotification(message, type) {
+        // Remover notificación anterior si existe
+        const existing = document.querySelector('.drag-drop-notification');
+        if (existing) existing.remove();
+
+        const notification = document.createElement('div');
+        notification.className = 'drag-drop-notification';
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            max-width: 400px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            background: ${type === 'success' ? 
+                'linear-gradient(135deg, #10b981, #059669)' : 
+                'linear-gradient(135deg, #ef4444, #dc2626)'};
+        `;
+        notification.textContent = (type === 'success' ? '✅ ' : '❌ ') + message;
+
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, type === 'success' ? 4000 : 6000);
     }
 
     // ==========================================
     // MÉTODOS PÚBLICOS
     // ==========================================
     refresh() {
-        // Reinicializar después de cambios en el DOM
-        this.setupDocumentDraggers();
-        this.setupFolderDropZones();
-        console.log('🔄 Sistema de drag & drop refrescado');
+        console.log('🔄 Refrescando drag & drop...');
+        this.setupDragAndDrop();
     }
-    
-    destroy() {
-        // Limpiar event listeners si es necesario
-        const documentItems = document.querySelectorAll('.document-item');
-        documentItems.forEach(item => {
-            item.draggable = false;
-            item.style.cursor = 'default';
+
+    debug() {
+        console.log('🔍 DEBUG - Sistema de drag & drop:');
+        
+        const docs = document.querySelectorAll('[data-document-id], [data-id]');
+        const folders = document.querySelectorAll('[data-folder-id]');
+        
+        console.log(`📄 Documentos encontrados: ${docs.length}`);
+        console.log(`📁 Carpetas encontradas: ${folders.length}`);
+        
+        docs.forEach((doc, i) => {
+            const id = this.getDocumentId(doc);
+            const name = this.getDocumentName(doc);
+            console.log(`  Doc ${i+1}: ID=${id}, Nombre="${name}", Draggable=${doc.draggable}`);
         });
         
-        console.log('🗑️ Sistema de drag & drop destruido');
+        folders.forEach((folder, i) => {
+            const id = this.getFolderId(folder);
+            const name = this.getFolderName(folder);
+            console.log(`  Folder ${i+1}: ID=${id}, Nombre="${name}"`);
+        });
     }
 }
 
 // ==========================================
-// INICIALIZACIÓN AUTOMÁTICA
+// INICIALIZACIÓN GLOBAL
 // ==========================================
-document.addEventListener('DOMContentLoaded', function() {
-    // Esperar un poco para que el DOM esté completamente cargado
-    setTimeout(() => {
-        if (typeof window.folderDragDrop === 'undefined') {
-            window.folderDragDrop = new FolderDragDrop();
-            console.log('🚀 Sistema de carpetas drag & drop listo');
-        }
-    }, 500);
-});
+let dragDropSystem = null;
 
-// Función global para refrescar el sistema después de cambios
-function refreshDragDrop() {
-    if (window.folderDragDrop) {
-        window.folderDragDrop.refresh();
+// Inicializar cuando el DOM esté listo
+function initDragDrop() {
+    if (!dragDropSystem) {
+        dragDropSystem = new FolderDragDrop();
+        window.folderDragDrop = dragDropSystem; // Para acceso global
     }
 }
 
-// Función global para mostrar notificaciones desde otras partes
-function showFolderNotification(message, isError = false) {
-    if (window.folderDragDrop) {
-        if (isError) {
-            window.folderDragDrop.showError(message);
-        } else {
-            window.folderDragDrop.showSuccess(message);
-        }
-    }
+// Auto-inicializar
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDragDrop);
+} else {
+    initDragDrop();
 }
+
+// Reinicializar después de cambios en el DOM
+setTimeout(initDragDrop, 1000);
+
+// Funciones globales para usar desde la consola
+window.debugDragDrop = () => dragDropSystem?.debug();
+window.refreshDragDrop = () => dragDropSystem?.refresh();

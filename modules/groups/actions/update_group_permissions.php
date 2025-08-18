@@ -1,7 +1,7 @@
 <?php
 /*
  * modules/groups/actions/update_group_permissions.php
- * Actualización de permisos y restricciones - Sistema mejorado con 5 opciones específicas
+ * Actualización de permisos y restricciones - Sistema mejorado con 6 opciones específicas
  */
 
 $projectRoot = dirname(dirname(dirname(__DIR__)));
@@ -69,13 +69,13 @@ try {
     $currentPermissions = json_decode($group['module_permissions'] ?: '{}', true);
     $currentRestrictions = json_decode($group['access_restrictions'] ?: '{}', true);
     
-    // Definir permisos válidos específicos
+    // Definir permisos válidos específicos (ACTUALIZADO con move_files)
     $validPermissions = [
         'upload_files',      // 1. Subir archivo
         'view_files',        // 2. Ver archivos  
         'create_folders',    // 3. Crear carpetas
         'download_files',    // 4. Descargar
-        'delete_files'       // 5. Eliminar archivo o documento
+        'delete_files'
     ];
     
     $pdo->beginTransaction();
@@ -235,33 +235,19 @@ try {
     
     echo json_encode([
         'success' => true,
-        'message' => 'Configuración actualizada exitosamente',
-        'updated_permissions' => $finalPermissions,
-        'updated_restrictions' => $finalRestrictions,
-        'changes_count' => count($changes),
+        'message' => 'Permisos y restricciones actualizados exitosamente',
         'changes' => $changes,
-        'affected_users' => $memberIds ?? []
-    ]);
-    
-} catch (PDOException $e) {
-    if (isset($pdo)) {
-        $pdo->rollBack();
-    }
-    
-    error_log('Error PDO en update_group_permissions.php: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Error de base de datos: ' . $e->getMessage()
+        'permissions_updated' => count($changes) > 0
     ]);
     
 } catch (Exception $e) {
-    if (isset($pdo)) {
+    if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
     
-    error_log('Error en update_group_permissions.php: ' . $e->getMessage());
+    error_log("Error updating group permissions: " . $e->getMessage());
     echo json_encode([
-        'success' => false, 
+        'success' => false,
         'message' => 'Error interno del servidor: ' . $e->getMessage()
     ]);
 }

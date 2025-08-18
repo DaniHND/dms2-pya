@@ -47,13 +47,14 @@ try {
     $permissions = json_decode($group['module_permissions'] ?: '{}', true);
     $restrictions = json_decode($group['access_restrictions'] ?: '{}', true);
 
-    // Normalizar permisos para las 5 opciones específicas
+    // Normalizar permisos para las 6 opciones específicas (AGREGADO move_files)
     $defaultPermissions = [
         'upload_files' => false,
         'view_files' => false,
         'create_folders' => false,
         'download_files' => false,
-        'delete_files' => false
+        'delete_files' => false,
+        'move_files' => false
     ];
 
     foreach ($defaultPermissions as $key => $defaultValue) {
@@ -813,40 +814,6 @@ function isRestricted($type, $id, $restrictions)
                                 </div>
                                 <div class="members-body">
                                     <div class="search-box">
-                                        <input type="text" class="form-control" id="searchUsers" placeholder="Buscar usuarios disponibles...">
-                                    </div>
-                                    <div id="usersList" class="users-list">
-                                        <?php foreach ($availableUsers as $user): ?>
-                                            <div class="user-item" onclick="toggleUserSelection(<?= $user['id'] ?>)">
-                                                <div class="user-item-content">
-                                                    <input class="form-check-input user-checkbox" type="checkbox" value="<?= $user['id'] ?>" id="user_<?= $user['id'] ?>" onchange="handleUserSelection(this, <?= $user['id'] ?>)">
-                                                    <div class="user-info">
-                                                        <div class="user-name"><?= htmlspecialchars($user['first_name'] . ' ' . $user['last_name']) ?></div>
-                                                        <div class="user-details">
-                                                            @<?= htmlspecialchars($user['username']) ?> • <?= htmlspecialchars($user['email']) ?>
-                                                        </div>
-                                                        <?php if ($user['company_name']): ?>
-                                                            <div class="user-company"><?= htmlspecialchars($user['company_name']) ?></div>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Miembros del Grupo -->
-                            <div class="members-section">
-                                <div class="members-header">
-                                    <h5>
-                                        <i data-feather="users"></i>
-                                        Miembros del Grupo
-                                        <span class="tab-badge" id="membersCount"><?= count($members) ?></span>
-                                    </h5>
-                                </div>
-                                <div class="members-body">
-                                    <div class="search-box">
                                         <input type="text" class="form-control" id="searchMembers" placeholder="Buscar miembros actuales...">
                                     </div>
                                     <div id="membersList" class="users-list">
@@ -898,7 +865,7 @@ function isRestricted($type, $id, $restrictions)
                                <i class="fas fa-shield-alt fa-2x me-3 text-warning"></i>
                                <div>
                                    <h6 class="mb-1">Configuración de Seguridad</h6>
-                                   <p class="mb-0">Configure las 5 acciones principales que pueden realizar los miembros de este grupo. <strong>Por defecto, todos los permisos están desactivados</strong> por seguridad.</p>
+                                   <p class="mb-0">Configure las 6 acciones principales que pueden realizar los miembros de este grupo. <strong>Por defecto, todos los permisos están desactivados</strong> por seguridad.</p>
                                </div>
                            </div>
                        </div>
@@ -1002,6 +969,26 @@ function isRestricted($type, $id, $restrictions)
                                                <?= $permissions['delete_files'] ? 'checked' : '' ?>>
                                            <label class="form-check-label ms-2 fw-bold" for="delete_files">
                                                <span class="status-text"><?= $permissions['delete_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
+                                           </label>
+                                       </div>
+                                   </div>
+                               </div>
+
+                               <!-- 6. Mover Archivos -->
+                               <div class="col-md-6 col-lg-4 mb-4">
+                                   <div class="permission-card <?= $permissions['move_files'] ? 'active' : '' ?>"
+                                       onclick="togglePermission('move_files')">
+                                       <div class="icon">
+                                           <i class="fas fa-arrows-alt"></i>
+                                       </div>
+                                       <h5>6. Mover Archivos</h5>
+                                       <p class="text-muted small mb-3">Permite mover documentos entre carpetas</p>
+                                       <div class="form-check form-switch d-flex justify-content-center">
+                                           <input class="form-check-input permission-toggle" type="checkbox"
+                                               name="permissions[move_files]" id="move_files"
+                                               <?= $permissions['move_files'] ? 'checked' : '' ?>>
+                                           <label class="form-check-label ms-2 fw-bold" for="move_files">
+                                               <span class="status-text"><?= $permissions['move_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
                                            </label>
                                        </div>
                                    </div>
@@ -1500,7 +1487,6 @@ function isRestricted($type, $id, $restrictions)
            });
        });
 
-       // Formulario de restricciones
        // Formulario de restricciones
        document.getElementById('restrictionsForm')?.addEventListener('submit', function(e) {
            e.preventDefault();
