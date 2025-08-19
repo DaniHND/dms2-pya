@@ -1225,19 +1225,7 @@ if (!function_exists('logActivity')) {
 
    <!-- ESTILOS CSS COMPLETO -->
    <style>
-       /* Variables CSS personalizadas */
-       /* Variables CSS corregidas - COLORES ORIGINALES */
-:root {
-    /* Colores principales - Esquema café y dorado original */
-    --primary-color: #8B4513;          /* Café principal original */
-    --primary-rgb: 139, 69, 19;        /* RGB del café */
-    --primary-light: #f5e6d3;          /* Café muy claro para fondos */
-    --bg-secondary: #f8f9fa;           /* Fondo secundario gris claro */
-    --border-color: #e9ecef;           /* Borde gris claro */
-    --text-primary: #343a40;           /* Texto principal gris oscuro */
-    --text-secondary: #6c757d;         /* Texto secundario gris */
-    --spacing-8: 2rem;                 /* Espaciado */
-}
+
 
 /* Reemplazar en el <style> del archivo inbox.php estas secciones: */
 

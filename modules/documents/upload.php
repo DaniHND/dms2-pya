@@ -52,7 +52,7 @@ function getUserPermissions($userId)
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
-            // ADMINISTRADORES: ACCESO TOTAL
+            // ADMINISTRADORES: ACCESO TOTAL SIN RESTRICCIONES
             return [
                 'permissions' => [
                     'view' => true,
@@ -63,7 +63,7 @@ function getUserPermissions($userId)
                     'create_folders' => true
                 ],
                 'restrictions' => [
-                    'companies' => [],
+                    'companies' => [], // VACÍO = ACCESO A TODAS
                     'departments' => [],
                     'document_types' => []
                 ]
@@ -503,14 +503,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canUpload) {
     }
 }
 
-// ===================================================================
-// CARGAR DATOS PARA EL FORMULARIO
-// ===================================================================
-$documentTypes = [];
-$companies = [];
-$departments = [];
-$folders = [];
-
 
 // ===================================================================
 // CORRECCIÓN PARA UPLOAD.PHP - Línea 735 aproximadamente
@@ -530,22 +522,29 @@ if ($canUpload) {
 
         $userPermissions = getUserPermissions($currentUser['id']);
         $restrictions = $userPermissions['restrictions'] ?? [];
+        $isAdmin = ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin');
+
+        error_log("=== DEBUG CARGA DATOS UPLOAD ===");
+        error_log("Es Admin: " . ($isAdmin ? 'SI' : 'NO'));
+        error_log("Restricciones: " . json_encode($restrictions));
 
         // ===== CARGAR TIPOS DE DOCUMENTOS - CORREGIDO =====
         try {
-            if (!empty($restrictions['document_types']) && is_array($restrictions['document_types'])) {
-                // Usuario con restricciones de tipos
-                $placeholders = str_repeat('?,', count($restrictions['document_types']) - 1) . '?';
-                $typesQuery = "SELECT id, name, description FROM document_types WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
-                $typesStmt = $pdo->prepare($typesQuery);
-                $typesStmt->execute($restrictions['document_types']);
-                $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                // Sin restricciones - todos los tipos
+            if ($isAdmin || empty($restrictions['document_types'])) {
+                // Admin O sin restricciones - todos los tipos
                 $typesQuery = "SELECT id, name, description FROM document_types WHERE status = 'active' ORDER BY name";
                 $typesStmt = $pdo->prepare($typesQuery);
                 $typesStmt->execute();
                 $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                // Usuario con restricciones de tipos
+                if (!empty($restrictions['document_types']) && is_array($restrictions['document_types'])) {
+                    $placeholders = str_repeat('?,', count($restrictions['document_types']) - 1) . '?';
+                    $typesQuery = "SELECT id, name, description FROM document_types WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+                    $typesStmt = $pdo->prepare($typesQuery);
+                    $typesStmt->execute($restrictions['document_types']);
+                    $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
             }
         } catch (Exception $e) {
             error_log("Error cargando tipos de documentos: " . $e->getMessage());
@@ -554,19 +553,21 @@ if ($canUpload) {
 
         // ===== CARGAR EMPRESAS - CORREGIDO =====
         try {
-            if (!empty($restrictions['companies']) && is_array($restrictions['companies'])) {
-                // Usuario con restricciones de empresas
-                $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
-                $companiesQuery = "SELECT id, name FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
-                $companiesStmt = $pdo->prepare($companiesQuery);
-                $companiesStmt->execute($restrictions['companies']);
-                $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                // Sin restricciones - todas las empresas
+            if ($isAdmin || empty($restrictions['companies'])) {
+                // Admin O sin restricciones - todas las empresas
                 $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
                 $companiesStmt = $pdo->prepare($companiesQuery);
                 $companiesStmt->execute();
                 $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                // Usuario con restricciones de empresas
+                if (!empty($restrictions['companies']) && is_array($restrictions['companies'])) {
+                    $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
+                    $companiesQuery = "SELECT id, name FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+                    $companiesStmt = $pdo->prepare($companiesQuery);
+                    $companiesStmt->execute($restrictions['companies']);
+                    $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
             }
         } catch (Exception $e) {
             error_log("Error cargando empresas: " . $e->getMessage());
@@ -576,20 +577,22 @@ if ($canUpload) {
         // ===== CARGAR DEPARTAMENTOS - CORREGIDO =====
         if ($uploadContext['company_id']) {
             try {
-                if (!empty($restrictions['departments']) && is_array($restrictions['departments'])) {
-                    // Usuario con restricciones de departamentos
-                    $placeholders = str_repeat('?,', count($restrictions['departments']) - 1) . '?';
-                    $deptQuery = "SELECT id, name FROM departments WHERE id IN ($placeholders) AND company_id = ? AND status = 'active' ORDER BY name";
-                    $deptStmt = $pdo->prepare($deptQuery);
-                    $params = array_merge($restrictions['departments'], [$uploadContext['company_id']]);
-                    $deptStmt->execute($params);
-                    $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
-                } else {
-                    // Sin restricciones - todos los departamentos de la empresa
+                if ($isAdmin || empty($restrictions['departments'])) {
+                    // Admin O sin restricciones - todos los departamentos de la empresa
                     $deptQuery = "SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name";
                     $deptStmt = $pdo->prepare($deptQuery);
                     $deptStmt->execute([$uploadContext['company_id']]);
                     $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+                } else {
+                    // Usuario con restricciones de departamentos
+                    if (!empty($restrictions['departments']) && is_array($restrictions['departments'])) {
+                        $placeholders = str_repeat('?,', count($restrictions['departments']) - 1) . '?';
+                        $deptQuery = "SELECT id, name FROM departments WHERE id IN ($placeholders) AND company_id = ? AND status = 'active' ORDER BY name";
+                        $params = array_merge($restrictions['departments'], [$uploadContext['company_id']]);
+                        $deptStmt = $pdo->prepare($deptQuery);
+                        $deptStmt->execute($params);
+                        $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+                    }
                 }
             } catch (Exception $e) {
                 error_log("Error cargando departamentos: " . $e->getMessage());
@@ -597,7 +600,7 @@ if ($canUpload) {
             }
         }
 
-        // ===== CARGAR CARPETAS - CORREGIDO =====
+        // ===== CARGAR CARPETAS - IGUAL QUE ANTES =====
         if ($uploadContext['department_id']) {
             try {
                 $foldersQuery = "SELECT id, name, folder_color FROM document_folders WHERE company_id = ? AND department_id = ? AND is_active = 1 ORDER BY name";
@@ -610,7 +613,7 @@ if ($canUpload) {
             }
         }
 
-        // ===== OBTENER NOMBRES PARA CONTEXTO - CORREGIDO =====
+        // ===== OBTENER NOMBRES PARA CONTEXTO - IGUAL QUE ANTES =====
         if ($uploadContext['company_id']) {
             try {
                 $companyQuery = "SELECT name FROM companies WHERE id = ?";
@@ -655,14 +658,6 @@ if ($canUpload) {
         error_log("Empresas: " . count($companies));
         error_log("Departamentos: " . count($departments));
         error_log("Carpetas: " . count($folders));
-        
-        // VERIFICAR QUE NO ESTÉN VACÍOS
-        if (empty($documentTypes)) {
-            error_log("WARNING: No hay tipos de documentos disponibles");
-        }
-        if (empty($companies)) {
-            error_log("WARNING: No hay empresas disponibles");
-        }
 
     } catch (Exception $e) {
         $error = "Error al cargar datos: " . $e->getMessage();
@@ -683,8 +678,8 @@ $companies = $companies ?? [];
 $departments = $departments ?? [];
 $folders = $folders ?? [];
 
-// Si no hay datos esenciales, mostrar error específico
-if ($canUpload && empty($companies)) {
+// Si no hay datos esenciales para usuarios normales, mostrar error específico
+if ($canUpload && !$isAdmin && empty($companies)) {
     $noAccess = true;
     $error = 'No hay empresas disponibles para subir documentos. Contacte al administrador.';
 }
@@ -699,8 +694,7 @@ error_log("documentTypes count: " . count($documentTypes));
 error_log("companies count: " . count($companies));
 error_log("canUpload: " . ($canUpload ? 'true' : 'false'));
 error_log("noAccess: " . ($noAccess ? 'true' : 'false'));
-
-
+error_log("isAdmin: " . ($isAdmin ? 'true' : 'false'));
 // ===================================================================
 // FUNCIONES AUXILIARES
 // ===================================================================

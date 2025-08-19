@@ -130,17 +130,33 @@ class GroupPermissionManager {
      * Verifica si un usuario puede acceder a una empresa específica
      * CAMBIO: Sin restricciones configuradas = SIN ACCESO
      */
-    public function canUserAccessCompany($userId, $companyId) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+
+/**
+ * CORRECCIÓN PARA group_permissions.php
+ * Estas funciones deben reemplazar las existentes en includes/group_permissions.php
+ * para que los administradores NO sean bloqueados por las restricciones
+ */
+
+function canUserAccessCompany($userId, $companyId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
         
-        // Si no tiene grupos, no puede acceder
-        if (!$permissions['has_groups']) {
-            return false;
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            return true; // ADMINISTRADORES: ACCESO TOTAL
         }
         
-        // Si es admin, puede acceder a todo
-        if ($permissions['user_role'] === 'admin') {
-            return true;
+        // Para usuarios normales, aplicar restricciones
+        $permissions = getUserGroupPermissions($userId);
+        
+        if (!$permissions['has_groups']) {
+            return false;
         }
         
         $allowedCompanies = $permissions['restrictions']['companies'];
@@ -150,25 +166,33 @@ class GroupPermissionManager {
             return false;
         }
         
-        // Verificar si la empresa está en la lista de permitidas
         return in_array((int)$companyId, $allowedCompanies);
+    } catch (Exception $e) {
+        error_log("Error en canUserAccessCompany: " . $e->getMessage());
+        return false;
     }
-    
-    /**
-     * Verifica si un usuario puede acceder a un departamento específico
-     * CAMBIO: Sin restricciones configuradas = SIN ACCESO
-     */
-    public function canUserAccessDepartment($userId, $departmentId) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+}
+
+function canUserAccessDepartment($userId, $departmentId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
         
-        // Si no tiene grupos, no puede acceder
-        if (!$permissions['has_groups']) {
-            return false;
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            return true; // ADMINISTRADORES: ACCESO TOTAL
         }
         
-        // Si es admin, puede acceder a todo
-        if ($permissions['user_role'] === 'admin') {
-            return true;
+        // Para usuarios normales, aplicar restricciones
+        $permissions = getUserGroupPermissions($userId);
+        
+        if (!$permissions['has_groups']) {
+            return false;
         }
         
         $allowedDepartments = $permissions['restrictions']['departments'];
@@ -178,76 +202,166 @@ class GroupPermissionManager {
             return false;
         }
         
-        // Verificar si el departamento está en la lista de permitidos
         return in_array((int)$departmentId, $allowedDepartments);
+    } catch (Exception $e) {
+        error_log("Error en canUserAccessDepartment: " . $e->getMessage());
+        return false;
     }
-    
-    /**
-     * Verifica si un usuario puede acceder a un tipo de documento específico
-     * CAMBIO: Sin restricciones configuradas = SIN ACCESO
-     */
-    public function canUserAccessDocumentType($userId, $documentTypeId) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+}
+
+function canUserAccessDocumentType($userId, $documentTypeId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
         
-        // Si no tiene grupos, no puede acceder
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            return true; // ADMINISTRADORES: ACCESO TOTAL
+        }
+        
+        // Para usuarios normales, aplicar restricciones
+        $permissions = getUserGroupPermissions($userId);
+        
         if (!$permissions['has_groups']) {
             return false;
         }
         
-        // Si es admin, puede acceder a todo
-        if ($permissions['user_role'] === 'admin') {
-            return true;
-        }
-        
         $allowedDocTypes = $permissions['restrictions']['document_types'];
         
-        // CAMBIO: Si no hay restricciones de tipos de documento = SIN ACCESO
+        // CAMBIO: Si no hay restricciones de tipos configuradas = SIN ACCESO
         if (empty($allowedDocTypes)) {
             return false;
         }
         
-        // Verificar si el tipo de documento está en la lista de permitidos
         return in_array((int)$documentTypeId, $allowedDocTypes);
+    } catch (Exception $e) {
+        error_log("Error en canUserAccessDocumentType: " . $e->getMessage());
+        return false;
     }
-    
-    /**
-     * Obtiene las empresas a las que el usuario tiene acceso
-     */
-    public function getUserAllowedCompanies($userId) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+}
+
+function getUserAllowedDepartments($userId, $companyId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            // ADMINISTRADORES: TODOS LOS DEPARTAMENTOS DE LA EMPRESA
+            $query = "SELECT id FROM departments WHERE company_id = ? AND status = 'active'";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([$companyId]);
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id');
+        }
+        
+        // Para usuarios normales
+        $permissions = getUserGroupPermissions($userId);
+        
+        if (!$permissions['has_groups']) {
+            return [];
+        }
+        
+        $allowedDepartments = $permissions['restrictions']['departments'];
+        
+        // CAMBIO: Si no hay restricciones = array vacío (sin acceso)
+        if (empty($allowedDepartments)) {
+            return [];
+        }
+        
+        // Si se especifica empresa, filtrar solo departamentos de esa empresa
+        if ($companyId) {
+            $placeholders = str_repeat('?,', count($allowedDepartments) - 1) . '?';
+            $query = "SELECT id FROM departments WHERE id IN ($placeholders) AND company_id = ? AND status = 'active'";
+            
+            $params = array_merge($allowedDepartments, [$companyId]);
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id');
+        }
+        
+        return $allowedDepartments;
+    } catch (Exception $e) {
+        error_log("Error en getUserAllowedDepartments: " . $e->getMessage());
+        return [];
+    }
+}
+
+function getUserAllowedCompanies($userId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            // ADMINISTRADORES: TODAS LAS EMPRESAS
+            $query = "SELECT id FROM companies WHERE status = 'active'";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute();
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id');
+        }
+        
+        // Para usuarios normales
+        $permissions = getUserGroupPermissions($userId);
         
         if (!$permissions['has_groups']) {
             return [];
         }
         
         return $permissions['restrictions']['companies'];
+    } catch (Exception $e) {
+        error_log("Error en getUserAllowedCompanies: " . $e->getMessage());
+        return [];
     }
-    
-    /**
-     * Obtiene los departamentos a los que el usuario tiene acceso
-     */
-    public function getUserAllowedDepartments($userId, $companyId = null) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+}
+
+function getUserAllowedDocumentTypes($userId) {
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
         
-        if (!$permissions['has_groups']) {
-            return [];
+        // Verificar si es administrador
+        $userQuery = "SELECT role FROM users WHERE id = ? AND status = 'active'";
+        $userStmt = $pdo->prepare($userQuery);
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && ($user['role'] === 'admin' || $user['role'] === 'super_admin')) {
+            // ADMINISTRADORES: TODOS LOS TIPOS DE DOCUMENTOS
+            $query = "SELECT id FROM document_types WHERE status = 'active'";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute();
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id');
         }
         
-        return $permissions['restrictions']['departments'];
-    }
-    
-    /**
-     * Obtiene los tipos de documento a los que el usuario tiene acceso
-     */
-    public function getUserAllowedDocumentTypes($userId) {
-        $permissions = $this->getUserEffectivePermissions($userId);
+        // Para usuarios normales
+        $permissions = getUserGroupPermissions($userId);
         
         if (!$permissions['has_groups']) {
             return [];
         }
         
         return $permissions['restrictions']['document_types'];
+    } catch (Exception $e) {
+        error_log("Error en getUserAllowedDocumentTypes: " . $e->getMessage());
+        return [];
     }
+}
     
     /**
      * Construye cláusula WHERE para filtrar documentos basado en permisos del usuario
