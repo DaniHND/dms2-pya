@@ -801,63 +801,104 @@ function isRestricted($type, $id, $restrictions)
 
                 <div class="tab-content-wrapper">
                     <!-- Tab de Miembros -->
-                    <?php if ($activeTab === 'members'): ?>
-                        <div class="members-grid">
-                            <!-- Usuarios Disponibles -->
-                            <div class="members-section">
-                                <div class="members-header">
-                                    <h5>
-                                        <i data-feather="user-plus"></i>
-                                        Usuarios Disponibles
-                                        <span class="tab-badge"><?= count($availableUsers) ?></span>
-                                    </h5>
-                                </div>
-                                <div class="members-body">
-                                    <div class="search-box">
-                                        <input type="text" class="form-control" id="searchMembers" placeholder="Buscar miembros actuales...">
+                   <?php if ($activeTab === 'members'): ?>
+    <div class="members-grid">
+        <!-- Usuarios Disponibles para Agregar -->
+        <div class="members-section">
+            <div class="members-header">
+                <h5>
+                    <i data-feather="user-plus"></i>
+                    Usuarios Disponibles
+                    <span class="tab-badge"><?= count($availableUsers) ?></span>
+                </h5>
+            </div>
+            <div class="members-body">
+                <div class="search-box">
+                    <input type="text" class="form-control" id="searchUsers" placeholder="Buscar usuarios disponibles...">
+                </div>
+                <div id="usersList" class="users-list">
+                    <?php if (empty($availableUsers)): ?>
+                        <div class="empty-state">
+                            <i data-feather="users"></i>
+                            <p>No hay usuarios disponibles para agregar</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($availableUsers as $user): ?>
+                            <div class="user-item" data-user-id="<?= $user['id'] ?>" onclick="toggleUserSelection(<?= $user['id'] ?>)">
+                                <div class="user-item-content">
+                                    <input type="checkbox" class="user-checkbox" id="user_<?= $user['id'] ?>" onchange="handleUserSelection(this, <?= $user['id'] ?>)">
+                                    <div class="user-info">
+                                        <div class="user-name"><?= htmlspecialchars($user['first_name'] . ' ' . $user['last_name']) ?></div>
+                                        <div class="user-details">
+                                            @<?= htmlspecialchars($user['username']) ?> • <?= htmlspecialchars($user['email']) ?>
+                                        </div>
+                                        <?php if ($user['company_name']): ?>
+                                            <div class="user-company"><?= htmlspecialchars($user['company_name']) ?></div>
+                                        <?php endif; ?>
                                     </div>
-                                    <div id="membersList" class="users-list">
-                                        <?php if (empty($members)): ?>
-                                            <div class="empty-state">
-                                                <i data-feather="user-x"></i>
-                                               <p>No hay miembros en este grupo</p>
-                                           </div>
-                                       <?php else: ?>
-                                           <?php foreach ($members as $member): ?>
-                                               <div class="member-item" data-member-id="<?= $member['id'] ?>">
-                                                   <div class="member-info">
-                                                       <div class="user-name"><?= htmlspecialchars($member['first_name'] . ' ' . $member['last_name']) ?></div>
-                                                       <div class="user-details">
-                                                           @<?= htmlspecialchars($member['username']) ?> • <?= htmlspecialchars($member['email']) ?>
-                                                       </div>
-                                                       <?php if ($member['company_name']): ?>
-                                                           <div class="user-company"><?= htmlspecialchars($member['company_name']) ?></div>
-                                                       <?php endif; ?>
-                                                       <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
-                                                           Agregado: <?= date('d/m/Y', strtotime($member['added_at'])) ?>
-                                                       </div>
-                                                   </div>
-                                                   <button type="button" class="remove-member-btn" onclick="removeMember(<?= $member['id'] ?>)">
-                                                       <i data-feather="x" style="width: 14px; height: 14px;"></i>
-                                                       Remover
-                                                   </button>
-                                               </div>
-                                           <?php endforeach; ?>
-                                       <?php endif; ?>
-                                   </div>
-                               </div>
-                           </div>
-                       </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
 
-                       <!-- Botón de guardar -->
-                       <div class="save-members-section">
-                           <button type="button" class="btn-save-members" onclick="saveMembers()">
-                               <i data-feather="save" style="width: 18px; height: 18px; margin-right: 8px;"></i>
-                               Guardar Cambios de Miembros
-                           </button>
-                       </div>
-                   <?php endif; ?>
+        <!-- Miembros Actuales del Grupo -->
+        <div class="members-section">
+            <div class="members-header">
+                <h5>
+                    <i data-feather="users"></i>
+                    Miembros Actuales
+                    <span class="tab-badge" id="membersCount"><?= count($members) ?></span>
+                </h5>
+            </div>
+            <div class="members-body">
+                <div class="search-box">
+                    <input type="text" class="form-control" id="searchMembers" placeholder="Buscar miembros actuales...">
+                </div>
+                <div id="membersList" class="users-list">
+                    <?php if (empty($members)): ?>
+                        <div class="empty-state">
+                            <i data-feather="user-x"></i>
+                            <p>No hay miembros en este grupo</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($members as $member): ?>
+                            <div class="member-item" data-member-id="<?= $member['id'] ?>">
+                                <div class="member-info">
+                                    <div class="user-name"><?= htmlspecialchars($member['first_name'] . ' ' . $member['last_name']) ?></div>
+                                    <div class="user-details">
+                                        @<?= htmlspecialchars($member['username']) ?> • <?= htmlspecialchars($member['email']) ?>
+                                    </div>
+                                    <?php if ($member['company_name']): ?>
+                                        <div class="user-company"><?= htmlspecialchars($member['company_name']) ?></div>
+                                    <?php endif; ?>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
+                                        Agregado: <?= date('d/m/Y', strtotime($member['added_at'])) ?>
+                                    </div>
+                                </div>
+                                <button type="button" class="remove-member-btn" onclick="removeMember(<?= $member['id'] ?>)">
+                                    <i data-feather="x" style="width: 14px; height: 14px;"></i>
+                                    Remover
+                                </button>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
 
+    <!-- Botón de guardar -->
+    <div class="save-members-section">
+        <button type="button" class="btn-save-members" onclick="saveMembers()">
+            <i data-feather="save" style="width: 18px; height: 18px; margin-right: 8px;"></i>
+            Guardar Cambios de Miembros
+        </button>
+    </div>
+<?php endif; ?>
+                      
                    <!-- Tab de Permisos -->
                    <?php if ($activeTab === 'permissions'): ?>
                        <div class="security-alert">
@@ -969,26 +1010,6 @@ function isRestricted($type, $id, $restrictions)
                                                <?= $permissions['delete_files'] ? 'checked' : '' ?>>
                                            <label class="form-check-label ms-2 fw-bold" for="delete_files">
                                                <span class="status-text"><?= $permissions['delete_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
-                                           </label>
-                                       </div>
-                                   </div>
-                               </div>
-
-                               <!-- 6. Mover Archivos -->
-                               <div class="col-md-6 col-lg-4 mb-4">
-                                   <div class="permission-card <?= $permissions['move_files'] ? 'active' : '' ?>"
-                                       onclick="togglePermission('move_files')">
-                                       <div class="icon">
-                                           <i class="fas fa-arrows-alt"></i>
-                                       </div>
-                                       <h5>6. Mover Archivos</h5>
-                                       <p class="text-muted small mb-3">Permite mover documentos entre carpetas</p>
-                                       <div class="form-check form-switch d-flex justify-content-center">
-                                           <input class="form-check-input permission-toggle" type="checkbox"
-                                               name="permissions[move_files]" id="move_files"
-                                               <?= $permissions['move_files'] ? 'checked' : '' ?>>
-                                           <label class="form-check-label ms-2 fw-bold" for="move_files">
-                                               <span class="status-text"><?= $permissions['move_files'] ? 'ACTIVADO' : 'DESACTIVADO' ?></span>
                                            </label>
                                        </div>
                                    </div>
