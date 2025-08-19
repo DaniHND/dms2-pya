@@ -141,28 +141,63 @@ try {
     $canDelete = $userPermissions['permissions']['delete'] ?? false;
     $canCreateFolders = $userPermissions['permissions']['create_folders'] ?? false;
 
-    // Verificar acceso
+    // ===== VALIDACIÓN CRÍTICA: VERIFICAR ACCESO MÍNIMO =====
     if (!$canView) {
         $items = [];
         $breadcrumbs = [['name' => 'Sin acceso', 'path' => '', 'icon' => 'lock']];
         $noAccess = true;
     } else {
-        $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
-        $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
+        // ===== VALIDACIÓN ADICIONAL PARA USUARIOS CON GRUPOS =====
+        $isAdmin = ($currentUser['role'] === 'admin' || $currentUser['role'] === 'super_admin');
+        $groupPermissions = getUserGroupPermissions($currentUser['id']);
+        
+        if (!$isAdmin && $groupPermissions['has_groups']) {
+            // Usuario con grupos - verificar que tenga restricciones configuradas
+            $restrictions = $userPermissions['restrictions'];
+            
+            // Si no tiene empresas configuradas, no puede navegar
+            if (empty($restrictions['companies'])) {
+                $items = [];
+                $breadcrumbs = [['name' => 'Sin empresas configuradas', 'path' => '', 'icon' => 'alert-triangle']];
+                $noAccess = true;
+            } else {
+                // Proceder normalmente con navegación
+                $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
+                $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
+                
+                // FILTROS
+                $extensionFilter = $_GET['extension'] ?? '';
+                $docTypeFilter = $_GET['doc_type'] ?? '';
 
-        // FILTROS
-        $extensionFilter = $_GET['extension'] ?? '';
-        $docTypeFilter = $_GET['doc_type'] ?? '';
+                // Si hay búsqueda o filtros, ejecutar búsqueda
+                if ($searchTerm || $extensionFilter || $docTypeFilter) {
+                    $items = searchItems($currentUser['id'], $currentUser['role'], $searchTerm, $currentPath, $extensionFilter, $docTypeFilter);
+                } else {
+                    $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
+                }
 
-        // Si hay búsqueda o filtros, ejecutar búsqueda
-        if ($searchTerm || $extensionFilter || $docTypeFilter) {
-            $items = searchItems($currentUser['id'], $currentUser['role'], $searchTerm, $currentPath, $extensionFilter, $docTypeFilter);
+                $breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
+                $noAccess = false;
+            }
         } else {
-            $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
-        }
+            // Admin o usuario sin grupos - proceder normalmente
+            $currentPath = isset($_GET['path']) ? trim($_GET['path']) : '';
+            $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
+            
+            // FILTROS
+            $extensionFilter = $_GET['extension'] ?? '';
+            $docTypeFilter = $_GET['doc_type'] ?? '';
 
-        $breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
-        $noAccess = false;
+            // Si hay búsqueda o filtros, ejecutar búsqueda
+            if ($searchTerm || $extensionFilter || $docTypeFilter) {
+                $items = searchItems($currentUser['id'], $currentUser['role'], $searchTerm, $currentPath, $extensionFilter, $docTypeFilter);
+            } else {
+                $items = getNavigationItems($currentUser['id'], $currentUser['role'], $currentPath);
+            }
+
+            $breadcrumbs = getBreadcrumbs($currentPath, $currentUser['id']);
+            $noAccess = false;
+        }
     }
 
     logActivity($currentUser['id'], 'view', 'visual_explorer', null, 'Usuario navegó por el explorador visual');
@@ -196,7 +231,7 @@ $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
 $pathParts = array_filter($pathParts); // Remover elementos vacíos
 
 // ===================================================================
-// FUNCIÓN getNavigationItems - VERSIÓN CORREGIDA
+// FUNCIÓN getNavigationItems - VERSIÓN CORREGIDA COMPLETA
 // ===================================================================
 function getNavigationItems($userId, $userRole, $currentPath = '')
 {
@@ -207,18 +242,33 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
     $pathParts = $currentPath ? explode('/', trim($currentPath, '/')) : [];
     $currentLevel = count($pathParts);
 
-    if ($currentLevel === 0) {
-        // NIVEL 0: EMPRESAS
-        $userPermissions = getUserPermissions($userId);
-        $restrictions = $userPermissions['restrictions'];
+    // ===== VERIFICAR PERMISOS DEL USUARIO PRIMERO =====
+    $isAdmin = ($userRole === 'admin' || $userRole === 'super_admin');
+    $userPermissions = getUserPermissions($userId);
+    $groupPermissions = getUserGroupPermissions($userId);
 
+    error_log("=== DEBUG NAVEGACIÓN ===");
+    error_log("Usuario: $userId, Admin: " . ($isAdmin ? 'SI' : 'NO'));
+    error_log("Path actual: '$currentPath', Nivel: $currentLevel");
+    error_log("Tiene grupos: " . ($groupPermissions['has_groups'] ? 'SI' : 'NO'));
+
+    if ($currentLevel === 0) {
+        // ===== NIVEL 0: EMPRESAS =====
+        error_log("📍 NIVEL 0: Mostrando empresas");
+        
+        $restrictions = $userPermissions['restrictions'];
         $whereConditions = ["c.status = 'active'"];
         $params = [];
 
-        if (!empty($restrictions['companies'])) {
+        if (!$isAdmin && !empty($restrictions['companies'])) {
             $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
             $whereConditions[] = "c.id IN ($placeholders)";
             $params = array_merge($params, $restrictions['companies']);
+            error_log("🔒 Aplicando restricciones de empresas: " . implode(',', $restrictions['companies']));
+        } elseif (!$isAdmin && empty($restrictions['companies']) && $groupPermissions['has_groups']) {
+            // ❌ USUARIO CON GRUPOS PERO SIN EMPRESAS CONFIGURADAS = SIN ACCESO
+            error_log("❌ Usuario con grupos pero sin empresas configuradas");
+            return [];
         }
 
         $whereClause = implode(' AND ', $whereConditions);
@@ -253,60 +303,40 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                 'can_create_inside' => true
             ];
         }
+
+        error_log("✅ Empresas encontradas: " . count($companies));
+
     } elseif ($currentLevel === 1) {
-        // NIVEL 1: DEPARTAMENTOS + DOCUMENTOS DE EMPRESA - SECCIÓN CORREGIDA
+        // ===== NIVEL 1: DEPARTAMENTOS + DOCUMENTOS DE EMPRESA =====
         $companyId = (int)$pathParts[0];
-        $userPermissions = getUserPermissions($userId);
-        $restrictions = $userPermissions['restrictions'];
-
-        // Verificar acceso a la empresa
-        $hasAccess = true;
-        if (!empty($restrictions['companies'])) {
-            $hasAccess = in_array($companyId, $restrictions['companies']);
-        }
-
-        if (!$hasAccess) {
-            return [];
-        }
-
-        // DEPARTAMENTOS CON RESTRICCIONES DE GRUPO - SECCIÓN CORREGIDA
-        $userGroupPermissions = getUserGroupPermissions($userId);
-
-        if ($userGroupPermissions['has_groups'] && !empty($userGroupPermissions['restrictions']['departments'])) {
-            // Usuario con grupos - aplicar restricciones de departamentos
-            $allowedDepartmentIds = getUserAllowedDepartments($userId, $companyId);
-            $departments = [];
-
-            // CORRECCIÓN: Verificar que sea un array de IDs y no esté vacío
-            if (!empty($allowedDepartmentIds) && is_array($allowedDepartmentIds)) {
-                foreach ($allowedDepartmentIds as $deptId) {
-                    // CORRECCIÓN: $deptId es un número, no un array
-                    $statsQuery = "
-                        SELECT d.id, d.name, d.description,
-                               COUNT(DISTINCT doc.id) as document_count,
-                               COUNT(DISTINCT f.id) as folder_count
-                        FROM departments d
-                        LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
-                        LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
-                        WHERE d.id = ? AND d.status = 'active'
-                        GROUP BY d.id, d.name, d.description
-                    ";
-
-                    try {
-                        $statsStmt = $pdo->prepare($statsQuery);
-                        $statsStmt->execute([$deptId]); // ✅ CORRECCIÓN: Usar $deptId directamente
-                        $deptStats = $statsStmt->fetch(PDO::FETCH_ASSOC);
-
-                        if ($deptStats) {
-                            $departments[] = $deptStats;
-                        }
-                    } catch (Exception $e) {
-                        error_log("Error obteniendo stats del departamento $deptId: " . $e->getMessage());
-                    }
+        error_log("📍 NIVEL 1: Empresa $companyId - Mostrando departamentos");
+        
+        // ❌ VALIDAR ACCESO A LA EMPRESA PRIMERO
+        if (!$isAdmin) {
+            $hasAccessToCompany = false;
+            $restrictions = $userPermissions['restrictions'];
+            
+            if ($groupPermissions['has_groups']) {
+                // Usuario con grupos: verificar restricciones
+                if (!empty($restrictions['companies'])) {
+                    $hasAccessToCompany = in_array($companyId, $restrictions['companies']);
                 }
+            } else {
+                // Usuario sin grupos: sin acceso
+                $hasAccessToCompany = false;
             }
-        } else {
-            // Sin restricciones - mostrar todos los departamentos
+            
+            if (!$hasAccessToCompany) {
+                error_log("❌ Usuario $userId sin acceso a empresa $companyId");
+                return [];
+            }
+        }
+
+        // ===== OBTENER DEPARTAMENTOS CON VALIDACIÓN ESTRICTA =====
+        $departments = [];
+        
+        if ($isAdmin) {
+            // Administradores: todos los departamentos
             $deptQuery = "
                 SELECT d.id, d.name, d.description,
                        COUNT(doc.id) as document_count,
@@ -319,13 +349,103 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                 ORDER BY d.name
             ";
 
-            try {
-                $stmt = $pdo->prepare($deptQuery);
-                $stmt->execute([$companyId]);
-                $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            } catch (Exception $e) {
-                error_log("Error obteniendo todos los departamentos: " . $e->getMessage());
-                $departments = [];
+            $stmt = $pdo->prepare($deptQuery);
+            $stmt->execute([$companyId]);
+            $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            error_log("✅ Admin - Departamentos cargados: " . count($departments));
+            
+        } else {
+            // ===== USUARIOS CON GRUPOS: VALIDACIÓN ESTRICTA =====
+            if ($groupPermissions['has_groups']) {
+                $allowedDepartments = $groupPermissions['restrictions']['departments'] ?? [];
+                
+                // ❌ SI NO TIENE DEPARTAMENTOS CONFIGURADOS = BLOQUEAR ACCESO
+                if (empty($allowedDepartments)) {
+                    error_log("🚫 Usuario $userId con grupos pero SIN departamentos configurados - bloqueando nivel departamental");
+                    
+                    // Solo mostrar documentos sin departamento (si los hay)
+                    $docQuery = "
+                        SELECT d.*, dt.name as document_type, u.first_name, u.last_name
+                        FROM documents d
+                        LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                        LEFT JOIN users u ON d.user_id = u.id
+                        WHERE d.company_id = ? AND d.department_id IS NULL AND d.folder_id IS NULL AND d.status = 'active'
+                        ORDER BY d.name
+                    ";
+
+                    $stmt = $pdo->prepare($docQuery);
+                    $stmt->execute([$companyId]);
+                    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                    foreach ($documents as $doc) {
+                        $items[] = [
+                            'type' => 'document',
+                            'id' => $doc['id'],
+                            'name' => $doc['name'],
+                            'description' => $doc['description'],
+                            'path' => $companyId . '/doc_' . $doc['id'],
+                            'file_size' => $doc['file_size'],
+                            'mime_type' => $doc['mime_type'],
+                            'original_name' => $doc['original_name'],
+                            'file_path' => $doc['file_path'],
+                            'created_at' => $doc['created_at'],
+                            'document_type' => $doc['document_type'],
+                            'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                            'can_enter' => false,
+                            'can_create_inside' => false,
+                            'draggable' => true
+                        ];
+                    }
+
+                    // Mostrar mensaje informativo como "departamento"
+                    $items[] = [
+                        'type' => 'info_message',
+                        'id' => 'no_dept_access',
+                        'name' => '🚫 Sin acceso a departamentos',
+                        'description' => 'Su grupo no tiene departamentos configurados. Contacte al administrador para obtener acceso a departamentos específicos.',
+                        'path' => '#',
+                        'document_count' => 0,
+                        'subfolder_count' => 0,
+                        'icon' => 'alert-triangle',
+                        'can_enter' => false,
+                        'can_create_inside' => false,
+                        'css_class' => 'restriction-message'
+                    ];
+
+                    return $items;
+                }
+
+                // Si tiene departamentos configurados, obtenerlos
+                foreach ($allowedDepartments as $deptId) {
+                    $statsQuery = "
+                        SELECT d.id, d.name, d.description,
+                               COUNT(DISTINCT doc.id) as document_count,
+                               COUNT(DISTINCT f.id) as folder_count
+                        FROM departments d
+                        LEFT JOIN documents doc ON d.id = doc.department_id AND doc.status = 'active'
+                        LEFT JOIN document_folders f ON d.id = f.department_id AND f.is_active = 1
+                        WHERE d.id = ? AND d.company_id = ? AND d.status = 'active'
+                        GROUP BY d.id, d.name, d.description
+                    ";
+
+                    try {
+                        $statsStmt = $pdo->prepare($statsQuery);
+                        $statsStmt->execute([$deptId, $companyId]);
+                        $deptStats = $statsStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($deptStats) {
+                            $departments[] = $deptStats;
+                        }
+                    } catch (Exception $e) {
+                        error_log("Error obteniendo stats del departamento $deptId: " . $e->getMessage());
+                    }
+                }
+                
+                error_log("✅ Usuario con grupos - Departamentos permitidos: " . count($departments));
+            } else {
+                error_log("❌ Usuario sin grupos - sin acceso a departamentos");
+                return [];
             }
         }
 
@@ -345,49 +465,73 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
             ];
         }
 
-        // DOCUMENTOS SIN DEPARTAMENTO
-        $docQuery = "
-            SELECT d.*, dt.name as document_type, u.first_name, u.last_name
-            FROM documents d
-            LEFT JOIN document_types dt ON d.document_type_id = dt.id
-            LEFT JOIN users u ON d.user_id = u.id
-            WHERE d.company_id = ? AND d.department_id IS NULL AND d.folder_id IS NULL AND d.status = 'active'
-            ORDER BY d.name
-        ";
+        // DOCUMENTOS SIN DEPARTAMENTO (siempre mostrar si existen para admins)
+        if ($isAdmin) {
+            $docQuery = "
+                SELECT d.*, dt.name as document_type, u.first_name, u.last_name
+                FROM documents d
+                LEFT JOIN document_types dt ON d.document_type_id = dt.id
+                LEFT JOIN users u ON d.user_id = u.id
+                WHERE d.company_id = ? AND d.department_id IS NULL AND d.folder_id IS NULL AND d.status = 'active'
+                ORDER BY d.name
+            ";
 
-        $stmt = $pdo->prepare($docQuery);
-        $stmt->execute([$companyId]);
-        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt = $pdo->prepare($docQuery);
+            $stmt->execute([$companyId]);
+            $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        foreach ($documents as $doc) {
-            $items[] = [
-                'type' => 'document',
-                'id' => $doc['id'],
-                'name' => $doc['name'],
-                'description' => $doc['description'],
-                'path' => $companyId . '/doc_' . $doc['id'],
-                'file_size' => $doc['file_size'],
-                'mime_type' => $doc['mime_type'],
-                'original_name' => $doc['original_name'],
-                'file_path' => $doc['file_path'],
-                'created_at' => $doc['created_at'],
-                'document_type' => $doc['document_type'],
-                'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
-                'can_enter' => false,
-                'can_create_inside' => false,
-                'draggable' => true
-            ];
+            foreach ($documents as $doc) {
+                $items[] = [
+                    'type' => 'document',
+                    'id' => $doc['id'],
+                    'name' => $doc['name'],
+                    'description' => $doc['description'],
+                    'path' => $companyId . '/doc_' . $doc['id'],
+                    'file_size' => $doc['file_size'],
+                    'mime_type' => $doc['mime_type'],
+                    'original_name' => $doc['original_name'],
+                    'file_path' => $doc['file_path'],
+                    'created_at' => $doc['created_at'],
+                    'document_type' => $doc['document_type'],
+                    'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                    'can_enter' => false,
+                    'can_create_inside' => false,
+                    'draggable' => true
+                ];
+            }
         }
+
     } elseif ($currentLevel === 2) {
-        // NIVEL 2: CARPETAS + DOCUMENTOS DE DEPARTAMENTO
+        // ===== NIVEL 2: CARPETAS + DOCUMENTOS DE DEPARTAMENTO =====
         $companyId = (int)$pathParts[0];
         $departmentId = (int)$pathParts[1];
+        
+        error_log("📍 NIVEL 2: Empresa $companyId, Departamento $departmentId");
 
+        // ❌ VALIDAR ACCESO A EMPRESA Y DEPARTAMENTO
+        if (!$isAdmin) {
+            $hasAccess = false;
+            
+            if ($groupPermissions['has_groups']) {
+                $restrictions = $userPermissions['restrictions'];
+                $hasAccessToCompany = !empty($restrictions['companies']) && in_array($companyId, $restrictions['companies']);
+                $hasAccessToDept = !empty($restrictions['departments']) && in_array($departmentId, $restrictions['departments']);
+                
+                $hasAccess = $hasAccessToCompany && $hasAccessToDept;
+            }
+            
+            if (!$hasAccess) {
+                error_log("❌ Usuario $userId sin acceso a empresa $companyId o departamento $departmentId");
+                return [];
+            }
+        }
+
+        // CARPETAS DEL DEPARTAMENTO
         $foldersQuery = "
             SELECT f.id, f.name, f.description, f.folder_color, f.folder_icon,
-                   COUNT(doc.id) as document_count
+                   COUNT(d.id) as document_count
             FROM document_folders f
-            LEFT JOIN documents doc ON f.id = doc.folder_id AND doc.status = 'active'
+            LEFT JOIN documents d ON f.id = d.folder_id AND d.status = 'active'
             WHERE f.company_id = ? AND f.department_id = ? AND f.is_active = 1
             GROUP BY f.id, f.name, f.description, f.folder_color, f.folder_icon
             ORDER BY f.name
@@ -405,16 +549,17 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                 'description' => $folder['description'],
                 'path' => $companyId . '/' . $departmentId . '/folder_' . $folder['id'],
                 'document_count' => $folder['document_count'],
-                'subfolder_count' => 0,
+                'folder_color' => $folder['folder_color'],
+                'folder_icon' => $folder['folder_icon'],
                 'icon' => $folder['folder_icon'] ?: 'folder',
-                'folder_color' => $folder['folder_color'] ?: '#3498db',
                 'can_enter' => true,
-                'can_create_inside' => false,
+                'can_create_inside' => true,
                 'draggable_target' => true
             ];
         }
 
-        $docQuery = "
+        // DOCUMENTOS SIN CARPETA
+        $docsQuery = "
             SELECT d.*, dt.name as document_type, u.first_name, u.last_name
             FROM documents d
             LEFT JOIN document_types dt ON d.document_type_id = dt.id
@@ -423,7 +568,7 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
             ORDER BY d.name
         ";
 
-        $stmt = $pdo->prepare($docQuery);
+        $stmt = $pdo->prepare($docsQuery);
         $stmt->execute([$companyId, $departmentId]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -446,55 +591,69 @@ function getNavigationItems($userId, $userRole, $currentPath = '')
                 'draggable' => true
             ];
         }
-    } elseif ($currentLevel === 3) {
-        // NIVEL 3: DOCUMENTOS DENTRO DE CARPETAS
+
+    } elseif ($currentLevel === 3 && strpos($pathParts[2], 'folder_') === 0) {
+        // ===== NIVEL 3: DOCUMENTOS DENTRO DE CARPETA =====
         $companyId = (int)$pathParts[0];
         $departmentId = (int)$pathParts[1];
-        $folderPart = $pathParts[2];
+        $folderId = (int)substr($pathParts[2], 7);
+        
+        error_log("📍 NIVEL 3: Carpeta $folderId");
 
-        if (strpos($folderPart, 'folder_') === 0) {
-            $folderId = (int)substr($folderPart, 7);
-
-            $docQuery = "
-                SELECT d.*, dt.name as document_type, u.first_name, u.last_name,
-                       f.name as folder_name, f.folder_color, f.folder_icon
-                FROM documents d
-                LEFT JOIN document_types dt ON d.document_type_id = dt.id
-                LEFT JOIN users u ON d.user_id = u.id
-                LEFT JOIN document_folders f ON d.folder_id = f.id
-                WHERE d.folder_id = ? AND d.status = 'active'
-                ORDER BY d.name
-            ";
-
-            $stmt = $pdo->prepare($docQuery);
-            $stmt->execute([$folderId]);
-            $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            foreach ($documents as $doc) {
-                $items[] = [
-                    'type' => 'document',
-                    'id' => $doc['id'],
-                    'name' => $doc['name'],
-                    'description' => $doc['description'],
-                    'path' => $companyId . '/' . $departmentId . '/folder_' . $folderId . '/doc_' . $doc['id'],
-                    'file_size' => $doc['file_size'],
-                    'mime_type' => $doc['mime_type'],
-                    'original_name' => $doc['original_name'],
-                    'file_path' => $doc['file_path'],
-                    'created_at' => $doc['created_at'],
-                    'document_type' => $doc['document_type'],
-                    'folder_name' => $doc['folder_name'],
-                    'folder_color' => $doc['folder_color'],
-                    'folder_icon' => $doc['folder_icon'],
-                    'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
-                    'can_enter' => false,
-                    'can_create_inside' => false,
-                    'draggable' => true
-                ];
+        // ❌ VALIDAR ACCESO A EMPRESA, DEPARTAMENTO Y CARPETA
+        if (!$isAdmin) {
+            $hasAccess = false;
+            
+            if ($groupPermissions['has_groups']) {
+                $restrictions = $userPermissions['restrictions'];
+                $hasAccessToCompany = !empty($restrictions['companies']) && in_array($companyId, $restrictions['companies']);
+                $hasAccessToDept = !empty($restrictions['departments']) && in_array($departmentId, $restrictions['departments']);
+                
+                $hasAccess = $hasAccessToCompany && $hasAccessToDept;
             }
+            
+            if (!$hasAccess) {
+                error_log("❌ Usuario $userId sin acceso a carpeta en empresa $companyId, departamento $departmentId");
+                return [];
+            }
+        }
+
+        // DOCUMENTOS DE LA CARPETA
+        $docsQuery = "
+            SELECT d.*, dt.name as document_type, u.first_name, u.last_name
+            FROM documents d
+            LEFT JOIN document_types dt ON d.document_type_id = dt.id
+            LEFT JOIN users u ON d.user_id = u.id
+            WHERE d.folder_id = ? AND d.status = 'active'
+            ORDER BY d.name
+        ";
+
+        $stmt = $pdo->prepare($docsQuery);
+        $stmt->execute([$folderId]);
+        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($documents as $doc) {
+            $items[] = [
+                'type' => 'document',
+                'id' => $doc['id'],
+                'name' => $doc['name'],
+                'description' => $doc['description'],
+                'path' => $companyId . '/' . $departmentId . '/folder_' . $folderId . '/doc_' . $doc['id'],
+                'file_size' => $doc['file_size'],
+                'mime_type' => $doc['mime_type'],
+                'original_name' => $doc['original_name'],
+                'file_path' => $doc['file_path'],
+                'created_at' => $doc['created_at'],
+                'document_type' => $doc['document_type'],
+                'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+                'can_enter' => false,
+                'can_create_inside' => false,
+                'draggable' => true
+            ];
         }
     }
 
+    error_log("✅ Total items encontrados: " . count($items));
     return $items;
 }
 
@@ -549,197 +708,197 @@ function getBreadcrumbs($currentPath, $userId)
             $folderId = (int)substr($folderPart, 7);
             $stmt = $pdo->prepare("SELECT name, folder_icon FROM document_folders WHERE id = ?");
             $stmt->execute([$folderId]);
-            $folder = $stmt->fetch();
+           $folder = $stmt->fetch();
 
-            if ($folder) {
-                $breadcrumbs[] = [
-                    'name' => $folder['name'],
-                    'path' => $pathParts[0] . '/' . $pathParts[1] . '/' . $folderPart,
-                    'icon' => $folder['folder_icon'] ?: 'folder',
-                    'drop_target' => true
-                ];
-            }
-        }
-    }
+           if ($folder) {
+               $breadcrumbs[] = [
+                   'name' => $folder['name'],
+                   'path' => $pathParts[0] . '/' . $pathParts[1] . '/' . $folderPart,
+                   'icon' => $folder['folder_icon'] ?: 'folder',
+                   'drop_target' => true
+               ];
+           }
+       }
+   }
 
-    return $breadcrumbs;
+   return $breadcrumbs;
 }
 
 function searchItems($userId, $userRole, $searchTerm, $currentPath = '', $extensionFilter = '', $docTypeFilter = '')
 {
-    if (empty($searchTerm) && empty($extensionFilter) && empty($docTypeFilter)) {
-        return [];
-    }
+   if (empty($searchTerm) && empty($extensionFilter) && empty($docTypeFilter)) {
+       return [];
+   }
 
-    $database = new Database();
-    $pdo = $database->getConnection();
-    $results = [];
+   $database = new Database();
+   $pdo = $database->getConnection();
+   $results = [];
 
-    $userPermissions = getUserPermissions($userId);
-    $restrictions = $userPermissions['restrictions'];
+   $userPermissions = getUserPermissions($userId);
+   $restrictions = $userPermissions['restrictions'];
 
-    $conditions = [];
-    $params = [];
+   $conditions = [];
+   $params = [];
 
-    // Condición de búsqueda por texto
-    if (!empty($searchTerm)) {
-        $conditions[] = "(doc.name LIKE ? OR doc.description LIKE ? OR doc.original_name LIKE ?)";
-        $params[] = "%{$searchTerm}%";
-        $params[] = "%{$searchTerm}%";
-        $params[] = "%{$searchTerm}%";
-    }
+   // Condición de búsqueda por texto
+   if (!empty($searchTerm)) {
+       $conditions[] = "(doc.name LIKE ? OR doc.description LIKE ? OR doc.original_name LIKE ?)";
+       $params[] = "%{$searchTerm}%";
+       $params[] = "%{$searchTerm}%";
+       $params[] = "%{$searchTerm}%";
+   }
 
-    // Filtro por extensión
-    if (!empty($extensionFilter)) {
-        $extensions = explode(',', $extensionFilter);
-        $extensionConditions = [];
-        foreach ($extensions as $ext) {
-            $extensionConditions[] = "LOWER(doc.original_name) LIKE ?";
-            $params[] = "%.{$ext}";
-        }
-        if (!empty($extensionConditions)) {
-            $conditions[] = "(" . implode(" OR ", $extensionConditions) . ")";
-        }
-    }
+   // Filtro por extensión
+   if (!empty($extensionFilter)) {
+       $extensions = explode(',', $extensionFilter);
+       $extensionConditions = [];
+       foreach ($extensions as $ext) {
+           $extensionConditions[] = "LOWER(doc.original_name) LIKE ?";
+           $params[] = "%.{$ext}";
+       }
+       if (!empty($extensionConditions)) {
+           $conditions[] = "(" . implode(" OR ", $extensionConditions) . ")";
+       }
+   }
 
-    // Filtro por tipo de documento
-    if (!empty($docTypeFilter)) {
-        $conditions[] = "doc.document_type_id = ?";
-        $params[] = $docTypeFilter;
-    }
+   // Filtro por tipo de documento
+   if (!empty($docTypeFilter)) {
+       $conditions[] = "doc.document_type_id = ?";
+       $params[] = $docTypeFilter;
+   }
 
-    // Restricciones de empresa
-    $companyRestriction = '';
-    if (!empty($restrictions['companies'])) {
-        $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
-        $companyRestriction = " AND doc.company_id IN ($placeholders)";
-        $params = array_merge($params, $restrictions['companies']);
-    }
+   // Restricciones de empresa
+   $companyRestriction = '';
+   if (!empty($restrictions['companies'])) {
+       $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
+       $companyRestriction = " AND doc.company_id IN ($placeholders)";
+       $params = array_merge($params, $restrictions['companies']);
+   }
 
-    $whereClause = !empty($conditions) ? "AND (" . implode(" AND ", $conditions) . ")" : "";
+   $whereClause = !empty($conditions) ? "AND (" . implode(" AND ", $conditions) . ")" : "";
 
-    $docsQuery = "
-        SELECT 'document' as type, doc.id, doc.name, doc.description, doc.company_id, doc.department_id, doc.folder_id,
-               doc.file_size, doc.mime_type, doc.original_name, doc.file_path, doc.created_at,
-               c.name as company_name, d.name as department_name, f.name as folder_name,
-               dt.name as document_type
-        FROM documents doc
-        INNER JOIN companies c ON doc.company_id = c.id
-        LEFT JOIN departments d ON doc.department_id = d.id
-        LEFT JOIN document_folders f ON doc.folder_id = f.id
-        LEFT JOIN document_types dt ON doc.document_type_id = dt.id
-        WHERE doc.status = 'active' AND c.status = 'active'
-        {$whereClause}
-        {$companyRestriction}
-        ORDER BY doc.name
-    ";
+   $docsQuery = "
+       SELECT 'document' as type, doc.id, doc.name, doc.description, doc.company_id, doc.department_id, doc.folder_id,
+              doc.file_size, doc.mime_type, doc.original_name, doc.file_path, doc.created_at,
+              c.name as company_name, d.name as department_name, f.name as folder_name,
+              dt.name as document_type
+       FROM documents doc
+       INNER JOIN companies c ON doc.company_id = c.id
+       LEFT JOIN departments d ON doc.department_id = d.id
+       LEFT JOIN document_folders f ON doc.folder_id = f.id
+       LEFT JOIN document_types dt ON doc.document_type_id = dt.id
+       WHERE doc.status = 'active' AND c.status = 'active'
+       {$whereClause}
+       {$companyRestriction}
+       ORDER BY doc.name
+   ";
 
-    $stmt = $pdo->prepare($docsQuery);
-    $stmt->execute($params);
-    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+   $stmt = $pdo->prepare($docsQuery);
+   $stmt->execute($params);
+   $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    foreach ($documents as $doc) {
-        $locationParts = [$doc['company_name']];
-        $pathParts = [$doc['company_id']];
+   foreach ($documents as $doc) {
+       $locationParts = [$doc['company_name']];
+       $pathParts = [$doc['company_id']];
 
-        if ($doc['department_name']) {
-            $locationParts[] = $doc['department_name'];
-            $pathParts[] = $doc['department_id'];
-        }
+       if ($doc['department_name']) {
+           $locationParts[] = $doc['department_name'];
+           $pathParts[] = $doc['department_id'];
+       }
 
-        if ($doc['folder_name']) {
-            $locationParts[] = $doc['folder_name'];
-            $pathParts[] = 'folder_' . $doc['folder_id'];
-        }
+       if ($doc['folder_name']) {
+           $locationParts[] = $doc['folder_name'];
+           $pathParts[] = 'folder_' . $doc['folder_id'];
+       }
 
-        $pathParts[] = 'doc_' . $doc['id'];
+       $pathParts[] = 'doc_' . $doc['id'];
 
-        $results[] = [
-            'type' => 'document',
-            'id' => $doc['id'],
-            'name' => $doc['name'],
-            'description' => $doc['description'],
-            'path' => implode('/', $pathParts),
-            'file_size' => $doc['file_size'],
-            'mime_type' => $doc['mime_type'],
-            'original_name' => $doc['original_name'],
-            'file_path' => $doc['file_path'],
-            'created_at' => $doc['created_at'],
-            'document_type' => $doc['document_type'],
-            'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
-            'location' => 'Documento en ' . implode(' → ', $locationParts),
-            'draggable' => true
-        ];
-    }
+       $results[] = [
+           'type' => 'document',
+           'id' => $doc['id'],
+           'name' => $doc['name'],
+           'description' => $doc['description'],
+           'path' => implode('/', $pathParts),
+           'file_size' => $doc['file_size'],
+           'mime_type' => $doc['mime_type'],
+           'original_name' => $doc['original_name'],
+           'file_path' => $doc['file_path'],
+           'created_at' => $doc['created_at'],
+           'document_type' => $doc['document_type'],
+           'icon' => getFileIcon($doc['original_name'], $doc['mime_type']),
+           'location' => 'Documento en ' . implode(' → ', $locationParts),
+           'draggable' => true
+       ];
+   }
 
-    return $results;
+   return $results;
 }
 
 // Funciones auxiliares
 function formatBytes($bytes)
 {
-    if ($bytes == 0) return '0 B';
-    $units = array('B', 'KB', 'MB', 'GB');
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-    $bytes /= pow(1024, $pow);
-    return round($bytes, 1) . ' ' . $units[$pow];
+   if ($bytes == 0) return '0 B';
+   $units = array('B', 'KB', 'MB', 'GB');
+   $bytes = max($bytes, 0);
+   $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+   $pow = min($pow, count($units) - 1);
+   $bytes /= pow(1024, $pow);
+   return round($bytes, 1) . ' ' . $units[$pow];
 }
 
 function formatDate($date)
 {
-    return $date ? date('d/m/Y H:i', strtotime($date)) : '';
+   return $date ? date('d/m/Y H:i', strtotime($date)) : '';
 }
 
 function getFileIcon($filename, $mimeType)
 {
-    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
-    if ($ext === 'pdf') return 'file-text';
-    if (in_array($ext, ['doc', 'docx'])) return 'file-text';
-    if (in_array($ext, ['xls', 'xlsx'])) return 'grid';
-    if (in_array($ext, ['mp4', 'avi', 'mov'])) return 'video';
-    return 'file';
+   $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+   if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
+   if ($ext === 'pdf') return 'file-text';
+   if (in_array($ext, ['doc', 'docx'])) return 'file-text';
+   if (in_array($ext, ['xls', 'xlsx'])) return 'grid';
+   if (in_array($ext, ['mp4', 'avi', 'mov'])) return 'video';
+   return 'file';
 }
 
 function getFileTypeClass($filename)
 {
-    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
-    if ($ext === 'pdf') return 'pdf';
-    if (in_array($ext, ['doc', 'docx'])) return 'word';
-    if (in_array($ext, ['xls', 'xlsx'])) return 'excel';
-    return 'file';
+   $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+   if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return 'image';
+   if ($ext === 'pdf') return 'pdf';
+   if (in_array($ext, ['doc', 'docx'])) return 'word';
+   if (in_array($ext, ['xls', 'xlsx'])) return 'excel';
+   return 'file';
 }
 
 function adjustBrightness($color, $percent)
 {
-    if (strlen($color) != 7) return $color;
-    $red = hexdec(substr($color, 1, 2));
-    $green = hexdec(substr($color, 3, 2));
-    $blue = hexdec(substr($color, 5, 2));
+   if (strlen($color) != 7) return $color;
+   $red = hexdec(substr($color, 1, 2));
+   $green = hexdec(substr($color, 3, 2));
+   $blue = hexdec(substr($color, 5, 2));
 
-    $red = max(0, min(255, $red + ($red * $percent / 100)));
-    $green = max(0, min(255, $green + ($green * $percent / 100)));
-    $blue = max(0, min(255, $blue + ($blue * $percent / 100)));
+   $red = max(0, min(255, $red + ($red * $percent / 100)));
+   $green = max(0, min(255, $green + ($green * $percent / 100)));
+   $blue = max(0, min(255, $blue + ($blue * $percent / 100)));
 
-    return sprintf("#%02x%02x%02x", $red, $green, $blue);
+   return sprintf("#%02x%02x%02x", $red, $green, $blue);
 }
 
 if (!function_exists('logActivity')) {
-    function logActivity($userId, $action, $table, $recordId, $description)
-    {
-        error_log("Activity: User $userId performed $action on $table: $description");
-    }
+   function logActivity($userId, $action, $table, $recordId, $description)
+   {
+       error_log("Activity: User $userId performed $action on $table: $description");
+   }
 }
 ?>
 <!DOCTYPE html>
 <html lang="es">
 
 <head>
-    <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <title>Explorador de Documentos - DMS2</title>
 
    <!-- CSS -->
@@ -1116,7 +1275,7 @@ if (!function_exists('logActivity')) {
                                                    <?php if ($canDelete): ?>
                                                        <button class="list-action-btn delete-btn" onclick="event.stopPropagation(); deleteDocument('<?= $item['id'] ?>', '<?= htmlspecialchars($item['name'], ENT_QUOTES) ?>')" title="Eliminar">
                                                            <i data-feather="trash-2"></i>
-                                                       </button>
+                                                           </button>
                                                    <?php endif; ?>
                                                <?php endif; ?>
                                            </div>
@@ -1225,152 +1384,33 @@ if (!function_exists('logActivity')) {
 
    <!-- ESTILOS CSS COMPLETO -->
    <style>
+       /* Elementos de restricción */
+       .restriction-message {
+           opacity: 0.8;
+           border: 2px dashed #f59e0b !important;
+           background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
+       }
 
+       .restriction-message:hover {
+           opacity: 1;
+           border-color: #d97706 !important;
+           background: linear-gradient(135deg, #fef3c7, #fed7aa) !important;
+           transform: scale(1.02);
+       }
 
-/* Reemplazar en el <style> del archivo inbox.php estas secciones: */
+       .restriction-message .item-icon {
+           background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+           color: white !important;
+       }
 
-/* Botón de regreso solo flecha */
-.btn-back-arrow {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    padding: 0.75rem;
-    border-radius: 50%;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    width: 40px;
-    height: 40px;
-    margin-right: 1rem;
-}
+       .restriction-message .item-name {
+           color: #92400e !important;
+           font-weight: 600 !important;
+       }
 
-.btn-back-arrow:hover {
-    background: var(--primary-color);   /* Café al hover */
-    color: white;
-    border-color: var(--primary-color);
-    transform: translateX(-2px);
-}
-
-/* Filtros avanzados */
-.advanced-filters {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
-    margin: 1rem 0;
-}
-
-.filter-group select:focus {
-    outline: none;
-    border-color: var(--primary-color);    /* Café en focus */
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.1);
-}
-
-/* Botón de filtros */
-.btn-filter-toggle {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    padding: 0.5rem 0.75rem;
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    transition: all 0.2s;
-}
-
-.btn-filter-toggle:hover {
-    background: var(--primary-light);     /* Café claro al hover */
-    border-color: var(--primary-color);
-}
-
-.btn-filter-toggle.active {
-    background: var(--primary-color);     /* Café cuando activo */
-    color: white;
-    border-color: var(--primary-color);
-}
-
-/* Formulario dentro del modal */
-.form-control:focus {
-    outline: none;
-    border-color: var(--primary-color);   /* Café en focus */
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.1);
-}
-
-/* Opciones de icono en modal */
-.icon-options input[type="radio"]:checked+i {
-    color: var(--primary-color);          /* Café para icono seleccionado */
-}
-
-.icon-options label:hover {
-    border-color: var(--primary-color);   /* Café al hover */
-}
-
-.icon-options label:has(input[type="radio"]:checked) {
-    border-color: var(--primary-color);   /* Café cuando seleccionado */
-    background: rgba(var(--primary-rgb), 0.1);
-}
-
-/* Breadcrumb item current */
-.breadcrumb-item.current {
-    color: var(--primary-color);          /* Café para item activo */
-    background: var(--primary-light);
-    font-weight: 600;
-}
-
-/* Search input focus */
-.search-input:focus {
-    outline: none;
-    border-color: var(--primary-color);   /* Café en focus */
-    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.1);
-}
-
-/* Drag and Drop con café */
-.drag-over {
-    background-color: rgba(var(--primary-rgb), 0.1) !important;  /* Café suave */
-    border: 2px dashed var(--primary-color) !important;          /* Café en borde */
-    transform: scale(1.02);
-}
-
-/* Explorer item hover con café */
-.explorer-item:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--card-shadow-hover);
-    border-color: var(--primary-color);   /* Café en borde al hover */
-}
-
-/* Drop target drag over con verde (mantener el verde para mover documentos) */
-.explorer-item.drop-target.drag-over {
-    border-color: #27ae60;               /* Verde para drop target */
-    background: linear-gradient(135deg, rgba(39, 174, 96, 0.1), rgba(46, 204, 113, 0.1));
-    transform: scale(1.05);
-}
-
-/* Breadcrumb drop target */
-.breadcrumb-drop-target.drag-over {
-    background: #27ae60 !important;      /* Verde para drop en breadcrumb */
-    color: white !important;
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(39, 174, 96, 0.3);
-}
-
-/* Search info card */
-.search-info-card {
-    padding: var(--spacing-4) var(--spacing-6);
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-3);
-    background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-    border-left: 4px solid var(--primary-color);  /* Café en borde izquierdo */
-}
-
-.search-info-card i {
-    color: var(--primary-color);          /* Café para icono */
-}
+       .restriction-message .item-info {
+           color: #a16207 !important;
+       }
 
        /* Botón de regreso solo flecha */
        .btn-back-arrow {
@@ -1439,7 +1479,7 @@ if (!function_exists('logActivity')) {
 
        .filter-group select {
            padding: 0.5rem;
-border: 1px solid var(--border-color);
+           border: 1px solid var(--border-color);
            border-radius: 4px;
            background: white;
            transition: border-color 0.2s;
@@ -2011,511 +2051,411 @@ border: 1px solid var(--border-color);
                }
            }, 1000);
        }
-// ===================================================================
-// FUNCIÓN deleteDocument CON MODAL PROFESIONAL MEJORADO (SIN ICONOS)
-// Reemplazar la función deleteDocument en inbox.php
-// ===================================================================
 
-function deleteDocument(documentId, documentName) {
-    console.log('🗑️ DELETE INICIADO:', { documentId, documentName });
+       // ===================================================================
+       // FUNCIÓN deleteDocument CON MODAL PROFESIONAL MEJORADO (SIN ICONOS)
+       // ===================================================================
+       function deleteDocument(documentId, documentName) {
+           console.log('🗑️ DELETE INICIADO:', { documentId, documentName });
 
-    if (!documentId) {
-        console.error('❌ ID de documento inválido:', documentId);
-        alert('Error: ID de documento no válido');
-        return;
-    }
+           if (!documentId) {
+               console.error('❌ ID de documento inválido:', documentId);
+               alert('Error: ID de documento no válido');
+               return;
+           }
 
-    if (!canDelete) {
-        console.error('❌ Sin permisos de eliminación. canDelete:', canDelete);
-        alert('No tienes permisos para eliminar documentos');
-        return;
-    }
+           if (!canDelete) {
+               console.error('❌ Sin permisos de eliminación. canDelete:', canDelete);
+               alert('No tienes permisos para eliminar documentos');
+               return;
+           }
 
-    // ===== CREAR MODAL PROFESIONAL DE CONFIRMACIÓN =====
-    const documentDisplayName = documentName || `Documento ID: ${documentId}`;
-    
-    console.log('🎯 Creando modal profesional de confirmación...');
-    
-    // Crear el modal
-    const modal = document.createElement('div');
-    modal.id = 'deleteConfirmModal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.65);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        backdrop-filter: blur(4px);
-        animation: fadeIn 0.2s ease-out;
-    `;
-    
-    modal.innerHTML = `
-        <div style="
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-radius: 16px;
-            padding: 40px;
-            max-width: 520px;
-            width: 90%;
-            box-shadow: 
-                0 25px 80px rgba(0, 0, 0, 0.15),
-                0 0 0 1px rgba(255, 255, 255, 0.2),
-                inset 0 1px 0 rgba(255, 255, 255, 0.8);
-            text-align: center;
-            position: relative;
-            transform: scale(0.9);
-            animation: modalSlideIn 0.3s ease-out forwards;
-        ">
-            <!-- Header -->
-            <div style="
-                margin-bottom: 30px;
-                padding-bottom: 20px;
-                border-bottom: 2px solid #e9ecef;
-            ">
-                <h2 style="
-                    margin: 0;
-                    color: #2c3e50;
-                    font-size: 28px;
-                    font-weight: 700;
-                    letter-spacing: -0.5px;
-                ">Confirmar Eliminación</h2>
-            </div>
-            
-            <!-- Content -->
-            <div style="
-                margin-bottom: 35px;
-            ">
-                <div style="
-                    background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
-                    border: 1px solid #fecaca;
-                    border-radius: 12px;
-                    padding: 25px;
-                    margin: 25px 0;
-                    position: relative;
-                ">
-                    <div style="
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        bottom: 0;
-                        width: 4px;
-                        background: linear-gradient(to bottom, #dc2626, #ef4444);
-                        border-radius: 2px 0 0 2px;
-                    "></div>
-                    
-                    <p style="
-                        margin: 0 0 15px 0;
-                        color: #374151;
-                        font-size: 16px;
-                        font-weight: 600;
-                    ">Documento seleccionado:</p>
-                    
-                    <p style="
-                        margin: 0;
-                        color: #1f2937;
-                        font-size: 18px;
-                        font-weight: 700;
-                        word-break: break-word;
-                        line-height: 1.4;
-                    ">${documentDisplayName}</p>
-                </div>
-                
-                <div style="
-                    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-                    border: 1px solid #fbbf24;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin: 20px 0;
-                ">
-                    <p style="
-                        margin: 0;
-                        color: #92400e;
-                        font-size: 15px;
-                        font-weight: 600;
-                        line-height: 1.5;
-                    ">
-                        <strong>Advertencia:</strong> Esta acción no se puede deshacer.<br>
-                        El documento será eliminado permanentemente del sistema.
-                    </p>
-                </div>
-            </div>
-            
-            <!-- Actions -->
-            <div style="
-                display: flex;
-                gap: 20px;
-                justify-content: center;
-                margin-top: 35px;
-            ">
-                <button id="cancelDelete" style="
-                    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-                    color: #495057;
-                    border: 2px solid #dee2e6;
-                    padding: 15px 35px;
-                    border-radius: 10px;
-                    font-size: 16px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    min-width: 140px;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                ">
-                    Cancelar
-                </button>
-                
-                <button id="confirmDelete" style="
-                    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-                    color: white;
-                    border: 2px solid #dc2626;
-                    padding: 15px 35px;
-                    border-radius: 10px;
-                    font-size: 16px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    min-width: 140px;
-                    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-                ">
-                    Eliminar
-                </button>
-            </div>
-        </div>
-    `;
-    
-    // Agregar estilos de animación
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        @keyframes modalSlideIn {
-            from { 
-                transform: scale(0.9) translateY(20px); 
-                opacity: 0;
-            }
-            to { 
-                transform: scale(1) translateY(0); 
-                opacity: 1;
-            }
-        }
-        
-        #deleteConfirmModal button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
-        }
-        
-        #deleteConfirmModal #cancelDelete:hover {
-            background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
-            border-color: #adb5bd;
-        }
-        
-        #deleteConfirmModal #confirmDelete:hover {
-            background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
-            box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
-        }
-        
-        #deleteConfirmModal button:active {
-            transform: translateY(0);
-        }
-        
-        @media (max-width: 600px) {
-            #deleteConfirmModal > div {
-                padding: 30px 25px;
-                margin: 20px;
-            }
-            
-            #deleteConfirmModal .actions {
-                flex-direction: column;
-                gap: 15px;
-            }
-            
-            #deleteConfirmModal button {
-                width: 100%;
-            }
-        }
-    `;
-    
-    document.head.appendChild(style);
-    
-    // Agregar el modal al DOM
-    document.body.appendChild(modal);
-    console.log('✅ Modal profesional creado y agregado al DOM');
-    
-    // Manejar clicks en los botones
-    const cancelBtn = modal.querySelector('#cancelDelete');
-    const confirmBtn = modal.querySelector('#confirmDelete');
-    
-    // Función para cerrar el modal con animación
-    function closeModal() {
-        modal.style.animation = 'fadeIn 0.2s ease-out reverse';
-        setTimeout(() => {
-            if (modal.parentNode) {
-                modal.parentNode.removeChild(modal);
-                document.head.removeChild(style);
-                console.log('🚪 Modal cerrado');
-            }
-        }, 200);
-    }
-    
-    // Si clickea "Cancelar"
-    cancelBtn.addEventListener('click', function() {
-        console.log('❌ Usuario canceló la eliminación desde modal profesional');
-        closeModal();
-    });
-    
-    // Si clickea "Eliminar"
-    confirmBtn.addEventListener('click', function() {
-        console.log('✅ Usuario confirmó eliminación desde modal profesional');
-        
-        // Cambiar el botón para mostrar estado de carga
-        confirmBtn.style.background = 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
-        confirmBtn.style.borderColor = '#6b7280';
-        confirmBtn.textContent = 'Eliminando...';
-        confirmBtn.disabled = true;
-        cancelBtn.disabled = true;
-        
-        closeModal();
-        
-        // Proceder con la eliminación
-        proceedWithDeletion(documentId, documentName);
-    });
-    
-    // Cerrar modal si clickea fuera de él
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            console.log('❌ Usuario cerró modal clickeando fuera');
-            closeModal();
-        }
-    });
-    
-    // Cerrar con tecla Escape
-    function handleEscape(e) {
-        if (e.key === 'Escape') {
-            console.log('❌ Usuario cerró modal con Escape');
-            closeModal();
-            document.removeEventListener('keydown', handleEscape);
-        }
-    }
-    document.addEventListener('keydown', handleEscape);
-    
-    // Focus en el botón de cancelar por defecto (para accesibilidad)
-    setTimeout(() => {
-        cancelBtn.focus();
-    }, 300);
-    
-    console.log('🎯 Modal profesional listo para interacción');
-}
+           // ===== CREAR MODAL PROFESIONAL DE CONFIRMACIÓN =====
+           const documentDisplayName = documentName || `Documento ID: ${documentId}`;
+           
+           console.log('🎯 Creando modal profesional de confirmación...');
+           
+           // Crear el modal
+           const modal = document.createElement('div');
+           modal.id = 'deleteConfirmModal';
+           modal.style.cssText = `
+               position: fixed;
+               top: 0;
+               left: 0;
+               width: 100%;
+               height: 100%;
+               background: rgba(0, 0, 0, 0.65);
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               z-index: 10000;
+               font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+               backdrop-filter: blur(4px);
+               animation: fadeIn 0.2s ease-out;
+           `;
+           
+           modal.innerHTML = `
+               <div style="
+                   background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+                   border-radius: 16px;
+                   padding: 40px;
+                   max-width: 520px;
+                   width: 90%;
+                   box-shadow: 
+                       0 25px 80px rgba(0, 0, 0, 0.15),
+                       0 0 0 1px rgba(255, 255, 255, 0.2),
+                       inset 0 1px 0 rgba(255, 255, 255, 0.8);
+                   text-align: center;
+                   position: relative;
+                   transform: scale(0.9);
+                   animation: modalSlideIn 0.3s ease-out forwards;
+               ">
+                   <!-- Header -->
+                   <div style="
+                       margin-bottom: 30px;
+                       padding-bottom: 20px;
+                       border-bottom: 2px solid #e9ecef;
+                   ">
+                       <h2 style="
+                           margin: 0;
+                           color: #2c3e50;
+                           font-size: 28px;
+                           font-weight: 700;
+                           letter-spacing: -0.5px;
+                       ">Confirmar Eliminación</h2>
+                   </div>
+                   
+                   <!-- Content -->
+                   <div style="
+                       margin-bottom: 35px;
+                   ">
+                       <div style="
+                           background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
+                           border: 1px solid #fecaca;
+                           border-radius: 12px;
+                           padding: 25px;
+                           margin: 25px 0;
+                           position: relative;
+                       ">
+                           <div style="
+                               position: absolute;
+                               left: 0;
+                               top: 0;
+                               bottom: 0;
+                               width: 4px;
+background: linear-gradient(to bottom, #dc2626, #ef4444);
+                               border-radius: 2px 0 0 2px;
+                           "></div>
+                           
+                           <p style="
+                               margin: 0 0 15px 0;
+                               color: #374151;
+                               font-size: 16px;
+                               font-weight: 600;
+                           ">Documento seleccionado:</p>
+                           
+                           <p style="
+                               margin: 0;
+                               color: #1f2937;
+                               font-size: 18px;
+                               font-weight: 700;
+                               word-break: break-word;
+                               line-height: 1.4;
+                           ">${documentDisplayName}</p>
+                       </div>
+                       
+                       <div style="
+                           background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+                           border: 1px solid #fbbf24;
+                           border-radius: 12px;
+                           padding: 20px;
+                           margin: 20px 0;
+                       ">
+                           <p style="
+                               margin: 0;
+                               color: #92400e;
+                               font-size: 15px;
+                               font-weight: 600;
+                               line-height: 1.5;
+                           ">
+                               <strong>Advertencia:</strong> Esta acción no se puede deshacer.<br>
+                               El documento será eliminado permanentemente del sistema.
+                           </p>
+                       </div>
+                   </div>
+                   
+                   <!-- Actions -->
+                   <div style="
+                       display: flex;
+                       gap: 20px;
+                       justify-content: center;
+                       margin-top: 35px;
+                   ">
+                       <button id="cancelDelete" style="
+                           background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                           color: #495057;
+                           border: 2px solid #dee2e6;
+                           padding: 15px 35px;
+                           border-radius: 10px;
+                           font-size: 16px;
+                           font-weight: 600;
+                           cursor: pointer;
+                           transition: all 0.2s ease;
+                           min-width: 140px;
+                           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                       ">
+                           Cancelar
+                       </button>
+                       
+                       <button id="confirmDelete" style="
+                           background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+                           color: white;
+                           border: 2px solid #dc2626;
+                           padding: 15px 35px;
+                           border-radius: 10px;
+                           font-size: 16px;
+                           font-weight: 600;
+                           cursor: pointer;
+                           transition: all 0.2s ease;
+                           min-width: 140px;
+                           box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+                       ">
+                           Eliminar
+                       </button>
+                   </div>
+               </div>
+           `;
+           
+           // Agregar estilos de animación
+           const style = document.createElement('style');
+           style.textContent = `
+               @keyframes fadeIn {
+                   from { opacity: 0; }
+                   to { opacity: 1; }
+               }
+               
+               @keyframes modalSlideIn {
+                   from { 
+                       transform: scale(0.9) translateY(20px); 
+                       opacity: 0;
+                   }
+                   to { 
+                       transform: scale(1) translateY(0); 
+                       opacity: 1;
+                   }
+               }
+               
+               #deleteConfirmModal button:hover {
+                   transform: translateY(-2px);
+                   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+               }
+               
+               #deleteConfirmModal #cancelDelete:hover {
+                   background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+                   border-color: #adb5bd;
+               }
+               
+               #deleteConfirmModal #confirmDelete:hover {
+                   background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+                   box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
+               }
+               
+               #deleteConfirmModal button:active {
+                   transform: translateY(0);
+               }
+               
+               @media (max-width: 600px) {
+                   #deleteConfirmModal > div {
+                       padding: 30px 25px;
+                       margin: 20px;
+                   }
+                   
+                   #deleteConfirmModal .actions {
+                       flex-direction: column;
+                       gap: 15px;
+                   }
+                   
+                   #deleteConfirmModal button {
+                       width: 100%;
+                   }
+               }
+           `;
+           
+           document.head.appendChild(style);
+           
+           // Agregar el modal al DOM
+           document.body.appendChild(modal);
+           console.log('✅ Modal profesional creado y agregado al DOM');
+           
+           // Manejar clicks en los botones
+           const cancelBtn = modal.querySelector('#cancelDelete');
+           const confirmBtn = modal.querySelector('#confirmDelete');
+           
+           // Función para cerrar el modal con animación
+           function closeModal() {
+               modal.style.animation = 'fadeIn 0.2s ease-out reverse';
+               setTimeout(() => {
+                   if (modal.parentNode) {
+                       modal.parentNode.removeChild(modal);
+                       document.head.removeChild(style);
+                       console.log('🚪 Modal cerrado');
+                   }
+               }, 200);
+           }
+           
+           // Si clickea "Cancelar"
+           cancelBtn.addEventListener('click', function() {
+               console.log('❌ Usuario canceló la eliminación desde modal profesional');
+               closeModal();
+           });
+           
+           // Si clickea "Eliminar"
+           confirmBtn.addEventListener('click', function() {
+               console.log('✅ Usuario confirmó eliminación desde modal profesional');
+               
+               // Cambiar el botón para mostrar estado de carga
+               confirmBtn.style.background = 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+               confirmBtn.style.borderColor = '#6b7280';
+               confirmBtn.textContent = 'Eliminando...';
+               confirmBtn.disabled = true;
+               cancelBtn.disabled = true;
+               
+               closeModal();
+               
+               // Proceder con la eliminación
+               proceedWithDeletion(documentId, documentName);
+           });
+           
+           // Cerrar modal si clickea fuera de él
+           modal.addEventListener('click', function(e) {
+               if (e.target === modal) {
+                   console.log('❌ Usuario cerró modal clickeando fuera');
+                   closeModal();
+               }
+           });
+           
+           // Cerrar con tecla Escape
+           function handleEscape(e) {
+               if (e.key === 'Escape') {
+                   console.log('❌ Usuario cerró modal con Escape');
+                   closeModal();
+                   document.removeEventListener('keydown', handleEscape);
+               }
+           }
+           document.addEventListener('keydown', handleEscape);
+           
+           // Focus en el botón de cancelar por defecto (para accesibilidad)
+           setTimeout(() => {
+               cancelBtn.focus();
+           }, 300);
+           
+           console.log('🎯 Modal profesional listo para interacción');
+       }
 
-// ===== FUNCIÓN SEPARADA PARA PROCESAR LA ELIMINACIÓN =====
-function proceedWithDeletion(documentId, documentName) {
-    console.log('🚀 Procediendo con eliminación confirmada:', { documentId, documentName });
-    
-    // Obtener path actual
-    function getCurrentPath() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlPath = urlParams.get('path');
-        if (urlPath) return urlPath;
-        if (typeof currentPath !== 'undefined' && currentPath) return currentPath;
-        
-        const breadcrumbs = document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]');
-        if (breadcrumbs.length > 0) {
-            const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
-            return lastBreadcrumb.dataset.breadcrumbPath || '';
-        }
-        return '';
-    }
+       // ===== FUNCIÓN SEPARADA PARA PROCESAR LA ELIMINACIÓN =====
+       function proceedWithDeletion(documentId, documentName) {
+           console.log('🚀 Procediendo con eliminación confirmada:', { documentId, documentName });
+           
+           // Obtener path actual
+           function getCurrentPath() {
+               const urlParams = new URLSearchParams(window.location.search);
+               const urlPath = urlParams.get('path');
+               if (urlPath) return urlPath;
+               if (typeof currentPath !== 'undefined' && currentPath) return currentPath;
+               
+               const breadcrumbs = document.querySelectorAll('.breadcrumb-item[data-breadcrumb-path]');
+               if (breadcrumbs.length > 0) {
+                   const lastBreadcrumb = breadcrumbs[breadcrumbs.length - 1];
+                   return lastBreadcrumb.dataset.breadcrumbPath || '';
+               }
+               return '';
+           }
 
-    const currentPathValue = getCurrentPath();
-    console.log('📍 Path actual:', currentPathValue);
+           const currentPathValue = getCurrentPath();
+           console.log('📍 Path actual:', currentPathValue);
 
-    // Mostrar indicador de carga en el botón original
-    const button = event ? event.target.closest('.action-btn, .list-action-btn') : null;
-    const originalContent = button ? button.innerHTML : null;
-    
-    if (button) {
-        button.disabled = true;
-        button.innerHTML = 'Eliminando...';
-        button.style.backgroundColor = '#6b7280';
-        button.style.color = 'white';
-        button.style.opacity = '0.8';
-        console.log('🔄 Botón original deshabilitado');
-    }
+           // Mostrar indicador de carga en el botón original
+           const button = event ? event.target.closest('.action-btn, .list-action-btn') : null;
+           const originalContent = button ? button.innerHTML : null;
+           
+           if (button) {
+               button.disabled = true;
+               button.innerHTML = 'Eliminando...';
+               button.style.backgroundColor = '#6b7280';
+               button.style.color = 'white';
+               button.style.opacity = '0.8';
+               console.log('🔄 Botón original deshabilitado');
+           }
 
-    // Crear formulario
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = 'delete.php';
-    form.style.display = 'none';
+           // Crear formulario
+           const form = document.createElement('form');
+           form.method = 'POST';
+           form.action = 'delete.php';
+           form.style.display = 'none';
 
-    // Campo document_id
-    const inputDoc = document.createElement('input');
-    inputDoc.type = 'hidden';
-    inputDoc.name = 'document_id';
-    inputDoc.value = documentId;
-    form.appendChild(inputDoc);
+           // Campo document_id
+           const inputDoc = document.createElement('input');
+           inputDoc.type = 'hidden';
+           inputDoc.name = 'document_id';
+           inputDoc.value = documentId;
+           form.appendChild(inputDoc);
 
-    // Campo return_path
-    if (currentPathValue) {
-        const inputPath = document.createElement('input');
-        inputPath.type = 'hidden';
-        inputPath.name = 'return_path';
-        inputPath.value = currentPathValue;
-        form.appendChild(inputPath);
-    }
+           // Campo return_path
+           if (currentPathValue) {
+               const inputPath = document.createElement('input');
+               inputPath.type = 'hidden';
+               inputPath.name = 'return_path';
+               inputPath.value = currentPathValue;
+               form.appendChild(inputPath);
+           }
 
-    console.log('📤 Formulario creado para eliminación confirmada');
+           console.log('📤 Formulario creado para eliminación confirmada');
 
-    // Timeout de seguridad
-    const timeoutId = setTimeout(() => {
-        console.error('⏰ TIMEOUT: Eliminación tardó más de 20 segundos');
-        
-        if (button && originalContent) {
-            button.disabled = false;
-            button.innerHTML = originalContent;
-            button.style.backgroundColor = '';
-            button.style.color = '';
-            button.style.opacity = '';
-        }
-        
-        alert('La eliminación está tardando más de lo esperado. La página se recargará para verificar el estado.');
-        window.location.reload();
-        
-    }, 20000);
+           // Timeout de seguridad
+           const timeoutId = setTimeout(() => {
+               console.error('⏰ TIMEOUT: Eliminación tardó más de 20 segundos');
+               
+               if (button && originalContent) {
+                   button.disabled = false;
+                   button.innerHTML = originalContent;
+                   button.style.backgroundColor = '';
+                   button.style.color = '';
+                   button.style.opacity = '';
+               }
+               
+               alert('La eliminación está tardando más de lo esperado. La página se recargará para verificar el estado.');
+               window.location.reload();
+               
+           }, 20000);
 
-    // Limpiar timeout cuando la página se descargue
-    window.addEventListener('beforeunload', () => {
-        clearTimeout(timeoutId);
-    });
+           // Limpiar timeout cuando la página se descargue
+           window.addEventListener('beforeunload', () => {
+               clearTimeout(timeoutId);
+           });
 
-    // Enviar formulario
-    document.body.appendChild(form);
-    console.log('📧 Enviando formulario de eliminación...');
-    
-    try {
-        form.submit();
-        console.log('✅ Eliminación enviada exitosamente');
-    } catch (error) {
-        console.error('❌ Error al enviar eliminación:', error);
-        clearTimeout(timeoutId);
-        
-        if (button && originalContent) {
-            button.disabled = false;
-            button.innerHTML = originalContent;
-            button.style.backgroundColor = '';
-            button.style.color = '';
-            button.style.opacity = '';
-        }
-        
-        alert('Error al procesar eliminación: ' + error.message);
-    }
-}
+           // Enviar formulario
+           document.body.appendChild(form);
+           console.log('📧 Enviando formulario de eliminación...');
+           
+           try {
+               form.submit();
+               console.log('✅ Eliminación enviada exitosamente');
+           } catch (error) {
+               console.error('❌ Error al enviar eliminación:', error);
+               clearTimeout(timeoutId);
+               
+               if (button && originalContent) {
+                   button.disabled = false;
+                   button.innerHTML = originalContent;
+                   button.style.backgroundColor = '';
+                   button.style.color = '';
+                   button.style.opacity = '';
+               }
+               
+               alert('Error al procesar eliminación: ' + error.message);
+           }
+       }
 
-// ===================================================================
-// FUNCIÓN AUXILIAR PARA VERIFICAR PERMISOS (AGREGAR AL SCRIPT)
-// ===================================================================
-function verifyDeletePermission() {
-    console.log('🔐 Verificando permisos de eliminación...');
-    console.log('canDelete:', canDelete);
-    console.log('currentUserRole:', currentUserRole);
-    console.log('currentUserId:', currentUserId);
-    
-    if (!canDelete) {
-        console.warn('❌ Usuario sin permisos de eliminación');
-        return false;
-    }
-    
-    return true;
-}
-
-// ===================================================================
-// FUNCIÓN MEJORADA PARA MANEJAR ERRORES DE ELIMINACIÓN
-// ===================================================================
-window.addEventListener('load', function() {
-    // Verificar si hay parámetros de error en la URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const error = urlParams.get('error');
-    const success = urlParams.get('success');
-    
-    if (error) {
-        let errorMessage = 'Error desconocido';
-        
-        switch (error) {
-            case 'no_delete_permission':
-                errorMessage = '❌ No tienes permisos para eliminar documentos.\nContacta al administrador para obtener permisos.';
-                break;
-            case 'document_not_found':
-                errorMessage = '❌ El documento no fue encontrado o ya fue eliminado.';
-                break;
-            case 'not_document_owner':
-                errorMessage = '❌ Solo puedes eliminar tus propios documentos.';
-                break;
-            case 'delete_failed':
-                errorMessage = '❌ Error al eliminar el documento. Inténtalo nuevamente.';
-                break;
-            case 'invalid_request':
-                errorMessage = '❌ Solicitud inválida.';
-                break;
-        }
-        
-        alert(errorMessage);
-        
-        // Limpiar URL
-        const cleanUrl = new URL(window.location);
-        cleanUrl.searchParams.delete('error');
-        window.history.replaceState({}, '', cleanUrl);
-    }
-    
-    if (success === 'document_deleted') {
-        const deletedName = urlParams.get('deleted_name');
-        const message = deletedName ? 
-            `✅ Documento "${decodeURIComponent(deletedName)}" eliminado correctamente.` : 
-            '✅ Documento eliminado correctamente.';
-        
-        showSuccessNotification(message);
-        
-        // Limpiar URL
-        const cleanUrl = new URL(window.location);
-        cleanUrl.searchParams.delete('success');
-        cleanUrl.searchParams.delete('deleted_name');
-        window.history.replaceState({}, '', cleanUrl);
-    }
-});
-
-// ===================================================================
-// AGREGAR ESTILOS PARA BOTÓN DE CARGA
-// ===================================================================
-const loadingStyles = `
-<style>
-.action-btn:disabled,
-.list-action-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.animate-spin {
-    animation: spin 1s linear infinite;
-}
-</style>
-`;
-
-if (!document.querySelector('#loading-styles')) {
-    const styleElement = document.createElement('div');
-    styleElement.id = 'loading-styles';
-    styleElement.innerHTML = loadingStyles;
-    document.head.appendChild(styleElement);
-}
        // ===================================================================
        // FUNCIÓN ÚNICA PARA MOVER DOCUMENTOS - SIN DUPLICACIONES
        // ===================================================================
@@ -2636,6 +2576,390 @@ if (!document.querySelector('#loading-styles')) {
            console.log(`✅ Drag & Drop configurado: ${documentItems.length} docs, ${folderItems.length} carpetas`);
        }
 
+       // ===================================================================
+       // FUNCIONES PARA MANEJAR ELEMENTOS DE RESTRICCIÓN
+       // ===================================================================
+       function handleRestrictionElements() {
+           console.log('🔍 Configurando manejo de elementos de restricción...');
+           
+           // Buscar elementos de mensaje de restricción
+           const restrictionItems = document.querySelectorAll('[data-item-type="info_message"]');
+           
+           restrictionItems.forEach(item => {
+               // Aplicar clase CSS especial
+               item.classList.add('restriction-message');
+               
+               // Remover eventos de navegación
+               item.style.cursor = 'default';
+               
+               // Prevenir clicks de navegación
+               item.addEventListener('click', function(e) {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   
+                   // Mostrar información detallada
+                   showRestrictionInfo();
+               });
+               
+               // Efecto visual especial
+               item.addEventListener('mouseenter', function() {
+                   this.style.transform = 'scale(1.02)';
+               });
+               
+               item.addEventListener('mouseleave', function() {
+                   this.style.transform = 'scale(1)';
+               });
+           });
+           
+           console.log(`✅ Configurados ${restrictionItems.length} elementos de restricción`);
+       }
+
+       function showRestrictionInfo() {
+           const modal = createRestrictionModal();
+           document.body.appendChild(modal);
+           
+           // Mostrar modal
+           setTimeout(() => {
+               modal.style.opacity = '1';
+           }, 10);
+           
+           // Cerrar con click fuera
+           modal.addEventListener('click', function(e) {
+               if (e.target === modal) {
+                   closeRestrictionModal(modal);
+               }
+           });
+           
+           // Cerrar con Escape
+           function handleEscape(e) {
+               if (e.key === 'Escape') {
+                   closeRestrictionModal(modal);
+                   document.removeEventListener('keydown', handleEscape);
+               }
+           }
+           document.addEventListener('keydown', handleEscape);
+       }
+
+function createRestrictionModal() {
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        backdrop-filter: blur(4px);
+    `;
+    
+    modal.innerHTML = `
+        <div style="
+            background: white;
+            border-radius: 16px;
+            padding: 0;
+            max-width: 650px;
+            width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        ">
+            <!-- Header con gradiente -->
+            <div style="
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 2rem;
+                border-radius: 16px 16px 0 0;
+                text-align: center;
+                color: white;
+            ">
+                <div style="
+                    width: 80px;
+                    height: 80px;
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 50%;
+                    margin: 0 auto 1.5rem auto;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    backdrop-filter: blur(10px);
+                    border: 2px solid rgba(255, 255, 255, 0.3);
+                ">
+                    <i data-feather="shield" style="width: 40px; height: 40px; color: white;"></i>
+                </div>
+                <h2 style="
+                    margin: 0 0 0.5rem 0;
+                    font-size: 1.8rem;
+                    font-weight: 700;
+                    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                ">Restricciones de Seguridad Activas</h2>
+                <p style="
+                    margin: 0;
+                    font-size: 1.1rem;
+                    opacity: 0.9;
+                    font-weight: 400;
+                ">Su grupo tiene configuraciones de seguridad específicas</p>
+            </div>
+            
+            <!-- Contenido -->
+            <div style="padding: 2rem;">
+                <!-- Sección de Sin Acceso -->
+                <div style="
+                    background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+                    border: 1px solid #ffb74d;
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    margin-bottom: 1.5rem;
+                    border-left: 5px solid #ff9800;
+                ">
+                    <h3 style="
+                        margin: 0 0 1rem 0;
+                        color: #e65100;
+                        font-size: 1.2rem;
+                        font-weight: 700;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    ">
+                        <i data-feather="alert-triangle" style="width: 24px; height: 24px;"></i>
+                        Sin Acceso a Departamentos
+                    </h3>
+                    <p style="
+                        margin: 0 0 1.5rem 0;
+                        color: #bf360c;
+                        line-height: 1.6;
+                        font-size: 1rem;
+                    ">
+                        Su grupo de usuario no tiene departamentos configurados en las restricciones de seguridad. 
+                        Esto significa que no puede acceder a ningún departamento específico.
+                    </p>
+                    
+                    <!-- Acciones disponibles -->
+                    <div style="
+                        background: rgba(255, 255, 255, 0.8);
+                        border-radius: 8px;
+                        padding: 1.2rem;
+                        border-left: 4px solid #ff9800;
+                    ">
+                        <h4 style="
+                            margin: 0 0 0.8rem 0;
+                            color: #e65100;
+                            font-size: 1.1rem;
+                            font-weight: 600;
+                        ">Acciones disponibles:</h4>
+                        <ul style="
+                            margin: 0;
+                            padding-left: 1.2rem;
+                            color: #bf360c;
+                            line-height: 1.8;
+                        ">
+                            <li><strong>Ver documentos</strong> sin departamento asignado</li>
+                            <li><strong>Navegar</strong> por empresas permitidas</li>
+                            <li><strong>Contactar al administrador</strong> para solicitar acceso a departamentos</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Sección de Cómo obtener acceso -->
+                <div style="
+                    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+                    border: 1px solid #42a5f5;
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    margin-bottom: 2rem;
+                    border-left: 5px solid #2196f3;
+                ">
+                    <h3 style="
+                        margin: 0 0 1rem 0;
+                        color: #0d47a1;
+                        font-size: 1.2rem;
+                        font-weight: 700;
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    ">
+                        <i data-feather="help-circle" style="width: 24px; height: 24px;"></i>
+                        ¿Cómo obtener acceso?
+                    </h3>
+                    <p style="
+                        margin: 0;
+                        color: #1565c0;
+                        line-height: 1.6;
+                        font-size: 1rem;
+                    ">
+                        Para acceder a departamentos específicos, <strong>contacte al administrador del sistema</strong>. 
+                        El administrador puede configurar las restricciones de su grupo para incluir 
+                        los departamentos a los que necesita acceso.
+                    </p>
+                </div>
+                
+                <!-- Botones de acción -->
+                <div style="
+                    display: flex;
+                    gap: 1rem;
+                    justify-content: center;
+                    flex-wrap: wrap;
+                ">
+                    <button onclick="closeRestrictionModal(this.closest('[style*=fixed]'))" style="
+                        background: linear-gradient(135deg, #757575, #616161);
+                        color: white;
+                        border: none;
+                        padding: 1rem 2rem;
+                        border-radius: 10px;
+                        font-weight: 600;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        box-shadow: 0 4px 12px rgba(117, 117, 117, 0.3);
+                        min-width: 140px;
+                    " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(117, 117, 117, 0.4)'" 
+                       onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(117, 117, 117, 0.3)'">
+                        Entendido
+                    </button>
+                    <button onclick="showContactAdmin()" style="
+                        background: linear-gradient(135deg, #42a5f5, #1e88e5);
+                        color: white;
+                        border: none;
+                        padding: 1rem 2rem;
+                        border-radius: 10px;
+                        font-weight: 600;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3);
+                        min-width: 140px;
+                    " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(66, 165, 245, 0.4)'" 
+                       onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(66, 165, 245, 0.3)'">
+                        📧 Contactar Admin
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Animar entrada
+    setTimeout(() => {
+        const content = modal.querySelector('div > div');
+        if (content) {
+            content.style.transform = 'scale(1)';
+        }
+    }, 10);
+    
+    // Actualizar iconos
+    setTimeout(() => {
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+    }, 50);
+    
+    return modal;
+}
+       function closeRestrictionModal(modal) {
+           modal.style.opacity = '0';
+           setTimeout(() => {
+               if (modal.parentNode) {
+                   modal.parentNode.removeChild(modal);
+               }
+           }, 300);
+       }
+
+function showContactAdmin() {
+    // Crear modal de contacto más elegante
+    const contactModal = document.createElement('div');
+    contactModal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10001;
+        backdrop-filter: blur(4px);
+    `;
+    
+    contactModal.innerHTML = `
+        <div style="
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        ">
+            <div style="
+                width: 60px;
+                height: 60px;
+                background: linear-gradient(135deg, #42a5f5, #1e88e5);
+                border-radius: 50%;
+                margin: 0 auto 1.5rem auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            ">
+                📧
+            </div>
+            <h2 style="margin: 0 0 1rem 0; color: #1565c0;">Información de Contacto</h2>
+            <div style="
+                background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+                border-radius: 12px;
+                padding: 1.5rem;
+                margin: 1.5rem 0;
+                text-align: left;
+                border-left: 4px solid #42a5f5;
+            ">
+                <h3 style="margin: 0 0 1rem 0; color: #1565c0;">Para solicitar acceso a departamentos:</h3>
+                <ul style="margin: 0; padding-left: 1.5rem; line-height: 1.8; color: #37474f;">
+                    <li><strong>Contacte al administrador</strong> del sistema</li>
+                    <li><strong>Especifique</strong> qué departamentos necesita</li>
+                    <li><strong>Indique</strong> el motivo de la solicitud</li>
+                    <li><strong>Mencione</strong> su nombre de usuario: <code style="background: #e3f2fd; padding: 2px 6px; border-radius: 4px;"><?= $currentUser['username'] ?></code></li>
+                </ul>
+                <div style="
+                    background: rgba(66, 165, 245, 0.1);
+                    border-radius: 8px;
+                    padding: 1rem;
+                    margin-top: 1rem;
+                    border: 1px solid rgba(66, 165, 245, 0.3);
+                ">
+                    <strong style="color: #1565c0;">💡 Resultado:</strong> El administrador configurará los permisos de su grupo para incluir los departamentos solicitados.
+                </div>
+            </div>
+            <button onclick="this.closest('[style*=fixed]').remove()" style="
+                background: linear-gradient(135deg, #42a5f5, #1e88e5);
+                color: white;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 10px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 1rem;
+                box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3);
+            ">
+                Entendido
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(contactModal);
+    
+    // Cerrar con click fuera
+    contactModal.addEventListener('click', function(e) {
+        if (e.target === contactModal) {
+            contactModal.remove();
+        }
+    });
+}
        // ===================================================================
        // FUNCIONES AUXILIARES
        // ===================================================================
@@ -2774,84 +3098,139 @@ if (!document.querySelector('#loading-styles')) {
            if (element) element.textContent = timeString;
        }
 
-       
        // ===================================================================
-        // INICIALIZACIÓN
-        // ===================================================================
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 DOM LOADED');
+       // INICIALIZACIÓN
+       // ===================================================================
+       document.addEventListener('DOMContentLoaded', function() {
+           console.log('🚀 DOM LOADED');
 
-            // Inicializar filtros desde URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const extension = urlParams.get('extension');
-            const docType = urlParams.get('doc_type');
+           // Inicializar filtros desde URL
+           const urlParams = new URLSearchParams(window.location.search);
+           const extension = urlParams.get('extension');
+           const docType = urlParams.get('doc_type');
 
-            if (extension) {
-                const extensionSelect = document.getElementById('extensionFilter');
-                if (extensionSelect) extensionSelect.value = extension;
-            }
+           if (extension) {
+               const extensionSelect = document.getElementById('extensionFilter');
+               if (extensionSelect) extensionSelect.value = extension;}
 
-            if (docType) {
-                const docTypeSelect = document.getElementById('documentTypeFilter');
-                if (docTypeSelect) docTypeSelect.value = docType;
-            }
+           if (docType) {
+               const docTypeSelect = document.getElementById('documentTypeFilter');
+               if (docTypeSelect) docTypeSelect.value = docType;
+           }
 
-            // Mostrar filtros si hay alguno activo
-            if (extension || docType) {
-                const filters = document.getElementById('advancedFilters');
-                if (filters) {
-                    filters.style.display = 'block';
-                    document.querySelector('.btn-filter-toggle')?.classList.add('active');
-                }
-            }
+           // Mostrar filtros si hay alguno activo
+           if (extension || docType) {
+               const filters = document.getElementById('advancedFilters');
+               if (filters) {
+                   filters.style.display = 'block';
+                   document.querySelector('.btn-filter-toggle')?.classList.add('active');
+               }
+           }
 
-            // Configurar drag & drop
-            setTimeout(setupDragDrop, 1000);
+           // Configurar drag & drop
+           setTimeout(setupDragDrop, 1000);
 
-            // Cerrar modales con click fuera o escape
-            document.addEventListener('click', function(event) {
-                const folderModal = document.getElementById('createDocumentFolderModal');
-                if (event.target === folderModal) closeDocumentFolderModal();
+           // Configurar elementos de restricción
+           setTimeout(() => {
+               handleRestrictionElements();
+           }, 500);
 
-                const documentModal = document.getElementById('documentModal');
-                if (event.target === documentModal) closeDocumentModal();
-            });
+           // Cerrar modales con click fuera o escape
+           document.addEventListener('click', function(event) {
+               const folderModal = document.getElementById('createDocumentFolderModal');
+               if (event.target === folderModal) closeDocumentFolderModal();
 
-            document.addEventListener('keydown', function(event) {
-                if (event.key === 'Escape') {
-                    const folderModal = document.getElementById('createDocumentFolderModal');
-                    if (folderModal && folderModal.style.display === 'flex') {
-                        closeDocumentFolderModal();
-                    }
-                    closeDocumentModal();
-                }
-            });
+               const documentModal = document.getElementById('documentModal');
+               if (event.target === documentModal) closeDocumentModal();
+           });
 
-            // Inicializar iconos
-            if (typeof feather !== 'undefined') {
-                feather.replace();
-            }
+           document.addEventListener('keydown', function(event) {
+               if (event.key === 'Escape') {
+                   const folderModal = document.getElementById('createDocumentFolderModal');
+                   if (folderModal && folderModal.style.display === 'flex') {
+                       closeDocumentFolderModal();
+                   }
+                   closeDocumentModal();
+               }
+           });
 
-            // Actualizar tiempo
-            updateTime();
-            setInterval(updateTime, 60000);
+           // Inicializar iconos
+           if (typeof feather !== 'undefined') {
+               feather.replace();
+           }
 
-            console.log('✅ Inicialización completa');
-        });
+           // Actualizar tiempo
+           updateTime();
+           setInterval(updateTime, 60000);
 
-        // Cargar Feather Icons si no está disponible
-        if (typeof feather === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/feather-icons';
-            script.onload = function() {
-                feather.replace();
-                console.log('✅ Feather Icons cargado');
-            };
-            document.head.appendChild(script);
-        }
+           console.log('✅ Inicialización completa');
+       });
 
-        console.log('✅ SCRIPT COMPLETO CARGADO SIN DUPLICACIONES');
-    </script>
+       // Manejar errores de eliminación desde URL
+       window.addEventListener('load', function() {
+           // Verificar si hay parámetros de error en la URL
+           const urlParams = new URLSearchParams(window.location.search);
+           const error = urlParams.get('error');
+           const success = urlParams.get('success');
+           
+           if (error) {
+               let errorMessage = 'Error desconocido';
+               
+               switch (error) {
+                   case 'no_delete_permission':
+                       errorMessage = '❌ No tienes permisos para eliminar documentos.\nContacta al administrador para obtener permisos.';
+                       break;
+                   case 'document_not_found':
+                       errorMessage = '❌ El documento no fue encontrado o ya fue eliminado.';
+                       break;
+                   case 'not_document_owner':
+                       errorMessage = '❌ Solo puedes eliminar tus propios documentos.';
+                       break;
+                   case 'delete_failed':
+                       errorMessage = '❌ Error al eliminar el documento. Inténtalo nuevamente.';
+                       break;
+                   case 'invalid_request':
+                       errorMessage = '❌ Solicitud inválida.';
+                       break;
+               }
+               
+               alert(errorMessage);
+               
+               // Limpiar URL
+               const cleanUrl = new URL(window.location);
+               cleanUrl.searchParams.delete('error');
+               window.history.replaceState({}, '', cleanUrl);
+           }
+           
+           if (success === 'document_deleted') {
+               const deletedName = urlParams.get('deleted_name');
+               const message = deletedName ? 
+                   `✅ Documento "${decodeURIComponent(deletedName)}" eliminado correctamente.` : 
+                   '✅ Documento eliminado correctamente.';
+               
+               showSuccessNotification(message);
+               
+               // Limpiar URL
+               const cleanUrl = new URL(window.location);
+               cleanUrl.searchParams.delete('success');
+               cleanUrl.searchParams.delete('deleted_name');
+               window.history.replaceState({}, '', cleanUrl);
+           }
+       });
+
+       // Cargar Feather Icons si no está disponible
+       if (typeof feather === 'undefined') {
+           const script = document.createElement('script');
+           script.src = 'https://unpkg.com/feather-icons';
+           script.onload = function() {
+               feather.replace();
+               console.log('✅ Feather Icons cargado');
+           };
+           document.head.appendChild(script);
+       }
+
+       console.log('✅ SCRIPT COMPLETO CARGADO SIN DUPLICACIONES');
+   </script>
 </body>
 
-</html
+</html>
