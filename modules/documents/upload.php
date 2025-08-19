@@ -615,71 +615,82 @@ if ($canUpload) {
         error_log("Restricciones: " . json_encode($restrictions));
 
         // ===== CARGAR TIPOS DE DOCUMENTOS - CORREGIDO =====
-        try {
-            if ($isAdmin || empty($restrictions['document_types'])) {
-                // Admin O sin restricciones - todos los tipos
-                $typesQuery = "SELECT id, name, description FROM document_types WHERE status = 'active' ORDER BY name";
-                $typesStmt = $pdo->prepare($typesQuery);
-                $typesStmt->execute();
-                $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                // Usuario con restricciones de tipos
-                if (!empty($restrictions['document_types']) && is_array($restrictions['document_types'])) {
-                    $placeholders = str_repeat('?,', count($restrictions['document_types']) - 1) . '?';
-                    $typesQuery = "SELECT id, name, description FROM document_types WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
-                    $typesStmt = $pdo->prepare($typesQuery);
-                    $typesStmt->execute($restrictions['document_types']);
-                    $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
-                }
-            }
+       // ===== CARGAR TIPOS DE DOCUMENTOS - CORREGIDO =====
+try {
+    if ($isAdmin) {
+        // SOLO ADMINISTRADORES ven todos los tipos
+        $typesQuery = "SELECT id, name, description FROM document_types WHERE status = 'active' ORDER BY name";
+        $typesStmt = $pdo->prepare($typesQuery);
+        $typesStmt->execute();
+        $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+        // USUARIOS CON GRUPOS: Solo tipos en sus restricciones
+        if ($groupPermissions['has_groups'] && !empty($restrictions['document_types']) && is_array($restrictions['document_types'])) {
+            $placeholders = str_repeat('?,', count($restrictions['document_types']) - 1) . '?';
+            $typesQuery = "SELECT id, name, description FROM document_types WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+            $typesStmt = $pdo->prepare($typesQuery);
+            $typesStmt->execute($restrictions['document_types']);
+            $documentTypes = $typesStmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            // Usuario con grupos pero sin tipos configurados = sin acceso
+            $documentTypes = [];
+        }
+    }
         } catch (Exception $e) {
             error_log("Error cargando tipos de documentos: " . $e->getMessage());
             $documentTypes = [];
         }
 
         // ===== CARGAR EMPRESAS - CORREGIDO =====
-        try {
-            if ($isAdmin || empty($restrictions['companies'])) {
-                // Admin O sin restricciones - todas las empresas
-                $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
-                $companiesStmt = $pdo->prepare($companiesQuery);
-                $companiesStmt->execute();
-                $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                // Usuario con restricciones de empresas
-                if (!empty($restrictions['companies']) && is_array($restrictions['companies'])) {
-                    $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
-                    $companiesQuery = "SELECT id, name FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
-                    $companiesStmt = $pdo->prepare($companiesQuery);
-                    $companiesStmt->execute($restrictions['companies']);
-                    $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
-                }
-            }
+try {
+    if ($isAdmin) {
+        // SOLO ADMINISTRADORES ven todas las empresas
+        $companiesQuery = "SELECT id, name FROM companies WHERE status = 'active' ORDER BY name";
+        $companiesStmt = $pdo->prepare($companiesQuery);
+        $companiesStmt->execute();
+        $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+        // USUARIOS CON GRUPOS: Solo empresas en sus restricciones
+        if ($groupPermissions['has_groups'] && !empty($restrictions['companies']) && is_array($restrictions['companies'])) {
+            $placeholders = str_repeat('?,', count($restrictions['companies']) - 1) . '?';
+            $companiesQuery = "SELECT id, name FROM companies WHERE id IN ($placeholders) AND status = 'active' ORDER BY name";
+            $companiesStmt = $pdo->prepare($companiesQuery);
+            $companiesStmt->execute($restrictions['companies']);
+            $companies = $companiesStmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            // Usuario con grupos pero sin empresas configuradas = sin acceso
+            $companies = [];
+        }
+    }
         } catch (Exception $e) {
             error_log("Error cargando empresas: " . $e->getMessage());
             $companies = [];
         }
 
         // ===== CARGAR DEPARTAMENTOS - CORREGIDO =====
-        if ($uploadContext['company_id']) {
-            try {
-                if ($isAdmin || empty($restrictions['departments'])) {
-                    // Admin O sin restricciones - todos los departamentos de la empresa
-                    $deptQuery = "SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name";
-                    $deptStmt = $pdo->prepare($deptQuery);
-                    $deptStmt->execute([$uploadContext['company_id']]);
-                    $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
-                } else {
-                    // Usuario con restricciones de departamentos
-                    if (!empty($restrictions['departments']) && is_array($restrictions['departments'])) {
-                        $placeholders = str_repeat('?,', count($restrictions['departments']) - 1) . '?';
-                        $deptQuery = "SELECT id, name FROM departments WHERE id IN ($placeholders) AND company_id = ? AND status = 'active' ORDER BY name";
-                        $params = array_merge($restrictions['departments'], [$uploadContext['company_id']]);
-                        $deptStmt = $pdo->prepare($deptQuery);
-                        $deptStmt->execute($params);
-                        $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
-                    }
-                }
+        // ===== CARGAR DEPARTAMENTOS - CORREGIDO =====
+if ($uploadContext['company_id']) {
+    try {
+        if ($isAdmin) {
+            // SOLO ADMINISTRADORES ven todos los departamentos
+            $deptQuery = "SELECT id, name FROM departments WHERE company_id = ? AND status = 'active' ORDER BY name";
+            $deptStmt = $pdo->prepare($deptQuery);
+            $deptStmt->execute([$uploadContext['company_id']]);
+            $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            // USUARIOS CON GRUPOS: Solo departamentos en sus restricciones
+            if ($groupPermissions['has_groups'] && !empty($restrictions['departments']) && is_array($restrictions['departments'])) {
+                $placeholders = str_repeat('?,', count($restrictions['departments']) - 1) . '?';
+                $deptQuery = "SELECT id, name FROM departments WHERE id IN ($placeholders) AND company_id = ? AND status = 'active' ORDER BY name";
+                $params = array_merge($restrictions['departments'], [$uploadContext['company_id']]);
+                $deptStmt = $pdo->prepare($deptQuery);
+                $deptStmt->execute($params);
+                $departments = $deptStmt->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                // Usuario con grupos pero sin departamentos configurados = sin acceso
+                $departments = [];
+            }
+        }
             } catch (Exception $e) {
                 error_log("Error cargando departamentos: " . $e->getMessage());
                 $departments = [];
