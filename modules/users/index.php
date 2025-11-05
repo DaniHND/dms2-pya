@@ -525,8 +525,9 @@ function formatDate($dateString) {
                                     <th>Estado</th>
                                     <th>Empresa</th>
                                     <th>Fecha Registro</th>
-                                    <th>Descarga</th>
-                                    <th class="actions-cell">Acciones</th>
+                                  
+                                 
+                                    <th class="actions-cell"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -559,13 +560,7 @@ function formatDate($dateString) {
                                         </td>
                                         <td><?php echo htmlspecialchars($user['company_name'] ?? 'Sin empresa'); ?></td>
                                         <td><?php echo formatDate($user['created_at']); ?></td>
-                                        <td>
-                                            <?php if ($user['download_enabled']): ?>
-                                                <span class="status-badge status-active">Sí</span>
-                                            <?php else: ?>
-                                                <span class="status-badge status-inactive">No</span>
-                                            <?php endif; ?>
-                                        </td>
+           
                                         <td class="actions-cell">
                                             <div class="action-buttons">
                                                 <button class="btn-action btn-view" 

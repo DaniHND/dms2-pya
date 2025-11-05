@@ -196,34 +196,34 @@ function getFullName()
                     <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
                     <div class="current-time" id="currentTime"></div>
                 </div>
-                <div class="header-actions">
-                    <!-- Botón de Configuración con menú desplegable -->
-                    <div class="dropdown-menu-container">
-                        <button class="btn-icon" onclick="toggleConfigMenu()" id="configMenuBtn" title="Configuración">
-                            <i data-feather="settings"></i>
-                        </button>
+              <div class="header-actions">
+    <!-- Botón de Configuración con menú desplegable -->
+    <div class="dropdown-menu-container">
+        <button class="btn-icon" onclick="toggleConfigMenu()" id="configMenuBtn" title="Configuración">
+            <i data-feather="settings"></i>
+        </button>
 
-                        <!-- Menú desplegable -->
-                        <div class="dropdown-menu" id="configDropdown">
-                            <div class="dropdown-header">
-                                Configuración del sistema
-                            </div>
-                            <button class="dropdown-item" onclick="closeConfigMenu(); showChangePasswordModal();">
-                                <i data-feather="lock"></i>
-                                <span>Cambiar contraseña</span>
-                            </button>
-                            <button class="dropdown-item" onclick="closeConfigMenu(); openHelp();">
-                                <i data-feather="help-circle"></i>
-                                <span>Ayuda</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="header-actions">
-                        <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                            <i data-feather="log-out"></i>
-                        </a>
-                    </div>
-                </div>
+        <!-- Menú desplegable -->
+        <div class="dropdown-menu" id="configDropdown">
+            <div class="dropdown-header">
+                Configuración del sistema
+            </div>
+            <button class="dropdown-item" onclick="closeConfigMenu(); showChangePasswordModal();">
+                <i data-feather="lock"></i>
+                <span>Cambiar contraseña</span>
+            </button>
+            <button class="dropdown-item" onclick="closeConfigMenu(); openHelp();">
+                <i data-feather="help-circle"></i>
+                <span>Ayuda</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Botón de cerrar sesión -->
+    <a href="logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')" title="Cerrar sesión">
+        <i data-feather="log-out"></i>
+    </a>
+</div>
             </div>
         </header>
 

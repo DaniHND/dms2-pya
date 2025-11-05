@@ -143,7 +143,6 @@ function openCreateUserModal() {
                                     <option value="">Seleccionar rol</option>
                                     <option value="admin">Administrador</option>
                                     <option value="user">Usuario</option>
-                                    <option value="viewer">Visualizador</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -166,14 +165,7 @@ function openCreateUserModal() {
                             </div>
                         </div>
                         
-                        <div class="form-row single">
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" name="download_enabled" value="1" checked>
-                                    Permitir descarga de documentos
-                                </label>
-                            </div>
-                        </div>
+
                         
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" onclick="closeCreateUserModal()">

@@ -77,7 +77,7 @@ if ($flash) {
                 <div class="logo">
                     <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
                 </div>
-                <h1>DMS2</h1>
+                <h1>DMS</h1>
                 <p>Document Management System</p>
 
             </div>
