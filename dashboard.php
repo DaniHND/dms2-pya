@@ -172,218 +172,220 @@ function getFullName()
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Script de acciones de usuario -->
-<script src="assets/js/user-actions.js"></script>
+    <script src="assets/js/user-actions.js"></script>
 </head>
 
 <body class="dashboard-layout">
-<!-- Modal de cambio de contraseña -->
-<?php include 'change_password_modal.php'; ?>
+    <!-- Modal de cambio de contraseña -->
+    <?php include 'change_password_modal.php'; ?>
     <!-- Sidebar -->
     <?php include 'includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
-<header class="content-header">
-    <div class="header-left">
-        <button class="mobile-menu-toggle" onclick="toggleSidebar()">
-            <i data-feather="menu"></i>
-        </button>
-        <h1>Dashboard</h1>
-    </div>
-
-    <div class="header-right">
-        <div class="header-info">
-            <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
-            <div class="current-time" id="currentTime"></div>
-        </div>
-        <div class="header-actions">
-            <!-- Botón de Configuración con menú desplegable -->
-            <div class="dropdown-menu-container">
-                <button class="btn-icon" onclick="toggleConfigMenu()" id="configMenuBtn" title="Configuración">
-                    <i data-feather="settings"></i>
+        <header class="content-header">
+            <div class="header-left">
+                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+                    <i data-feather="menu"></i>
                 </button>
-                
-                <!-- Menú desplegable -->
-                <div class="dropdown-menu" id="configDropdown">
-                    <div class="dropdown-header">
-                        Configuración del sistema
+                <h1>Dashboard</h1>
+            </div>
+
+            <div class="header-right">
+                <div class="header-info">
+                    <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
+                    <div class="current-time" id="currentTime"></div>
+                </div>
+                <div class="header-actions">
+                    <!-- Botón de Configuración con menú desplegable -->
+                    <div class="dropdown-menu-container">
+                        <button class="btn-icon" onclick="toggleConfigMenu()" id="configMenuBtn" title="Configuración">
+                            <i data-feather="settings"></i>
+                        </button>
+
+                        <!-- Menú desplegable -->
+                        <div class="dropdown-menu" id="configDropdown">
+                            <div class="dropdown-header">
+                                Configuración del sistema
+                            </div>
+                            <button class="dropdown-item" onclick="closeConfigMenu(); showChangePasswordModal();">
+                                <i data-feather="lock"></i>
+                                <span>Cambiar contraseña</span>
+                            </button>
+                            <button class="dropdown-item" onclick="closeConfigMenu(); openHelp();">
+                                <i data-feather="help-circle"></i>
+                                <span>Ayuda</span>
+                            </button>
+                        </div>
                     </div>
-                    <button class="dropdown-item" onclick="closeConfigMenu(); showChangePasswordModal();">
-                        <i data-feather="lock"></i>
-                        <span>Cambiar contraseña</span>
-                    </button>
-                    <button class="dropdown-item" onclick="closeConfigMenu(); openHelp();">
-                        <i data-feather="help-circle"></i>
-                        <span>Ayuda</span>
-                    </button>
+                    <div class="header-actions">
+                        <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
+                            <i data-feather="log-out"></i>
+                        </a>
+                    </div>
                 </div>
             </div>
-            
-            <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')" title="Cerrar Sesión">
-                <i data-feather="log-out"></i>
-            </a>
-        </div>
-    </div>
-</header>
+        </header>
 
-<style>
-/* Estilos para el menú desplegable de configuración */
-.dropdown-menu-container {
-    position: relative;
-    display: inline-block;
-}
+        <style>
+            /* Estilos para el menú desplegable de configuración */
+            .dropdown-menu-container {
+                position: relative;
+                display: inline-block;
+            }
 
-.dropdown-menu {
-    display: none;
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-    min-width: 240px;
-    z-index: 1000;
-    overflow: hidden;
-}
+            .dropdown-menu {
+                display: none;
+                position: absolute;
+                top: calc(100% + 8px);
+                right: 0;
+                background: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+                min-width: 240px;
+                z-index: 1000;
+                overflow: hidden;
+            }
 
-.dropdown-menu.active {
-    display: block;
-    animation: dropdownFadeIn 0.2s ease-out;
-}
+            .dropdown-menu.active {
+                display: block;
+                animation: dropdownFadeIn 0.2s ease-out;
+            }
 
-@keyframes dropdownFadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
+            @keyframes dropdownFadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
 
-.dropdown-header {
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-    border-bottom: 1px solid #e5e7eb;
-    font-size: 13px;
-    font-weight: 600;
-    color: #6b7280;
-    text-align: center;
-}
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
 
-.dropdown-item {
-    width: 100%;
-    padding: 12px 16px;
-    background: white;
-    border: none;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: #374151;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    border-bottom: 1px solid #f3f4f6;
-}
+            .dropdown-header {
+                padding: 12px 16px;
+                background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 13px;
+                font-weight: 600;
+                color: #6b7280;
+                text-align: center;
+            }
 
-.dropdown-item:last-child {
-    border-bottom: none;
-}
+            .dropdown-item {
+                width: 100%;
+                padding: 12px 16px;
+                background: white;
+                border: none;
+                text-align: left;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                color: #374151;
+                font-size: 14px;
+                transition: all 0.2s ease;
+                border-bottom: 1px solid #f3f4f6;
+            }
 
-.dropdown-item:hover {
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-    color: #1f2937;
-}
+            .dropdown-item:last-child {
+                border-bottom: none;
+            }
 
-.dropdown-item i {
-    width: 18px;
-    height: 18px;
-    color: #6b7280;
-}
+            .dropdown-item:hover {
+                background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                color: #1f2937;
+            }
 
-.dropdown-item:hover i {
-    color: #3b82f6;
-}
+            .dropdown-item i {
+                width: 18px;
+                height: 18px;
+                color: #6b7280;
+            }
 
-.dropdown-item span {
-    flex: 1;
-}
+            .dropdown-item:hover i {
+                color: #3b82f6;
+            }
 
-/* Overlay para cerrar el menú al hacer clic fuera */
-.dropdown-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 999;
-}
+            .dropdown-item span {
+                flex: 1;
+            }
 
-.dropdown-overlay.active {
-    display: block;
-}
-</style>
+            /* Overlay para cerrar el menú al hacer clic fuera */
+            .dropdown-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 999;
+            }
 
-<script>
-// Toggle menú de configuración
-function toggleConfigMenu() {
-    const dropdown = document.getElementById('configDropdown');
-    const overlay = document.getElementById('dropdownOverlay');
-    
-    if (!overlay) {
-        // Crear overlay si no existe
-        const newOverlay = document.createElement('div');
-        newOverlay.id = 'dropdownOverlay';
-        newOverlay.className = 'dropdown-overlay';
-        newOverlay.onclick = closeConfigMenu;
-        document.body.appendChild(newOverlay);
-    }
-    
-    const overlayElement = document.getElementById('dropdownOverlay');
-    
-    if (dropdown.classList.contains('active')) {
-        closeConfigMenu();
-    } else {
-        dropdown.classList.add('active');
-        overlayElement.classList.add('active');
-        
-        // Actualizar iconos de Feather
-        if (typeof feather !== 'undefined') {
-            feather.replace();
-        }
-    }
-}
+            .dropdown-overlay.active {
+                display: block;
+            }
+        </style>
 
-// Cerrar menú de configuración
-function closeConfigMenu() {
-    const dropdown = document.getElementById('configDropdown');
-    const overlay = document.getElementById('dropdownOverlay');
-    
-    if (dropdown) {
-        dropdown.classList.remove('active');
-    }
-    
-    if (overlay) {
-        overlay.classList.remove('active');
-    }
-}
+        <script>
+            // Toggle menú de configuración
+            function toggleConfigMenu() {
+                const dropdown = document.getElementById('configDropdown');
+                const overlay = document.getElementById('dropdownOverlay');
 
-// Cerrar menú al presionar ESC
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        closeConfigMenu();
-    }
-});
+                if (!overlay) {
+                    // Crear overlay si no existe
+                    const newOverlay = document.createElement('div');
+                    newOverlay.id = 'dropdownOverlay';
+                    newOverlay.className = 'dropdown-overlay';
+                    newOverlay.onclick = closeConfigMenu;
+                    document.body.appendChild(newOverlay);
+                }
 
-// Cerrar menú al hacer scroll
-window.addEventListener('scroll', function() {
-    closeConfigMenu();
-});
-</script>
+                const overlayElement = document.getElementById('dropdownOverlay');
+
+                if (dropdown.classList.contains('active')) {
+                    closeConfigMenu();
+                } else {
+                    dropdown.classList.add('active');
+                    overlayElement.classList.add('active');
+
+                    // Actualizar iconos de Feather
+                    if (typeof feather !== 'undefined') {
+                        feather.replace();
+                    }
+                }
+            }
+
+            // Cerrar menú de configuración
+            function closeConfigMenu() {
+                const dropdown = document.getElementById('configDropdown');
+                const overlay = document.getElementById('dropdownOverlay');
+
+                if (dropdown) {
+                    dropdown.classList.remove('active');
+                }
+
+                if (overlay) {
+                    overlay.classList.remove('active');
+                }
+            }
+
+            // Cerrar menú al presionar ESC
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    closeConfigMenu();
+                }
+            });
+
+            // Cerrar menú al hacer scroll
+            window.addEventListener('scroll', function() {
+                closeConfigMenu();
+            });
+        </script>
 
         <!-- Contenido del dashboard -->
         <div class="dashboard-content">
@@ -544,7 +546,7 @@ window.addEventListener('scroll', function() {
                         </div>
                     </div>
                 </div>
-            </div>            
+            </div>
         </div>
     </main>
 
@@ -587,10 +589,10 @@ window.addEventListener('scroll', function() {
 
             // Mapear datos existentes
             const dataMap = new Map(documentsByDay.map(item => [item.date, parseInt(item.count)]));
-            
+
             // Crear array de datos para todos los días
             const chartData = last7Days.map(date => dataMap.get(date) || 0);
-            
+
             // Formatear labels
             const chartLabels = last7Days.map(date => {
                 const d = new Date(date);
@@ -654,7 +656,7 @@ window.addEventListener('scroll', function() {
         // Inicializar gráfico de documentos por tipo (dona)
         function initTypeChart() {
             const ctx = document.getElementById('typeChart').getContext('2d');
-            
+
             if (documentsByType.length === 0) {
                 ctx.fillStyle = '#6b7280';
                 ctx.textAlign = 'center';
@@ -713,12 +715,12 @@ window.addEventListener('scroll', function() {
             const now = new Date();
             const timeString = now.toLocaleString('es-ES', {
                 day: '2-digit',
-                month: '2-digit', 
+                month: '2-digit',
                 year: 'numeric',
                 hour: '2-digit',
                 minute: '2-digit'
             });
-            
+
             const welcomeTimeString = now.toLocaleString('es-ES', {
                 weekday: 'long',
                 day: 'numeric',
@@ -727,14 +729,14 @@ window.addEventListener('scroll', function() {
                 hour: '2-digit',
                 minute: '2-digit'
             });
-            
+
             const timeElement = document.getElementById('currentTime');
             const welcomeTimeElement = document.getElementById('welcomeTime');
-            
+
             if (timeElement) {
                 timeElement.textContent = timeString;
             }
-            
+
             if (welcomeTimeElement) {
                 welcomeTimeElement.textContent = welcomeTimeString;
             }
@@ -745,14 +747,14 @@ window.addEventListener('scroll', function() {
             const sidebar = document.querySelector('.sidebar');
             const mainContent = document.querySelector('.main-content');
             const overlay = document.querySelector('.sidebar-overlay');
-            
+
             if (sidebar) {
                 sidebar.classList.toggle('collapsed');
-                
+
                 if (mainContent) {
                     mainContent.classList.toggle('sidebar-collapsed');
                 }
-                
+
                 if (overlay) {
                     overlay.classList.toggle('active');
                 }
@@ -1183,6 +1185,7 @@ window.addEventListener('scroll', function() {
             align-items: center;
             gap: 1rem;
         }
+
         .header-right {
             display: flex;
             align-items: center;
@@ -1248,6 +1251,7 @@ window.addEventListener('scroll', function() {
                 opacity: 0;
                 transform: translateY(20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -1258,10 +1262,21 @@ window.addEventListener('scroll', function() {
             animation: fadeInUp 0.6s ease-out;
         }
 
-        .stat-card:nth-child(1) { animation-delay: 0.1s; }
-        .stat-card:nth-child(2) { animation-delay: 0.2s; }
-        .stat-card:nth-child(3) { animation-delay: 0.3s; }
-        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+        .stat-card:nth-child(1) {
+            animation-delay: 0.1s;
+        }
+
+        .stat-card:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .stat-card:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+
+        .stat-card:nth-child(4) {
+            animation-delay: 0.4s;
+        }
 
         .dashboard-widget {
             animation: fadeInUp 0.6s ease-out;
@@ -1436,56 +1451,77 @@ window.addEventListener('scroll', function() {
             left: 0;
             right: 0;
             height: 4px;
-background: linear-gradient(90deg, #3b82f6, #2563eb);
+            background: linear-gradient(90deg, #3b82f6, #2563eb);
             border-radius: 16px 16px 0 0;
         }
     </style>
-    
+
     <!-- AGREGAR ESTA LÍNEA AQUÍ -->
     <?php include 'change_password_modal.php'; ?>
-    
+
 </body>
 
 </html>
 
 <?php
 // Funciones auxiliares para la actividad
-function getActivityIcon($action) {
+function getActivityIcon($action)
+{
     switch ($action) {
-        case 'login': return 'log-in';
-        case 'logout': return 'log-out';
-        case 'document_upload': return 'upload';
-        case 'document_download': return 'download';
-        case 'user_created': return 'user-plus';
-        case 'company_created': return 'building';
-        case 'document_deleted': return 'trash-2';
-        case 'dashboard_access': return 'home';
-        default: return 'activity';
+        case 'login':
+            return 'log-in';
+        case 'logout':
+            return 'log-out';
+        case 'document_upload':
+            return 'upload';
+        case 'document_download':
+            return 'download';
+        case 'user_created':
+            return 'user-plus';
+        case 'company_created':
+            return 'building';
+        case 'document_deleted':
+            return 'trash-2';
+        case 'dashboard_access':
+            return 'home';
+        default:
+            return 'activity';
     }
 }
 
-function getActivityDescription($action) {
+function getActivityDescription($action)
+{
     switch ($action) {
-        case 'login': return 'inició sesión';
-        case 'logout': return 'cerró sesión';
-        case 'document_upload': return 'subió un documento';
-        case 'document_download': return 'descargó un documento';
-        case 'user_created': return 'creó un usuario';
-        case 'company_created': return 'creó una empresa';
-        case 'document_deleted': return 'eliminó un documento';
-        case 'dashboard_access': return 'accedió al dashboard';
-        default: return 'realizó una acción';
+        case 'login':
+            return 'inició sesión';
+        case 'logout':
+            return 'cerró sesión';
+        case 'document_upload':
+            return 'subió un documento';
+        case 'document_download':
+            return 'descargó un documento';
+        case 'user_created':
+            return 'creó un usuario';
+        case 'company_created':
+            return 'creó una empresa';
+        case 'document_deleted':
+            return 'eliminó un documento';
+        case 'dashboard_access':
+            return 'accedió al dashboard';
+        default:
+            return 'realizó una acción';
     }
 }
 
-function formatTimeAgo($datetime) {
+function formatTimeAgo($datetime)
+{
     $time = time() - strtotime($datetime);
-    
+
     if ($time < 60) return 'Hace menos de 1 minuto';
-    if ($time < 3600) return 'Hace ' . floor($time/60) . ' minutos';
-    if ($time < 86400) return 'Hace ' . floor($time/3600) . ' horas';
-    if ($time < 2592000) return 'Hace ' . floor($time/86400) . ' días';
-    
+    if ($time < 3600) return 'Hace ' . floor($time / 60) . ' minutos';
+    if ($time < 86400) return 'Hace ' . floor($time / 3600) . ' horas';
+    if ($time < 2592000) return 'Hace ' . floor($time / 86400) . ' días';
+
     return date('d/m/Y', strtotime($datetime));
 }
 ?>
