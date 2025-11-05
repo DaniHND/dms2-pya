@@ -83,11 +83,13 @@ $filters = [
 $whereConditions = [];
 $params = [];
 
+// CORRECCIÓN AQUÍ - Usar placeholders únicos
 if (!empty($filters['search'])) {
-    $whereConditions[] = "(d.name LIKE :search OR d.description LIKE :search OR c.name LIKE :search_company OR CONCAT(u.first_name, ' ', u.last_name) LIKE :search_manager)";
+    $whereConditions[] = "(d.name LIKE :search OR d.description LIKE :search2 OR c.name LIKE :search3 OR CONCAT(u.first_name, ' ', u.last_name) LIKE :search4)";
     $params['search'] = '%' . $filters['search'] . '%';
-    $params['search_company'] = '%' . $filters['search'] . '%';
-    $params['search_manager'] = '%' . $filters['search'] . '%';
+    $params['search2'] = '%' . $filters['search'] . '%';
+    $params['search3'] = '%' . $filters['search'] . '%';
+    $params['search4'] = '%' . $filters['search'] . '%';
 }
 
 if (!empty($filters['status'])) {
@@ -156,9 +158,6 @@ try {
 } catch (Exception $e) {
     $companies = [];
 }
-
-// Obtener estadísticas - REMOVIDO para simplificar
-// Se puede agregar después si es necesario
 
 // Funciones helper
 function getStatusBadgeClass($status)
@@ -405,7 +404,7 @@ logActivity($currentUser['id'], 'view_departments', 'departments', null, 'Usuari
                     </table>
                 </div>
 
-                <!-- Paginación - MISMO ESTILO -->
+                <!-- Paginación -->
                 <?php if ($totalPages > 1): ?>
                     <div class="pagination-section">
                         <div class="pagination-info">
@@ -448,12 +447,23 @@ logActivity($currentUser['id'], 'view_departments', 'departments', null, 'Usuari
         // Actualizar tiempo
         updateTime();
 
-        // Función para manejar cambios en filtros (filtrado automático)
+        // Variable para almacenar el timeout del debounce
+        let searchTimeout = null;
+
+        // Función para manejar cambios en filtros con debounce
         function handleFilterChange() {
-            const form = document.getElementById('filtersForm');
-            if (form) {
-                form.submit();
+            // Limpiar timeout anterior
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
             }
+
+            // Crear nuevo timeout de 800ms
+            searchTimeout = setTimeout(() => {
+                const form = document.getElementById('filtersForm');
+                if (form) {
+                    form.submit();
+                }
+            }, 800);
         }
     </script>
 </body>

@@ -26,9 +26,11 @@ $filters = [
 $whereConditions = [];
 $params = [];
 
+// CORRECCIÓN AQUÍ - Usar placeholders únicos
 if (!empty($filters['search'])) {
-    $whereConditions[] = "(dt.name LIKE :search OR dt.description LIKE :search)";
+    $whereConditions[] = "(dt.name LIKE :search OR dt.description LIKE :search2)";
     $params['search'] = '%' . $filters['search'] . '%';
+    $params['search2'] = '%' . $filters['search'] . '%';
 }
 
 if (!empty($filters['status'])) {
@@ -191,17 +193,27 @@ if (!function_exists('logActivity')) {
         // Variables globales
         var currentModal = null;
         var currentDocumentTypeId = null;
+        var searchTimeout = null; // Para el debounce
 
         // ==========================================
-        // FUNCIÓN PARA FILTROS
+        // FUNCIÓN PARA FILTROS CON DEBOUNCE
         // ==========================================
         
         function handleFilterChange() {
             console.log('🔍 Cambio en filtros detectado');
-            const form = document.getElementById('filtersForm');
-            if (form) {
-                form.submit();
+            
+            // Limpiar timeout anterior
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
             }
+            
+            // Crear nuevo timeout de 800ms
+            searchTimeout = setTimeout(() => {
+                const form = document.getElementById('filtersForm');
+                if (form) {
+                    form.submit();
+                }
+            }, 800);
         }
 
         // ==========================================
