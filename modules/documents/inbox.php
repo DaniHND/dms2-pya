@@ -928,9 +928,6 @@ if (!function_exists('logActivity')) {
                    <div class="current-time" id="currentTime"></div>
                </div>
                <div class="header-actions">
-                   <button class="btn-icon" onclick="showSettings()">
-                       <i data-feather="settings"></i>
-                   </button>
                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                        <i data-feather="log-out"></i>
                    </a>
@@ -1301,12 +1298,6 @@ if (!function_exists('logActivity')) {
                                    <br>Para obtener acceso, debe estar asignado a un grupo con el permiso "Ver Archivos" activado.
                                    <br>Contacte al administrador del sistema para solicitar acceso.
                                </p>
-                               <div class="empty-actions">
-                                   <a href="../../dashboard.php" class="btn-secondary">
-                                       <i data-feather="home"></i>
-                                       <span>Volver al Dashboard</span>
-                                   </a>
-                               </div>
                            </div>
                        </div>
                    </div>

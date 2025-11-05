@@ -383,9 +383,6 @@ if (function_exists('logActivity')) {
                     <div class="current-time" id="currentTime"></div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
-                        <i data-feather="settings"></i>
-                    </button>
                     <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
                         <i data-feather="log-out"></i>
                     </a>

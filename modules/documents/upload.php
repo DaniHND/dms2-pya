@@ -212,27 +212,13 @@ if ($noAccess) {
                                 <div class="empty-icon">
                                     <i data-feather="lock"></i>
                                 </div>
-                                <h3>Sin permisos para subir archivos</h3>
-                                <p>
-                                    Su usuario no tiene permisos para subir documentos al sistema.
-                                    <br>Para obtener acceso de subida, contacte al administrador del sistema.
-                                </p>
-                                <?php if ($error): ?>
-                                    <div class="alert alert-error" style="margin-top: 1rem;">
-                                        <i data-feather="alert-circle"></i>
-                                        <?php echo htmlspecialchars($error); ?>
-                                    </div>
-                                <?php endif; ?>
-                                <div class="empty-actions">
-                                    <a href="inbox.php" class="btn-secondary">
-                                        <i data-feather="folder"></i>
-                                        <span>Ver Documentos</span>
-                                    </a>
-                                    <a href="../../dashboard.php" class="btn-secondary">
-                                        <i data-feather="home"></i>
-                                        <span>Volver al Dashboard</span>
-                                    </a>
-                                </div>
+                                <div></div>
+                              <p>
+                                   Su usuario no tiene permisos para ver documentos en el sistema.
+                                   <br>Para obtener acceso, debe estar asignado a un grupo con el permiso "Subir Documentos" activado.
+                                   <br>Contacte al administrador del sistema para solicitar acceso.
+                               </p>
+                                                         
                             </div>
                         </div>
                     </div>
@@ -838,9 +824,6 @@ if (!function_exists('logActivity')) {
                    <div class="current-time" id="currentTime"></div>
                </div>
                <div class="header-actions">
-                   <button class="btn-icon" onclick="showSettings()" title="Configuración">
-                       <i data-feather="settings"></i>
-                   </button>
                    <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')" title="Cerrar sesión">
                        <i data-feather="log-out"></i>
                    </a>

@@ -171,38 +171,219 @@ function getFullName()
     <link rel="stylesheet" href="assets/css/dashboard.css">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Script de acciones de usuario -->
+<script src="assets/js/user-actions.js"></script>
 </head>
 
 <body class="dashboard-layout">
+<!-- Modal de cambio de contraseña -->
+<?php include 'change_password_modal.php'; ?>
     <!-- Sidebar -->
     <?php include 'includes/sidebar.php'; ?>
 
     <!-- Contenido principal -->
     <main class="main-content">
-        <!-- Header del dashboard -->
-        <header class="content-header">
-            <div class="header-left">
-                <button class="mobile-menu-toggle" onclick="toggleSidebar()">
-                    <i data-feather="menu"></i>
-                </button>
-                <h1>Dashboard</h1>
-            </div>
+<header class="content-header">
+    <div class="header-left">
+        <button class="mobile-menu-toggle" onclick="toggleSidebar()">
+            <i data-feather="menu"></i>
+        </button>
+        <h1>Dashboard</h1>
+    </div>
 
-            <div class="header-right">
-                <div class="header-info">
-                    <div class="user-name-header"><?php echo htmlspecialchars(getFullName()); ?></div>
-                    <div class="current-time" id="currentTime"></div>
-                </div>
-                <div class="header-actions">
-                    <button class="btn-icon" onclick="showComingSoon('Configuración')">
-                        <i data-feather="settings"></i>
+    <div class="header-right">
+        <div class="header-info">
+            <div class="user-name-header"><?php echo htmlspecialchars(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? '')); ?></div>
+            <div class="current-time" id="currentTime"></div>
+        </div>
+        <div class="header-actions">
+            <!-- Botón de Configuración con menú desplegable -->
+            <div class="dropdown-menu-container">
+                <button class="btn-icon" onclick="toggleConfigMenu()" id="configMenuBtn" title="Configuración">
+                    <i data-feather="settings"></i>
+                </button>
+                
+                <!-- Menú desplegable -->
+                <div class="dropdown-menu" id="configDropdown">
+                    <div class="dropdown-header">
+                        Configuración del sistema
+                    </div>
+                    <button class="dropdown-item" onclick="closeConfigMenu(); showChangePasswordModal();">
+                        <i data-feather="lock"></i>
+                        <span>Cambiar contraseña</span>
                     </button>
-                    <a href="logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')">
-                        <i data-feather="log-out"></i>
-                    </a>
+                    <button class="dropdown-item" onclick="closeConfigMenu(); openHelp();">
+                        <i data-feather="help-circle"></i>
+                        <span>Ayuda</span>
+                    </button>
                 </div>
             </div>
-        </header>
+            
+            <a href="../../logout.php" class="btn-icon logout-btn" onclick="return confirm('¿Está seguro que desea cerrar sesión?')" title="Cerrar Sesión">
+                <i data-feather="log-out"></i>
+            </a>
+        </div>
+    </div>
+</header>
+
+<style>
+/* Estilos para el menú desplegable de configuración */
+.dropdown-menu-container {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    min-width: 240px;
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.dropdown-menu.active {
+    display: block;
+    animation: dropdownFadeIn 0.2s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dropdown-header {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 13px;
+    font-weight: 600;
+    color: #6b7280;
+    text-align: center;
+}
+
+.dropdown-item {
+    width: 100%;
+    padding: 12px 16px;
+    background: white;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #374151;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    color: #1f2937;
+}
+
+.dropdown-item i {
+    width: 18px;
+    height: 18px;
+    color: #6b7280;
+}
+
+.dropdown-item:hover i {
+    color: #3b82f6;
+}
+
+.dropdown-item span {
+    flex: 1;
+}
+
+/* Overlay para cerrar el menú al hacer clic fuera */
+.dropdown-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 999;
+}
+
+.dropdown-overlay.active {
+    display: block;
+}
+</style>
+
+<script>
+// Toggle menú de configuración
+function toggleConfigMenu() {
+    const dropdown = document.getElementById('configDropdown');
+    const overlay = document.getElementById('dropdownOverlay');
+    
+    if (!overlay) {
+        // Crear overlay si no existe
+        const newOverlay = document.createElement('div');
+        newOverlay.id = 'dropdownOverlay';
+        newOverlay.className = 'dropdown-overlay';
+        newOverlay.onclick = closeConfigMenu;
+        document.body.appendChild(newOverlay);
+    }
+    
+    const overlayElement = document.getElementById('dropdownOverlay');
+    
+    if (dropdown.classList.contains('active')) {
+        closeConfigMenu();
+    } else {
+        dropdown.classList.add('active');
+        overlayElement.classList.add('active');
+        
+        // Actualizar iconos de Feather
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+    }
+}
+
+// Cerrar menú de configuración
+function closeConfigMenu() {
+    const dropdown = document.getElementById('configDropdown');
+    const overlay = document.getElementById('dropdownOverlay');
+    
+    if (dropdown) {
+        dropdown.classList.remove('active');
+    }
+    
+    if (overlay) {
+        overlay.classList.remove('active');
+    }
+}
+
+// Cerrar menú al presionar ESC
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeConfigMenu();
+    }
+});
+
+// Cerrar menú al hacer scroll
+window.addEventListener('scroll', function() {
+    closeConfigMenu();
+});
+</script>
 
         <!-- Contenido del dashboard -->
         <div class="dashboard-content">
@@ -1255,10 +1436,14 @@ function getFullName()
             left: 0;
             right: 0;
             height: 4px;
-            background: linear-gradient(90deg, #3b82f6, #2563eb);
+background: linear-gradient(90deg, #3b82f6, #2563eb);
             border-radius: 16px 16px 0 0;
         }
     </style>
+    
+    <!-- AGREGAR ESTA LÍNEA AQUÍ -->
+    <?php include 'change_password_modal.php'; ?>
+    
 </body>
 
 </html>

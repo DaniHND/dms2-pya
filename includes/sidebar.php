@@ -138,6 +138,12 @@ function isActive($page, $module = null)
                 </li>
 
             <?php endif; ?>
+            <li class="nav-divider"></li>
+            <li>
+                <a href="#">
+                    <span>Configuración</span>
+                </a>
+            </li>
         </ul>
     </nav>
 </aside>

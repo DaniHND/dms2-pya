@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Servidor: 127.0.0.1
--- Tiempo de generación: 15-08-2025 a las 17:46:32
+-- Tiempo de generación: 21-08-2025 a las 19:36:31
 -- Versión del servidor: 10.4.32-MariaDB
 -- Versión de PHP: 8.2.12
 
@@ -20,6 +20,44 @@ SET time_zone = "+00:00";
 --
 -- Base de datos: `dms2`
 --
+CREATE DATABASE IF NOT EXISTS `dms2` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE `dms2`;
+
+DELIMITER $$
+--
+-- Funciones
+--
+DROP FUNCTION IF EXISTS `ValidateGroupPermissions`$$
+CREATE DEFINER=`root`@`localhost` FUNCTION `ValidateGroupPermissions` (`permissions_json` TEXT) RETURNS TINYINT(1) DETERMINISTIC READS SQL DATA BEGIN
+    DECLARE result BOOLEAN DEFAULT FALSE;
+    DECLARE required_keys_count INT DEFAULT 0;
+    
+    -- Verificar que sea un JSON válido
+    IF JSON_VALID(permissions_json) = 0 THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Verificar que contenga las claves requeridas para los permisos
+    -- Contamos cuántas de las 6 claves principales existen
+    SET required_keys_count = (
+        IF(JSON_EXTRACT(permissions_json, '$.upload_files') IS NOT NULL, 1, 0) +
+        IF(JSON_EXTRACT(permissions_json, '$.view_files') IS NOT NULL, 1, 0) +
+        IF(JSON_EXTRACT(permissions_json, '$.create_folders') IS NOT NULL, 1, 0) +
+        IF(JSON_EXTRACT(permissions_json, '$.download_files') IS NOT NULL, 1, 0) +
+        IF(JSON_EXTRACT(permissions_json, '$.delete_files') IS NOT NULL, 1, 0) +
+        IF(JSON_EXTRACT(permissions_json, '$.move_files') IS NOT NULL, 1, 0)
+    );
+    
+    -- Si tiene al menos 5 de las 6 claves principales, es válido
+    -- (move_files es opcional por compatibilidad)
+    IF required_keys_count >= 5 THEN
+        SET result = TRUE;
+    END IF;
+    
+    RETURN result;
+END$$
+
+DELIMITER ;
 
 -- --------------------------------------------------------
 
@@ -27,6 +65,7 @@ SET time_zone = "+00:00";
 -- Estructura de tabla para la tabla `activity_logs`
 --
 
+DROP TABLE IF EXISTS `activity_logs`;
 CREATE TABLE `activity_logs` (
   `id` int(11) NOT NULL,
   `user_id` int(11) DEFAULT NULL,
@@ -39,12 +78,43 @@ CREATE TABLE `activity_logs` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `activity_logs`
+--
+
+INSERT INTO `activity_logs` (`id`, `user_id`, `action`, `table_name`, `record_id`, `description`, `ip_address`, `user_agent`, `created_at`) VALUES
+(1, 1, 'dashboard_access', 'dashboard', NULL, 'Usuario accedió al dashboard', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:11:45'),
+(2, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:11:52'),
+(3, 1, 'user_created', 'users', 17, 'Usuario Pruebav Visualizador (visual) creado con rol viewer', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:12:50'),
+(4, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:16:57'),
+(5, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:16:59'),
+(6, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:00'),
+(7, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:18'),
+(8, 1, 'document_deleted', 'documents', 154, 'Eliminó documento: DMS2_UseCase (Empresa Ejemplo SA)', NULL, NULL, '2025-08-21 17:17:24'),
+(9, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:24'),
+(10, 1, 'folder_created', 'document_folders', 27, 'Creó carpeta \'cas\' en Empresa Ejemplo SA → Administración', NULL, NULL, '2025-08-21 17:17:35'),
+(11, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:38'),
+(12, 1, 'view', 'visual_explorer', NULL, 'Usuario navegó por el explorador visual', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:44'),
+(13, 1, 'view_reports', 'reports', NULL, 'Usuario accedió al módulo de reportes', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:48'),
+(14, 1, 'view_activity_log', 'reports', NULL, 'Usuario accedió al log de actividades', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:50'),
+(15, 1, 'export_pdf', 'reports', NULL, 'Usuario exportó reporte de activity_log en formato pdf', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-21 17:17:53'),
+(16, 1, 'view_reports', 'reports', NULL, 'Usuario accedió al módulo de reportes', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:57'),
+(17, 1, 'view_user_reports', 'reports', NULL, 'Usuario accedió al reporte de usuarios', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:17:58'),
+(18, 1, 'export_pdf', 'reports', NULL, 'Usuario exportó reporte de user_reports en formato pdf', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-21 17:18:01'),
+(19, 1, 'view_reports', 'reports', NULL, 'Usuario accedió al módulo de reportes', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:18:04'),
+(20, 1, 'view_documents_report', 'reports', NULL, 'Usuario accedió al reporte de documentos', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:18:06'),
+(21, 1, 'export_pdf', 'reports', NULL, 'Usuario exportó reporte de documents_report en formato pdf', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-21 17:18:08'),
+(22, 1, 'view_reports', 'reports', NULL, 'Usuario accedió al módulo de reportes', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', '2025-08-22 01:18:11'),
+(23, 1, 'group_permissions_updated', 'user_groups', 46, 'Grupo \'Visualizadores\' actualizado: Subir archivos: ACTIVADO, Ver archivos (Inbox): ACTIVADO', NULL, NULL, '2025-08-21 17:22:27'),
+(24, 1, 'group_permissions_updated', 'user_groups', 46, 'Grupo \'Visualizadores\' actualizado: Empresas permitidas: 1 elementos, Departamentos permitidos: 1 elementos', NULL, NULL, '2025-08-21 17:22:38');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `companies`
 --
 
+DROP TABLE IF EXISTS `companies`;
 CREATE TABLE `companies` (
   `id` int(11) NOT NULL,
   `name` varchar(255) NOT NULL,
@@ -59,12 +129,21 @@ CREATE TABLE `companies` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `companies`
+--
+
+INSERT INTO `companies` (`id`, `name`, `description`, `ruc`, `address`, `phone`, `email`, `contact_person`, `status`, `created_at`, `updated_at`) VALUES
+(1, 'Empresa Ejemplo SA', 'Empresa principal del grupo empresarial', '1234567890123', 'Av. Principal 123, Ciudad', '555-0001', 'contacto@ejemplo.com', 'Juan Pérez', 'active', '2025-07-24 17:26:06', '2025-08-02 15:44:45'),
+(2, 'Corporación Demo SRL', 'Corporación especializada en servicios', '9876543210987', 'Calle Secundaria 456, Ciudad', '555-0002', 'info@demo.com', 'María González', 'active', '2025-07-24 17:26:06', '2025-08-02 15:44:45');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `departments`
 --
 
+DROP TABLE IF EXISTS `departments`;
 CREATE TABLE `departments` (
   `id` int(11) NOT NULL,
   `company_id` int(11) DEFAULT NULL,
@@ -77,12 +156,22 @@ CREATE TABLE `departments` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `departments`
+--
+
+INSERT INTO `departments` (`id`, `company_id`, `manager_id`, `name`, `description`, `parent_id`, `status`, `created_at`, `updated_at`) VALUES
+(1, 1, NULL, 'Administración', 'Departamento de Administración General', NULL, 'active', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(4, 2, NULL, 'Ventas', 'Departamento de Ventas', NULL, 'active', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(5, 2, NULL, 'Marketing', 'Departamento de Marketing', 4, 'active', '2025-07-24 17:26:06', '2025-07-24 17:26:06');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `documents`
 --
 
+DROP TABLE IF EXISTS `documents`;
 CREATE TABLE `documents` (
   `id` int(11) NOT NULL,
   `company_id` int(11) DEFAULT NULL,
@@ -104,12 +193,21 @@ CREATE TABLE `documents` (
   `deleted_by` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `documents`
+--
+
+INSERT INTO `documents` (`id`, `company_id`, `department_id`, `folder_id`, `document_type_id`, `user_id`, `name`, `original_name`, `file_path`, `file_size`, `mime_type`, `description`, `tags`, `status`, `created_at`, `updated_at`, `deleted_at`, `deleted_by`) VALUES
+(153, 1, 1, 27, 4, 1, 'diagrama de caso', 'dms2_diagrama_casos_uso.png', 'uploads/documents/diagrama_de_caso.png', 56503, 'image/png', '', NULL, 'active', '2025-08-21 17:16:57', '2025-08-21 17:17:42', NULL, NULL),
+(154, 1, 1, NULL, 4, 1, 'DMS2_UseCase', 'DMS2_UseCase.png', 'uploads/documents/DMS2_UseCase.png', 284663, 'image/png', '', NULL, 'deleted', '2025-08-21 17:17:18', '2025-08-21 17:17:24', '2025-08-21 17:17:24', 1);
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `document_folders`
 --
 
+DROP TABLE IF EXISTS `document_folders`;
 CREATE TABLE `document_folders` (
   `id` int(11) NOT NULL,
   `name` varchar(150) NOT NULL,
@@ -126,12 +224,20 @@ CREATE TABLE `document_folders` (
   `updated_at` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Volcado de datos para la tabla `document_folders`
+--
+
+INSERT INTO `document_folders` (`id`, `name`, `description`, `company_id`, `department_id`, `parent_folder_id`, `folder_color`, `folder_icon`, `folder_path`, `is_active`, `created_by`, `created_at`, `updated_at`) VALUES
+(27, 'cas', '', 1, 1, NULL, '#34495e', 'folder', '/Empresa Ejemplo SA/Administración/cas', 1, 1, '2025-08-21 17:17:35', '2025-08-21 17:17:35');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `document_types`
 --
 
+DROP TABLE IF EXISTS `document_types`;
 CREATE TABLE `document_types` (
   `id` int(11) NOT NULL,
   `name` varchar(100) NOT NULL,
@@ -145,12 +251,22 @@ CREATE TABLE `document_types` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `document_types`
+--
+
+INSERT INTO `document_types` (`id`, `name`, `description`, `icon`, `color`, `extensions`, `max_size`, `status`, `created_at`, `updated_at`) VALUES
+(1, 'Facturas', 'Facturas y comprobantes fiscales', 'file-text', '#6b7280', '[\"pdf\", \"jpg\", \"png\"]', 10485760, 'active', '2025-07-24 17:26:06', '2025-07-30 19:47:17'),
+(2, 'Contratos', 'Contratos y acuerdos legales', 'file-text', '#6b7280', '[\"pdf\", \"doc\", \"docx\"]', 20971520, 'active', '2025-07-24 17:26:06', '2025-07-30 19:47:17'),
+(4, 'Imágenes', 'Archivos de imagen', 'file-text', '#6b7280', '[\"jpg\", \"jpeg\", \"png\", \"gif\"]', 5242880, 'active', '2025-07-24 17:26:06', '2025-07-30 19:47:17');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura Stand-in para la vista `group_stats`
 -- (Véase abajo para la vista actual)
 --
+DROP VIEW IF EXISTS `group_stats`;
 CREATE TABLE `group_stats` (
 `id` int(11)
 ,`name` varchar(150)
@@ -175,6 +291,7 @@ CREATE TABLE `group_stats` (
 -- Estructura de tabla para la tabla `inbox_records`
 --
 
+DROP TABLE IF EXISTS `inbox_records`;
 CREATE TABLE `inbox_records` (
   `id` int(11) NOT NULL,
   `document_id` int(11) NOT NULL,
@@ -196,6 +313,7 @@ CREATE TABLE `inbox_records` (
 -- Estructura de tabla para la tabla `notifications`
 --
 
+DROP TABLE IF EXISTS `notifications`;
 CREATE TABLE `notifications` (
   `id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
@@ -218,6 +336,7 @@ CREATE TABLE `notifications` (
 -- Estructura de tabla para la tabla `security_groups`
 --
 
+DROP TABLE IF EXISTS `security_groups`;
 CREATE TABLE `security_groups` (
   `id` int(11) NOT NULL,
   `company_id` int(11) DEFAULT NULL,
@@ -230,12 +349,21 @@ CREATE TABLE `security_groups` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `security_groups`
+--
+
+INSERT INTO `security_groups` (`id`, `company_id`, `department_id`, `name`, `description`, `permissions`, `status`, `created_at`, `updated_at`) VALUES
+(1, 1, 1, 'Administradores', 'Acceso total al sistema', '{\"read\": true, \"write\": true, \"delete\": true, \"admin\": true}', 'active', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(3, 2, 4, 'Usuarios Ventas', 'Acceso a documentos', '{\"read\": true, \"write\": true, \"delete\": false, \"admin\": false}', 'active', '2025-07-24 17:26:06', '2025-08-08 22:23:10');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `system_config`
 --
 
+DROP TABLE IF EXISTS `system_config`;
 CREATE TABLE `system_config` (
   `id` int(11) NOT NULL,
   `config_key` varchar(100) NOT NULL,
@@ -245,12 +373,24 @@ CREATE TABLE `system_config` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `system_config`
+--
+
+INSERT INTO `system_config` (`id`, `config_key`, `config_value`, `description`, `created_at`, `updated_at`) VALUES
+(1, 'system_name', 'DMS2 - Sistema Gestor de Documentos', 'Nombre del sistema', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(2, 'max_file_size', '20971520', 'Tamaño máximo de archivo en bytes (20MB)', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(3, 'allowed_extensions', '[\"pdf\", \"doc\", \"docx\", \"xlsx\", \"jpg\", \"jpeg\", \"png\", \"gif\"]', 'Extensiones permitidas', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(4, 'session_timeout', '3600', 'Tiempo de sesión en segundos (1 hora)', '2025-07-24 17:26:06', '2025-07-24 17:26:06'),
+(5, 'backup_enabled', 'true', 'Habilitar respaldos automáticos', '2025-07-24 17:26:06', '2025-07-24 17:26:06');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `users`
 --
 
+DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
   `id` int(11) NOT NULL,
   `username` varchar(50) NOT NULL,
@@ -269,12 +409,24 @@ CREATE TABLE `users` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `users`
+--
+
+INSERT INTO `users` (`id`, `username`, `password`, `email`, `first_name`, `last_name`, `company_id`, `department_id`, `group_id`, `role`, `status`, `download_enabled`, `last_login`, `created_at`, `updated_at`) VALUES
+(1, 'admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@dms2.com', 'Administrador', 'Sistema', 1, 1, 1, 'admin', 'active', 1, '2025-08-21 17:11:43', '2025-07-24 17:26:06', '2025-08-21 17:11:43'),
+(2, 'jperez', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'jperez@ejemplo.com', 'Juan', 'Pérez', 1, NULL, NULL, 'user', 'active', 0, '2025-08-11 19:47:47', '2025-07-24 17:26:06', '2025-08-11 19:47:47'),
+(15, 'uprueba', '$2y$10$zup62OnOTczZOak.tb9nCutk7VZh1IphMIMG8L/FF1eWRfs.TUNou', 'prueba@prueba.com', 'Prueba', 'Prueba', NULL, NULL, NULL, 'user', 'active', 1, '2025-08-19 15:05:48', '2025-08-16 16:24:38', '2025-08-19 15:05:48'),
+(16, 'uprueba2', '$2y$10$gx7Vz2Dy5/FH1ImFKzB4EuxFxDC8hD8yXr.To0M6JVDoM9RIpoVf2', 'prueb@xamp.com', 'Preuba2', 'Prueba2', NULL, NULL, NULL, 'user', 'active', 1, NULL, '2025-08-16 16:25:47', '2025-08-16 16:25:47'),
+(17, 'visual', '$2y$10$qAQlTT89b11vXD3rIwcVB.u/lpWQ01lETiJkgpeX6FG1Sn/ImuLZm', 'visual@prueba.com', 'Pruebav', 'Visualizador', 1, NULL, NULL, 'viewer', 'active', 1, NULL, '2025-08-21 17:12:50', '2025-08-21 17:12:50');
+
 -- --------------------------------------------------------
 
 --
 -- Estructura Stand-in para la vista `user_access_summary`
 -- (Véase abajo para la vista actual)
 --
+DROP VIEW IF EXISTS `user_access_summary`;
 CREATE TABLE `user_access_summary` (
 `user_id` int(11)
 ,`username` varchar(50)
@@ -294,6 +446,7 @@ CREATE TABLE `user_access_summary` (
 -- Estructura de tabla para la tabla `user_groups`
 --
 
+DROP TABLE IF EXISTS `user_groups`;
 CREATE TABLE `user_groups` (
   `id` int(11) NOT NULL,
   `name` varchar(150) NOT NULL,
@@ -312,19 +465,46 @@ CREATE TABLE `user_groups` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Grupos de usuarios con permisos granulares de 5 acciones específicas';
 
 --
+-- Volcado de datos para la tabla `user_groups`
+--
+
+INSERT INTO `user_groups` (`id`, `name`, `description`, `module_permissions`, `access_restrictions`, `download_limit_daily`, `upload_limit_daily`, `status`, `is_system_group`, `created_by`, `created_at`, `updated_at`, `deleted_at`, `deleted_by`) VALUES
+(46, 'Visualizadores', '', '{\"upload_files\":true,\"view_files\":true,\"create_folders\":false,\"download_files\":false,\"delete_files\":false,\"move_files\":false}', '{\"companies\":[1],\"departments\":[1],\"document_types\":[]}', NULL, NULL, 'active', 0, 1, '2025-08-21 17:22:20', '2025-08-21 17:22:38', NULL, NULL);
+
+--
 -- Disparadores `user_groups`
 --
+DROP TRIGGER IF EXISTS `user_groups_before_insert`;
+DELIMITER $$
+CREATE TRIGGER `user_groups_before_insert` BEFORE INSERT ON `user_groups` FOR EACH ROW BEGIN
+    -- Validar formato de permisos solo si no es NULL y no está vacío
+    IF NEW.module_permissions IS NOT NULL 
+       AND NEW.module_permissions != '' 
+       AND NEW.module_permissions != '{}' THEN
+        
+        -- Intentar validar con la función personalizada
+        IF NOT ValidateGroupPermissions(NEW.module_permissions) THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Formato de permisos inválido. Debe contener las claves requeridas: upload_files, view_files, create_folders, download_files, delete_files.';
+        END IF;
+    END IF;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `user_groups_before_update`;
 DELIMITER $$
 CREATE TRIGGER `user_groups_before_update` BEFORE UPDATE ON `user_groups` FOR EACH ROW BEGIN
-    -- Validar formato de permisos solo si no es NULL
-    IF NEW.module_permissions IS NOT NULL AND NEW.module_permissions != '' AND
-       NOT ValidateGroupPermissions(NEW.module_permissions) THEN
-        SIGNAL SQLSTATE '45000' 
-        SET MESSAGE_TEXT = 'Formato de permisos inválido. Debe contener las 5 claves requeridas.';
+    -- Validar formato de permisos solo si no es NULL y no está vacío
+    IF NEW.module_permissions IS NOT NULL 
+       AND NEW.module_permissions != '' 
+       AND NEW.module_permissions != '{}' THEN
+        
+        -- Intentar validar con la función personalizada
+        IF NOT ValidateGroupPermissions(NEW.module_permissions) THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Formato de permisos inválido. Debe contener las claves requeridas: upload_files, view_files, create_folders, download_files, delete_files.';
+        END IF;
     END IF;
-    
-    -- Asegurar que updated_at se actualice
-    SET NEW.updated_at = NOW();
 END
 $$
 DELIMITER ;
@@ -335,6 +515,7 @@ DELIMITER ;
 -- Estructura de tabla para la tabla `user_groups_backup`
 --
 
+DROP TABLE IF EXISTS `user_groups_backup`;
 CREATE TABLE `user_groups_backup` (
   `id` int(11) NOT NULL DEFAULT 0,
   `name` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -352,12 +533,22 @@ CREATE TABLE `user_groups_backup` (
   `deleted_by` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `user_groups_backup`
+--
+
+INSERT INTO `user_groups_backup` (`id`, `name`, `description`, `module_permissions`, `access_restrictions`, `download_limit_daily`, `upload_limit_daily`, `status`, `is_system_group`, `created_by`, `created_at`, `updated_at`, `deleted_at`, `deleted_by`) VALUES
+(22, 'Prueba504', 'Grupo de prueba con permisos de edición', '{\"view\":true,\"view_reports\":true,\"download\":true,\"export\":true,\"create\":true,\"edit\":false,\"delete\":true,\"delete_permanent\":true,\"manage_users\":true,\"system_config\":true}', '{\"companies\":[3],\"departments\":[10],\"document_types\":[16]}', NULL, NULL, 'active', 0, 1, '2025-08-03 21:08:31', '2025-08-09 16:51:52', NULL, NULL),
+(23, 'Administradores', 'Administradores con acceso completo al sistema', '{\"view\":false,\"view_reports\":false,\"download\":false,\"export\":false,\"create\":false,\"edit\":false,\"delete\":false,\"delete_permanent\":false,\"manage_users\":false,\"system_config\":false}', '{\"companies\":[3],\"departments\":[1],\"document_types\":[4,16]}', NULL, NULL, 'inactive', 0, 7, '2025-08-07 04:16:43', '2025-08-09 16:15:22', NULL, NULL),
+(32, 'Grupo de prueba', 'grupo para probar permisos', '{}', '{}', NULL, NULL, 'active', 0, 1, '2025-08-10 03:45:48', '2025-08-10 03:45:48', NULL, NULL);
+
 -- --------------------------------------------------------
 
 --
 -- Estructura de tabla para la tabla `user_group_members`
 --
 
+DROP TABLE IF EXISTS `user_group_members`;
 CREATE TABLE `user_group_members` (
   `id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
@@ -372,6 +563,7 @@ CREATE TABLE `user_group_members` (
 -- Estructura Stand-in para la vista `v_folders_complete`
 -- (Véase abajo para la vista actual)
 --
+DROP VIEW IF EXISTS `v_folders_complete`;
 CREATE TABLE `v_folders_complete` (
 `id` int(11)
 ,`name` varchar(150)
@@ -400,6 +592,7 @@ CREATE TABLE `v_folders_complete` (
 -- Estructura Stand-in para la vista `v_group_permissions_summary`
 -- (Véase abajo para la vista actual)
 --
+DROP VIEW IF EXISTS `v_group_permissions_summary`;
 CREATE TABLE `v_group_permissions_summary` (
 `id` int(11)
 ,`name` varchar(150)
@@ -428,6 +621,7 @@ CREATE TABLE `v_group_permissions_summary` (
 --
 DROP TABLE IF EXISTS `group_stats`;
 
+DROP VIEW IF EXISTS `group_stats`;
 CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `group_stats`  AS SELECT `ug`.`id` AS `id`, `ug`.`name` AS `name`, `ug`.`description` AS `description`, `ug`.`status` AS `status`, `ug`.`is_system_group` AS `is_system_group`, `ug`.`module_permissions` AS `module_permissions`, `ug`.`access_restrictions` AS `access_restrictions`, `ug`.`download_limit_daily` AS `download_limit_daily`, `ug`.`upload_limit_daily` AS `upload_limit_daily`, count(distinct `ugm`.`user_id`) AS `total_members`, count(distinct case when `u`.`status` = 'active' then `ugm`.`user_id` end) AS `active_members`, count(distinct `u`.`company_id`) AS `companies_represented`, count(distinct `u`.`department_id`) AS `departments_represented`, `ug`.`created_at` AS `created_at`, concat(`creator`.`first_name`,' ',`creator`.`last_name`) AS `created_by_name` FROM (((`user_groups` `ug` left join `user_group_members` `ugm` on(`ug`.`id` = `ugm`.`group_id`)) left join `users` `u` on(`ugm`.`user_id` = `u`.`id` and `u`.`status` <> 'deleted')) left join `users` `creator` on(`ug`.`created_by` = `creator`.`id`)) GROUP BY `ug`.`id`, `ug`.`name`, `ug`.`description`, `ug`.`status`, `ug`.`is_system_group`, `ug`.`created_at`, `creator`.`first_name`, `creator`.`last_name` ;
 
 -- --------------------------------------------------------
@@ -437,6 +631,7 @@ CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW 
 --
 DROP TABLE IF EXISTS `user_access_summary`;
 
+DROP VIEW IF EXISTS `user_access_summary`;
 CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `user_access_summary`  AS SELECT `u`.`id` AS `user_id`, `u`.`username` AS `username`, `u`.`first_name` AS `first_name`, `u`.`last_name` AS `last_name`, `u`.`company_id` AS `company_id`, `u`.`department_id` AS `department_id`, group_concat(distinct `ug`.`name` order by `ug`.`name` ASC separator ', ') AS `groups`, group_concat(distinct `ug`.`id` order by `ug`.`id` ASC separator ',') AS `group_ids`, count(distinct `ugm`.`group_id`) AS `total_groups`, CASE WHEN `u`.`status` = 'active' AND count(`ugm`.`group_id`) > 0 THEN 'active_with_groups' WHEN `u`.`status` = 'active' AND count(`ugm`.`group_id`) = 0 THEN 'active_no_groups' ELSE `u`.`status` END AS `access_status` FROM ((`users` `u` left join `user_group_members` `ugm` on(`u`.`id` = `ugm`.`user_id`)) left join `user_groups` `ug` on(`ugm`.`group_id` = `ug`.`id` and `ug`.`status` = 'active')) WHERE `u`.`status` <> 'deleted' GROUP BY `u`.`id`, `u`.`username`, `u`.`first_name`, `u`.`last_name`, `u`.`company_id`, `u`.`department_id` ;
 
 -- --------------------------------------------------------
@@ -446,6 +641,7 @@ CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW 
 --
 DROP TABLE IF EXISTS `v_folders_complete`;
 
+DROP VIEW IF EXISTS `v_folders_complete`;
 CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v_folders_complete`  AS SELECT `f`.`id` AS `id`, `f`.`name` AS `name`, `f`.`description` AS `description`, `f`.`company_id` AS `company_id`, `f`.`department_id` AS `department_id`, `f`.`parent_folder_id` AS `parent_folder_id`, `f`.`folder_color` AS `folder_color`, `f`.`folder_icon` AS `folder_icon`, `f`.`folder_path` AS `folder_path`, `f`.`is_active` AS `is_active`, `f`.`created_by` AS `created_by`, `f`.`created_at` AS `created_at`, `f`.`updated_at` AS `updated_at`, `c`.`name` AS `company_name`, `d`.`name` AS `department_name`, `pf`.`name` AS `parent_folder_name`, concat(`u`.`first_name`,' ',`u`.`last_name`) AS `created_by_name`, count(`doc`.`id`) AS `document_count`, CASE WHEN `f`.`parent_folder_id` is null THEN 0 ELSE 1 END AS `folder_level` FROM (((((`document_folders` `f` left join `companies` `c` on(`f`.`company_id` = `c`.`id`)) left join `departments` `d` on(`f`.`department_id` = `d`.`id`)) left join `document_folders` `pf` on(`f`.`parent_folder_id` = `pf`.`id`)) left join `users` `u` on(`f`.`created_by` = `u`.`id`)) left join `documents` `doc` on(`f`.`id` = `doc`.`folder_id` and `doc`.`status` = 'active')) WHERE `f`.`is_active` = 1 GROUP BY `f`.`id`, `f`.`name`, `f`.`description`, `f`.`company_id`, `f`.`department_id`, `f`.`parent_folder_id`, `f`.`folder_color`, `f`.`folder_icon`, `f`.`folder_path`, `f`.`is_active`, `f`.`created_by`, `f`.`created_at`, `f`.`updated_at`, `c`.`name`, `d`.`name`, `pf`.`name`, `u`.`first_name`, `u`.`last_name` ;
 
 -- --------------------------------------------------------
@@ -455,6 +651,7 @@ CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW 
 --
 DROP TABLE IF EXISTS `v_group_permissions_summary`;
 
+DROP VIEW IF EXISTS `v_group_permissions_summary`;
 CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v_group_permissions_summary`  AS SELECT `ug`.`id` AS `id`, `ug`.`name` AS `name`, `ug`.`description` AS `description`, `ug`.`status` AS `status`, `ug`.`is_system_group` AS `is_system_group`, CASE WHEN json_unquote(json_extract(`ug`.`module_permissions`,'$.upload_files')) = 'true' THEN 1 ELSE 0 END AS `can_upload`, CASE WHEN json_unquote(json_extract(`ug`.`module_permissions`,'$.view_files')) = 'true' THEN 1 ELSE 0 END AS `can_view`, CASE WHEN json_unquote(json_extract(`ug`.`module_permissions`,'$.create_folders')) = 'true' THEN 1 ELSE 0 END AS `can_create_folders`, CASE WHEN json_unquote(json_extract(`ug`.`module_permissions`,'$.download_files')) = 'true' THEN 1 ELSE 0 END AS `can_download`, CASE WHEN json_unquote(json_extract(`ug`.`module_permissions`,'$.delete_files')) = 'true' THEN 1 ELSE 0 END AS `can_delete`, ifnull(json_length(`ug`.`access_restrictions`,'$.companies'),0) AS `restricted_companies_count`, ifnull(json_length(`ug`.`access_restrictions`,'$.departments'),0) AS `restricted_departments_count`, ifnull(json_length(`ug`.`access_restrictions`,'$.document_types'),0) AS `restricted_document_types_count`, count(distinct `ugm`.`user_id`) AS `total_members`, count(distinct case when `u`.`status` = 'active' then `ugm`.`user_id` end) AS `active_members`, `ug`.`created_at` AS `created_at`, `ug`.`updated_at` AS `updated_at`, concat(ifnull(`creator`.`first_name`,''),' ',ifnull(`creator`.`last_name`,'')) AS `created_by_name` FROM (((`user_groups` `ug` left join `user_group_members` `ugm` on(`ug`.`id` = `ugm`.`group_id`)) left join `users` `u` on(`ugm`.`user_id` = `u`.`id`)) left join `users` `creator` on(`ug`.`created_by` = `creator`.`id`)) WHERE `ug`.`deleted_at` is null GROUP BY `ug`.`id`, `ug`.`name`, `ug`.`description`, `ug`.`status`, `ug`.`is_system_group`, `ug`.`module_permissions`, `ug`.`access_restrictions`, `ug`.`created_at`, `ug`.`updated_at`, `creator`.`first_name`, `creator`.`last_name` ;
 
 --
@@ -608,37 +805,37 @@ ALTER TABLE `user_group_members`
 -- AUTO_INCREMENT de la tabla `activity_logs`
 --
 ALTER TABLE `activity_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=25;
 
 --
 -- AUTO_INCREMENT de la tabla `companies`
 --
 ALTER TABLE `companies`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
 
 --
 -- AUTO_INCREMENT de la tabla `departments`
 --
 ALTER TABLE `departments`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
 
 --
 -- AUTO_INCREMENT de la tabla `documents`
 --
 ALTER TABLE `documents`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=155;
 
 --
 -- AUTO_INCREMENT de la tabla `document_folders`
 --
 ALTER TABLE `document_folders`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=28;
 
 --
 -- AUTO_INCREMENT de la tabla `document_types`
 --
 ALTER TABLE `document_types`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
 
 --
 -- AUTO_INCREMENT de la tabla `inbox_records`
@@ -656,31 +853,31 @@ ALTER TABLE `notifications`
 -- AUTO_INCREMENT de la tabla `security_groups`
 --
 ALTER TABLE `security_groups`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
 
 --
 -- AUTO_INCREMENT de la tabla `system_config`
 --
 ALTER TABLE `system_config`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT de la tabla `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=18;
 
 --
 -- AUTO_INCREMENT de la tabla `user_groups`
 --
 ALTER TABLE `user_groups`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=47;
 
 --
 -- AUTO_INCREMENT de la tabla `user_group_members`
 --
 ALTER TABLE `user_group_members`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=59;
 
 --
 -- Restricciones para tablas volcadas
