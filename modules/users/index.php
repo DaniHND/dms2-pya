@@ -473,7 +473,6 @@ function formatDate($dateString) {
                                 <option value="">Todos los roles</option>
                                 <option value="admin" <?php echo $filters['role'] === 'admin' ? 'selected' : ''; ?>>Administrador</option>
                                 <option value="user" <?php echo $filters['role'] === 'user' ? 'selected' : ''; ?>>Usuario</option>
-                                <option value="viewer" <?php echo $filters['role'] === 'viewer' ? 'selected' : ''; ?>>Visualizador</option>
                             </select>
                         </div>
                         

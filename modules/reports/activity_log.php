@@ -374,7 +374,7 @@ if (function_exists('logActivity')) {
                 <button class="mobile-menu-toggle" onclick="toggleSidebar()">
                     <i data-feather="menu"></i>
                 </button>
-                <h1>Log de Actividades</h1>
+                <h1>Actividades</h1>
             </div>
 
             <div class="header-right">

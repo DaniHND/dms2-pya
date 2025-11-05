@@ -18,7 +18,7 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
-    
+
     if (empty($username) || empty($password)) {
         $error = 'Por favor ingrese usuario y contraseña';
     } else {
@@ -28,19 +28,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                   LEFT JOIN companies c ON u.company_id = c.id 
                   LEFT JOIN departments d ON u.department_id = d.id 
                   WHERE u.username = :username AND u.status = 'active'";
-        
+
         $user = fetchOne($query, ['username' => $username]);
-        
+
         if ($user && password_verify($password, $user['password'])) {
             // Login exitoso
             SessionManager::login($user);
             $success = 'Inicio de sesión exitoso. Redirigiendo...';
-            
+
             // Redirigir después de 2 segundos
             header('refresh:2;url=dashboard.php');
         } else {
             $error = 'Usuario o contraseña incorrectos';
-            
+
             // Log de intento fallido
             logActivity(null, 'failed_login', 'users', null, 'Intento fallido de login para usuario: ' . $username);
         }
@@ -60,6 +60,7 @@ if ($flash) {
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -76,11 +77,11 @@ if ($flash) {
                 <div class="logo">
                     <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
                 </div>
-                <h1>DMS</h1>
+                <h1>DMS2</h1>
                 <p>Document Management System</p>
-             
+
             </div>
-            
+
             <div class="login-form">
                 <?php if ($error): ?>
                     <div class="alert alert-error">
@@ -88,37 +89,37 @@ if ($flash) {
                         <?php echo htmlspecialchars($error); ?>
                     </div>
                 <?php endif; ?>
-                
+
                 <?php if ($success): ?>
                     <div class="alert alert-success">
                         <i data-feather="check-circle"></i>
                         <?php echo htmlspecialchars($success); ?>
                     </div>
                 <?php endif; ?>
-                
+
                 <form method="POST" action="login.php" id="loginForm">
                     <div class="form-group">
                         <label for="username">Usuario</label>
                         <div class="input-group">
                             <i data-feather="user"></i>
-                            <input type="text" id="username" name="username" 
-                                   placeholder="Ingrese su usuario" required
-                                   value="<?php echo htmlspecialchars($username ?? ''); ?>">
+                            <input type="text" id="username" name="username"
+                                placeholder="Ingrese su usuario" required
+                                value="<?php echo htmlspecialchars($username ?? ''); ?>">
                         </div>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="password">Contraseña</label>
                         <div class="input-group">
                             <i data-feather="lock"></i>
-                            <input type="password" id="password" name="password" 
-                                   placeholder="Ingrese su contraseña" required>
+                            <input type="password" id="password" name="password"
+                                placeholder="Ingrese su contraseña" required>
                             <button type="button" class="toggle-password" onclick="togglePassword()">
                                 <i data-feather="eye"></i>
                             </button>
                         </div>
                     </div>
-                    
+
                     <div class="form-group">
                         <button type="submit" class="btn btn-primary">
                             <i data-feather="log-in"></i>
@@ -126,23 +127,9 @@ if ($flash) {
                         </button>
                     </div>
                 </form>
-                
+
                 <div class="login-footer">
                     <a href="#" onclick="showRecoveryModal()">¿Olvidó su contraseña?</a>
-                </div>
-            </div>
-            
-            <div class="demo-credentials">
-                <h3>Credenciales de Prueba:</h3>
-                <div class="demo-user">
-                    <strong>Administrador:</strong><br>
-                    Usuario: <code>admin</code><br>
-                    Contraseña: <code>password</code>
-                </div>
-                <div class="demo-user">
-                    <strong>Usuario Normal:</strong><br>
-                    Usuario: <code>jperez</code><br>
-                    Contraseña: <code>password</code>
                 </div>
             </div>
         </div>
@@ -162,8 +149,8 @@ if ($flash) {
                 <form id="recoveryForm">
                     <div class="form-group">
                         <label for="recovery_email">Email</label>
-                        <input type="email" id="recovery_email" name="recovery_email" 
-                               placeholder="correo@ejemplo.com" required>
+                        <input type="email" id="recovery_email" name="recovery_email"
+                            placeholder="correo@ejemplo.com" required>
                     </div>
                     <div class="form-group">
                         <button type="submit" class="btn btn-primary">
@@ -181,7 +168,7 @@ if ($flash) {
     <script>
         // Inicializar iconos
         feather.replace();
-        
+
         // Auto-completar para testing
         document.addEventListener('DOMContentLoaded', function() {
             // Permitir llenar automáticamente con credenciales de prueba
@@ -202,4 +189,5 @@ if ($flash) {
         });
     </script>
 </body>
+
 </html>
