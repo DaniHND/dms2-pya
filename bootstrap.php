@@ -1,9 +1,6 @@
 <?php
-/**
- * bootstrap.php - Inicializador global del sistema DMS2 
- * CON SISTEMA UNIFICADO DE PERMISOS
- */
-
+//bootstrap.php - Inicializador global del sistema DMS2 
+ 
 // Prevenir inclusión múltiple
 if (defined('DMS_BOOTSTRAP_LOADED')) {
     return;
@@ -12,7 +9,7 @@ define('DMS_BOOTSTRAP_LOADED', true);
 
 // Configurar manejo de errores
 error_reporting(E_ALL);
-ini_set('display_errors', 1); // Cambiar a 0 en producción
+ini_set('display_errors', 1); 
 ini_set('log_errors', 1);
 
 // Definir constantes del sistema
@@ -47,10 +44,6 @@ spl_autoload_register(function ($className) {
         }
     }
 });
-
-// ============================================================================
-// CARGAR ARCHIVOS CORE DEL SISTEMA
-// ============================================================================
 
 // 1. Cargar configuración de base de datos
 $databasePath = DMS_ROOT . '/config/database.php';
@@ -94,10 +87,6 @@ if (file_exists($unifiedPermissionsPath)) {
         error_log('DMS2: Sistema de Permisos Legacy cargado como fallback');
     }
 }
-
-// ============================================================================
-// DEFINIR FUNCIONES BÁSICAS SI NO EXISTEN
-// ============================================================================
 
 // Función fetchOne si no existe
 if (!function_exists('fetchOne')) {
@@ -209,10 +198,6 @@ if (!function_exists('getFileExtension')) {
     }
 }
 
-// ============================================================================
-// FUNCIONES DE COMPATIBILIDAD CON SISTEMA ANTERIOR
-// ============================================================================
-
 // Asegurar compatibilidad con sistemas que llaman funciones con nombres antiguos
 if (!function_exists('userHasPermission')) {
     function userHasPermission($userId, $permission) {
@@ -238,13 +223,8 @@ if (!function_exists('getUserEffectivePermissions')) {
     }
 }
 
-// ============================================================================
-// MIDDLEWARE PARA VERIFICAR PERMISOS EN PÁGINAS
-// ============================================================================
 
-/**
- * Función para verificar permisos al inicio de páginas
- */
+  //Función para verificar permisos al inicio de páginas
 if (!function_exists('requirePermission')) {
     function requirePermission($permission, $redirectUrl = '../../dashboard.php') {
         if (!hasUserPermission($permission)) {
@@ -290,10 +270,6 @@ if (!function_exists('buildRestrictedQuery')) {
         ];
     }
 }
-
-// ============================================================================
-// VERIFICACIÓN FINAL DEL SISTEMA
-// ============================================================================
 
 /**
  * Verificar que el sistema esté completamente cargado
@@ -343,10 +319,6 @@ if (!verifyUnifiedSystemLoaded()) {
         error_log('DMS2: Sistema Unificado de Permisos inicializado');
     }
 }
-
-// ============================================================================
-// CONFIGURACIONES ADICIONALES PARA EL SISTEMA UNIFICADO
-// ============================================================================
 
 /**
  * Configurar headers de seguridad básicos

@@ -1,7 +1,4 @@
 <?php
-// api/change_password_simple.php
-// API SIMPLE para cambiar contraseña del usuario actual
-
 session_start();
 header('Content-Type: application/json');
 

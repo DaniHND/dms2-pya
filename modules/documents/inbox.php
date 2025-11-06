@@ -3071,7 +3071,7 @@ function showContactAdmin() {
        }
 
        function toggleSidebar() {
-           console.log('Toggle sidebar ejecutado');
+          console.log('Toggle sidebar ejecutado');
        }
 
        function updateTime() {

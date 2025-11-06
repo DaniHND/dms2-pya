@@ -1,8 +1,4 @@
 <?php
-/*
- * api/update_context.php
- * API para actualizar el contexto de empresa y departamento en la sesión
- */
 
 require_once '../config/session.php';
 require_once '../config/database.php';

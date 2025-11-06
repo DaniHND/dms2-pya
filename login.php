@@ -1,11 +1,8 @@
 <?php
-// login.php
-// Página de autenticación para DMS2
 
 require_once 'config/session.php';
 require_once 'config/database.php';
 
-// Si ya está logueado, redirigir al dashboard
 if (SessionManager::isLoggedIn()) {
     header('Location: dashboard.php');
     exit();
@@ -14,7 +11,7 @@ if (SessionManager::isLoggedIn()) {
 $error = '';
 $success = '';
 
-// Procesar formulario de login
+//formulario de login
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
@@ -22,7 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (empty($username) || empty($password)) {
         $error = 'Por favor ingrese usuario y contraseña';
     } else {
-        // Buscar usuario en la base de datos
+        
+        // Busca usuario en la base de datos
         $query = "SELECT u.*, c.name as company_name, d.name as department_name 
                   FROM users u 
                   LEFT JOIN companies c ON u.company_id = c.id 
@@ -32,11 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $user = fetchOne($query, ['username' => $username]);
 
         if ($user && password_verify($password, $user['password'])) {
-            // Login exitoso
+
             SessionManager::login($user);
             $success = 'Inicio de sesión exitoso. Redirigiendo...';
 
-            // Redirigir después de 2 segundos
             header('refresh:2;url=dashboard.php');
         } else {
             $error = 'Usuario o contraseña incorrectos';
@@ -60,7 +57,6 @@ if ($flash) {
 
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -69,7 +65,6 @@ if ($flash) {
     <link rel="stylesheet" href="assets/css/login.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.0/feather.min.css">
 </head>
-
 <body class="login-page">
     <div class="login-container">
         <div class="login-card">
@@ -78,10 +73,8 @@ if ($flash) {
                     <img src="https://perdomoyasociados.com/wp-content/uploads/2023/09/logo_perdomo_2023_dorado-768x150.png" alt="Perdomo y Asociados" class="logo-image">
                 </div>
                 <h1>DMS</h1>
-                <p>Document Management System</p>
-
+                <p>Sistema Gestor de Documentos</p>
             </div>
-
             <div class="login-form">
                 <?php if ($error): ?>
                     <div class="alert alert-error">
@@ -89,7 +82,6 @@ if ($flash) {
                         <?php echo htmlspecialchars($error); ?>
                     </div>
                 <?php endif; ?>
-
                 <?php if ($success): ?>
                     <div class="alert alert-success">
                         <i data-feather="check-circle"></i>
@@ -162,7 +154,6 @@ if ($flash) {
             </div>
         </div>
     </div>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.0/feather.min.js"></script>
     <script src="assets/js/login.js"></script>
     <script>

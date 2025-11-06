@@ -1,8 +1,4 @@
 <?php
-/*
- * create_folder.php
- * API para crear carpetas de documentos
- */
 
 header('Content-Type: application/json');
 error_reporting(E_ALL);

@@ -1,8 +1,4 @@
 <?php
-/*
- * api/get_companies.php
- * Obtener lista de empresas para restricciones de acceso
- */
 
 header('Content-Type: application/json; charset=utf-8');
 require_once '../config/database.php';

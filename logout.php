@@ -1,7 +1,4 @@
 <?php
-// logout.php
-// Cerrar sesión del usuario - DMS2
-
 require_once 'config/session.php';
 
 // Cerrar sesión

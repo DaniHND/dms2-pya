@@ -660,23 +660,88 @@ function formatDate($dateString) {
         }
         
         // Función para toggle del sidebar
-        function toggleSidebar() {
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const overlay = document.querySelector('.sidebar-overlay');
-            
-            if (sidebar) {
-                sidebar.classList.toggle('collapsed');
-                
-                if (mainContent) {
-                    mainContent.classList.toggle('sidebar-collapsed');
-                }
-                
-                if (overlay) {
-                    overlay.classList.toggle('active');
-                }
-            }
+       // Función para toggle del sidebar
+function toggleSidebar() {
+    console.log('🔥 toggleSidebar ejecutado en users/index.php');
+    
+    const sidebar = document.querySelector('.sidebar');
+    const mainContent = document.querySelector('.main-content');
+    let overlay = document.querySelector('.sidebar-overlay');
+    
+    if (!sidebar) {
+        console.error('❌ Sidebar no encontrado');
+        return;
+    }
+    
+    // Crear overlay si no existe
+    if (!overlay) {
+        console.log('📦 Creando overlay...');
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        `;
+        overlay.addEventListener('click', function() {
+            sidebar.classList.remove('active');
+            overlay.style.display = 'none';
+            overlay.style.opacity = '0';
+            document.body.style.overflow = '';
+        });
+        document.body.appendChild(overlay);
+        console.log('✅ Overlay creado');
+    }
+    
+    if (window.innerWidth <= 768) {
+        // 📱 COMPORTAMIENTO MÓVIL
+        const isActive = sidebar.classList.toggle('active');
+        
+        if (isActive) {
+            overlay.style.display = 'block';
+            setTimeout(() => overlay.style.opacity = '1', 10);
+            document.body.style.overflow = 'hidden';
+        } else {
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.style.display = 'none', 300);
+            document.body.style.overflow = '';
         }
+        
+        console.log('📱 Sidebar móvil:', isActive ? 'ABIERTO' : 'CERRADO');
+    } else {
+        // 💻 COMPORTAMIENTO DESKTOP
+        sidebar.classList.toggle('collapsed');
+        if (mainContent) {
+            mainContent.classList.toggle('sidebar-collapsed');
+        }
+        console.log('💻 Sidebar desktop toggleado');
+    }
+}
+
+// Cerrar sidebar con tecla Escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.querySelector('.sidebar-overlay');
+        
+        if (sidebar && sidebar.classList.contains('active')) {
+            sidebar.classList.remove('active');
+            if (overlay) {
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.style.display = 'none', 300);
+            }
+            document.body.style.overflow = '';
+            console.log('🚪 Sidebar cerrado con Escape');
+        }
+    }
+});
         
         console.log('✅ Módulo de empresas cargado correctamente');
         

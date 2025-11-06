@@ -1,6 +1,4 @@
 <?php
-// api/change_password.php
-// API para cambiar la contraseña del usuario - DMS2
 
 session_start();
 header('Content-Type: application/json');

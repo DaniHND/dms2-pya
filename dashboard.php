@@ -1,6 +1,4 @@
 <?php
-// dashboard.php - Modernizado con estilos unificados y gráficos
-
 require_once 'config/session.php';
 require_once 'config/database.php';
 
@@ -53,7 +51,7 @@ function getDashboardStats($userId, $companyId, $role)
         $result = fetchOne($query);
         $stats['total_companies'] = $result['total'] ?? 0;
     } else {
-        $stats['total_companies'] = 1;  // El usuario solo ve su empresa
+        $stats['total_companies'] = 1;
     }
 
     return $stats;
@@ -171,17 +169,13 @@ function getFullName()
     <link rel="stylesheet" href="assets/css/dashboard.css">
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Script de acciones de usuario -->
     <script src="assets/js/user-actions.js"></script>
 </head>
 
 <body class="dashboard-layout">
-    <!-- Modal de cambio de contraseña -->
     <?php include 'change_password_modal.php'; ?>
-    <!-- Sidebar -->
     <?php include 'includes/sidebar.php'; ?>
 
-    <!-- Contenido principal -->
     <main class="main-content">
         <header class="content-header">
             <div class="header-left">
@@ -557,6 +551,89 @@ function getFullName()
         var documentsByDay = <?php echo json_encode($documentsByDay); ?>;
         var documentsByType = <?php echo json_encode($documentsByType); ?>;
 
+        // ============================================
+        // FUNCIÓN UNIFICADA PARA TOGGLE DEL SIDEBAR
+        // ============================================
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            let overlay = document.querySelector('.sidebar-overlay');
+            
+            if (!sidebar) {
+                console.error('Sidebar no encontrado');
+                return;
+            }
+            
+            // Crear overlay si no existe
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.className = 'sidebar-overlay';
+                overlay.addEventListener('click', closeSidebar);
+                document.body.appendChild(overlay);
+            }
+            
+            if (window.innerWidth <= 768) {
+                // Comportamiento móvil
+                const isActive = sidebar.classList.toggle('active');
+                overlay.classList.toggle('active', isActive);
+                
+                // Prevenir scroll del body cuando está abierto
+                document.body.style.overflow = isActive ? 'hidden' : '';
+                
+                console.log('Sidebar móvil:', isActive ? 'abierto' : 'cerrado');
+            } else {
+                // Comportamiento desktop
+                sidebar.classList.toggle('collapsed');
+                if (mainContent) {
+                    mainContent.classList.toggle('sidebar-collapsed');
+                }
+            }
+        }
+
+        // Cerrar sidebar específicamente
+        function closeSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.querySelector('.sidebar-overlay');
+            
+            if (sidebar && sidebar.classList.contains('active')) {
+                sidebar.classList.remove('active');
+                if (overlay) overlay.classList.remove('active');
+                document.body.style.overflow = '';
+                
+                console.log('Sidebar cerrado');
+            }
+        }
+
+        // Cerrar sidebar con tecla Escape
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeSidebar();
+                closeConfigMenu(); // También cerrar menú de config
+            }
+        });
+
+        // Manejar resize de ventana
+        let resizeTimer;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function() {
+                const sidebar = document.querySelector('.sidebar');
+                const mainContent = document.querySelector('.main-content');
+                const overlay = document.querySelector('.sidebar-overlay');
+                
+                if (window.innerWidth > 768) {
+                    // Desktop: remover clases móviles
+                    if (sidebar) sidebar.classList.remove('active');
+                    if (overlay) overlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                } else {
+                    // Mobile: remover clases desktop
+                    if (sidebar) sidebar.classList.remove('collapsed');
+                    if (mainContent) mainContent.classList.remove('sidebar-collapsed');
+                }
+            }, 250);
+        });
+
         // Inicializar página
         document.addEventListener('DOMContentLoaded', function() {
             // Inicializar iconos de Feather
@@ -572,6 +649,8 @@ function getFullName()
             // Actualizar reloj
             updateTime();
             setInterval(updateTime, 60000);
+            
+            console.log('✅ Dashboard inicializado correctamente');
         });
 
         // Inicializar gráfico de documentos por día (barras)
@@ -742,25 +821,6 @@ function getFullName()
             }
         }
 
-        // Función para toggle del sidebar
-        function toggleSidebar() {
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const overlay = document.querySelector('.sidebar-overlay');
-
-            if (sidebar) {
-                sidebar.classList.toggle('collapsed');
-
-                if (mainContent) {
-                    mainContent.classList.toggle('sidebar-collapsed');
-                }
-
-                if (overlay) {
-                    overlay.classList.toggle('active');
-                }
-            }
-        }
-
         // Función placeholder para "próximamente"
         function showComingSoon(feature) {
             alert(`${feature} estará disponible próximamente.`);
@@ -778,6 +838,25 @@ function getFullName()
             --orange-gradient: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
             --soft-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --soft-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* ===== OVERLAY PARA SIDEBAR MÓVIL ===== */
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+            opacity: 1;
         }
 
         /* Sección de bienvenida profesional */
@@ -1136,38 +1215,6 @@ function getFullName()
             opacity: 0.5;
         }
 
-        /* Estadísticas del sistema */
-        .system-stats-section {
-            margin-top: 2rem;
-        }
-
-        .system-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 2rem;
-        }
-
-        .system-stat {
-            text-align: center;
-            padding: 1.5rem;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            border-radius: 12px;
-            border: 1px solid #e5e7eb;
-        }
-
-        .system-stat-value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #1e40af;
-            margin-bottom: 0.5rem;
-        }
-
-        .system-stat-label {
-            color: #6b7280;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-
         /* Header actualizado */
         .content-header {
             display: flex;
@@ -1243,6 +1290,11 @@ function getFullName()
 
         .mobile-menu-toggle {
             display: none;
+            background: none;
+            border: none;
+            color: #374151;
+            padding: 0.5rem;
+            cursor: pointer;
         }
 
         /* Animaciones */
@@ -1288,7 +1340,7 @@ function getFullName()
             animation-delay: 0.6s;
         }
 
-        /* Responsividad */
+        /* ===== RESPONSIVIDAD ===== */
         @media (max-width: 1024px) {
             .dashboard-main-grid {
                 grid-template-columns: 1fr;
@@ -1304,11 +1356,6 @@ function getFullName()
         @media (max-width: 768px) {
             .mobile-menu-toggle {
                 display: block;
-                background: none;
-                border: none;
-                color: #374151;
-                padding: 0.5rem;
-                cursor: pointer;
             }
 
             .stats-grid {
@@ -1380,11 +1427,6 @@ function getFullName()
             .stat-number {
                 font-size: 2rem;
             }
-
-            .system-stats {
-                grid-template-columns: 1fr;
-                gap: 1rem;
-            }
         }
 
         @media (max-width: 480px) {
@@ -1455,9 +1497,6 @@ function getFullName()
             border-radius: 16px 16px 0 0;
         }
     </style>
-
-    <!-- AGREGAR ESTA LÍNEA AQUÍ -->
-    <?php include 'change_password_modal.php'; ?>
 
 </body>
 

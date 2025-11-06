@@ -1,5 +1,5 @@
 <?php
-// reset_password.php
+
 require_once __DIR__ . '/config/database.php';
 
 $token = $_GET['token'] ?? '';

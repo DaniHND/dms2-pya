@@ -368,7 +368,7 @@ document.addEventListener('keydown', function(e) {
 
 // Función para ayuda
 function openHelp() {
-    alert('Sistema de Ayuda - Próximamente disponible\n\nPara soporte inmediato, contacte al administrador.');
+    window.open('https://drive.google.com/file/d/1LJUFtoUJZDdBy3sC-b8M92owE9-LE0c6/view', '_blank');
 }
 
 // Inicializar iconos cuando el documento esté listo

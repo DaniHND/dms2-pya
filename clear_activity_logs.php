@@ -1,10 +1,4 @@
 <?php
-/**
- * clear_activity_logs.php
- * Script simple para limpiar activity logs
- * Uso: php clear_activity_logs.php
- */
-
 require_once __DIR__ . '/config/database.php';
 
 echo "🧹 LIMPIADOR DE ACTIVITY LOGS\n";

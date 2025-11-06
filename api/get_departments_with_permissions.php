@@ -1,8 +1,4 @@
 <?php
-/**
- * api/get_departments_with_permissions.php
- * API para obtener departamentos aplicando restricciones de permisos
- */
 
 require_once '../config/session.php';
 require_once '../includes/permission_functions.php';
